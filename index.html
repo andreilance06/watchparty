@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="A simple browser-based watch party with synchronized video and chat.">
+  <title>WatchParty</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">▶</span>
+      <div>
+        <h1>WatchParty</h1>
+        <p>Watch together. Chat together.</p>
+      </div>
+    </div>
+
+    <div class="connection" aria-live="polite">
+      <span id="statusDot" class="status-dot"></span>
+      <span id="connectionStatus">Connecting...</span>
+    </div>
+  </header>
+
+  <main class="watch-layout">
+    <section class="player-panel" aria-labelledby="player-title">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">WATCH TOGETHER</p>
+          <h2 id="player-title">Now Playing</h2>
+        </div>
+        <span id="roleBadge" class="role-badge">Viewer</span>
+      </div>
+
+      <div id="videoShell" class="video-shell">
+        <div id="programmaticPlayer" class="programmatic-player">
+          <canvas id="videoCanvas" aria-label="WatchParty video"></canvas>
+          <div id="subtitleOverlay" class="movi-subtitle-overlay" aria-live="polite"></div>
+          <div id="playerControls" class="player-controls" hidden>
+            <button id="playPauseButton" class="player-icon-button" type="button" aria-label="Play">▶</button>
+            <div id="progressGroup" class="progress-group">
+              <input id="progressSlider" class="progress-slider" type="range" min="0" max="100" value="0" step="0.01" aria-label="Seek">
+              <span id="timeDisplay" class="time-display">00:00 / 00:00</span>
+            </div>
+            <label class="compact-control volume-control" title="Volume">
+              <span aria-hidden="true">🔊</span>
+              <input id="volumeSlider" type="range" min="0" max="1" value="1" step="0.05" aria-label="Volume">
+            </label>
+            <label id="captionControl" class="compact-control" hidden>
+              <span>CC</span>
+              <select id="captionSelect" aria-label="Subtitle track"><option value="">Off</option></select>
+            </label>
+            <label id="speedControl" class="compact-control">
+              <span>Speed</span>
+              <select id="speedSelect" aria-label="Playback speed">
+                <option value="0.5">0.5×</option><option value="0.75">0.75×</option>
+                <option value="1" selected>1×</option><option value="1.25">1.25×</option>
+                <option value="1.5">1.5×</option><option value="2">2×</option>
+              </select>
+            </label>
+            <button id="fullscreenButton" class="player-icon-button" type="button" aria-label="Enter fullscreen" title="Fullscreen">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg>
+            </button>
+          </div>
+        </div>
+        <div id="videoPlaceholder" class="video-placeholder">
+          <span class="placeholder-icon" aria-hidden="true">▶</span>
+          <strong>Waiting for the host</strong>
+          <span>The host will choose a video file and start the watch party.</span>
+        </div>
+      </div>
+
+      <div class="player-info">
+        <div>
+          <p class="eyebrow">CURRENT VIDEO</p>
+          <h3 id="fileName">No video selected</h3>
+        </div>
+        <p id="syncStatus" class="sync-status">Waiting for host</p>
+      </div>
+
+      <div id="hostControls" class="host-controls" hidden>
+        <button id="chooseVideoButton" class="file-button" type="button">
+          <span aria-hidden="true">＋</span>
+          Choose Video
+        </button>
+        <p class="control-help">The file stays on this device. WatchParty creates one high-quality, GPU-accelerated stream for everyone.</p>
+      </div>
+    </section>
+
+    <aside class="chat-panel" aria-labelledby="chat-title">
+      <div class="chat-heading">
+        <div>
+          <p class="eyebrow">LIVE</p>
+          <h2 id="chat-title">Chatroom</h2>
+        </div>
+        <div class="chat-heading-actions">
+          <span id="viewerCount" class="viewer-count">0 online</span>
+          <form id="nameForm" class="name-form" autocomplete="off">
+            <label class="sr-only" for="displayNameInput">Display name</label>
+            <input id="displayNameInput" name="displayName" type="text" maxlength="24" placeholder="Display name" aria-label="Display name" required>
+            <button type="submit">Save</button>
+          </form>
+        </div>
+      </div>
+
+      <div id="chatMessages" class="chat-messages" role="log" aria-live="polite" aria-label="Chat messages">
+        <div class="system-message">Welcome to WatchParty.</div>
+      </div>
+
+      <form id="chatForm" class="chat-form" autocomplete="off">
+        <label class="sr-only" for="chatInput">Message</label>
+        <input id="chatInput" name="message" type="text" maxlength="300" placeholder="Say something..." required>
+        <button type="submit" aria-label="Send message">Send</button>
+      </form>
+    </aside>
+  </main>
+
+  <footer class="site-footer">
+    <span>WatchParty</span>
+    <span>•</span>
+    <span id="networkHint">One shared session · No file uploads</span>
+  </footer>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

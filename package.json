@@ -1,0 +1,14 @@
+{
+  "name": "watchparty",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A synchronized HLS watch party with Movi Player and chat.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ffmpeg-static": "^5.2.0",
+    "ws": "^8.18.0"
+  }
+}
