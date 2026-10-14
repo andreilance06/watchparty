@@ -34,40 +34,28 @@
       </div>
 
       <div id="videoShell" class="video-shell">
-        <div id="programmaticPlayer" class="programmatic-player">
-          <canvas id="videoCanvas" aria-label="WatchParty video"></canvas>
-          <div id="subtitleOverlay" class="movi-subtitle-overlay" aria-live="polite"></div>
-          <div id="playerControls" class="player-controls" hidden>
-            <button id="playPauseButton" class="player-icon-button" type="button" aria-label="Play">▶</button>
-            <div id="progressGroup" class="progress-group">
-              <input id="progressSlider" class="progress-slider" type="range" min="0" max="100" value="0" step="0.01" aria-label="Seek">
-              <span id="timeDisplay" class="time-display">00:00 / 00:00</span>
-            </div>
-            <label class="compact-control volume-control" title="Volume">
-              <span aria-hidden="true">🔊</span>
-              <input id="volumeSlider" type="range" min="0" max="1" value="1" step="0.05" aria-label="Volume">
-            </label>
-            <label id="captionControl" class="compact-control" hidden>
-              <span>CC</span>
-              <select id="captionSelect" aria-label="Subtitle track"><option value="">Off</option></select>
-            </label>
-            <label id="speedControl" class="compact-control">
-              <span>Speed</span>
-              <select id="speedSelect" aria-label="Playback speed">
-                <option value="0.5">0.5×</option><option value="0.75">0.75×</option>
-                <option value="1" selected>1×</option><option value="1.25">1.25×</option>
-                <option value="1.5">1.5×</option><option value="2">2×</option>
-              </select>
-            </label>
-            <button id="fullscreenButton" class="player-icon-button" type="button" aria-label="Enter fullscreen" title="Fullscreen">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg>
-            </button>
-          </div>
-        </div>
+        <movi-player
+          id="video"
+          playsinline
+          preload="auto"
+          engine="hlsjs native"
+          theme="dark"
+          themecolor="#7c5cff"
+          objectfit="contain"
+          titlemode="fullscreen">
+          Your browser does not support the WatchParty player.
+        </movi-player>
         <div id="videoPlaceholder" class="video-placeholder">
           <span class="placeholder-icon" aria-hidden="true">▶</span>
           <strong>Waiting for the host</strong>
           <span>The host will choose a video file and start the watch party.</span>
+        </div>
+        <div id="viewerControls" class="viewer-controls" hidden>
+          <button id="fullscreenButton" class="fullscreen-button" type="button" aria-label="Enter fullscreen" title="Fullscreen">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/>
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -76,7 +64,15 @@
           <p class="eyebrow">CURRENT VIDEO</p>
           <h3 id="fileName">No video selected</h3>
         </div>
-        <p id="syncStatus" class="sync-status">Waiting for host</p>
+        <div class="player-local-controls">
+          <label id="captionControl" class="caption-control" for="captionSelect" hidden>
+            <span>Captions</span>
+            <select id="captionSelect" aria-label="Caption track">
+              <option value="-1">Off</option>
+            </select>
+          </label>
+          <p id="syncStatus" class="sync-status">Waiting for host</p>
+        </div>
       </div>
 
       <div id="hostControls" class="host-controls" hidden>

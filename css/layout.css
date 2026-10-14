@@ -1,0 +1,67 @@
+.watch-layout {
+  width: min(1500px, 100%);
+  margin: 0 auto;
+  padding: .75rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas:
+    "player"
+    "chat";
+  align-items: start;
+  gap: .75rem;
+}
+
+.player-panel,
+.chat-panel {
+  width: 100%;
+  min-width: 0;
+  background: rgba(18, 21, 29, .94);
+  border: 1px solid var(--border);
+  border-radius: 1rem;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+.player-panel {
+  grid-area: player;
+}
+
+.panel-heading,
+.chat-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .75rem;
+  padding: .9rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.eyebrow {
+  margin: 0 0 .18rem;
+  color: var(--accent);
+  font-size: .62rem;
+  font-weight: 800;
+  letter-spacing: .12em;
+}
+
+.panel-heading h2,
+.chat-heading h2 {
+  font-size: 1rem;
+}
+
+.role-badge,
+.viewer-count {
+  padding: .35rem .55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  background: var(--surface-2);
+  font-size: .68rem;
+  white-space: nowrap;
+}
+
+.role-badge.host {
+  color: #dcd5ff;
+  border-color: rgba(124, 92, 255, .35);
+  background: rgba(124, 92, 255, .12);
+}

@@ -1,0 +1,205 @@
+
+.video-shell {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  background: #050608;
+}
+
+.video-shell movi-player {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #050608;
+}
+
+.subtitle-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  display: block;
+  pointer-events: none;
+  background: transparent;
+}
+
+.viewer-controls {
+  position: absolute;
+  right: .75rem;
+  bottom: .75rem;
+  z-index: 3;
+}
+
+.viewer-controls[hidden] { display: none; }
+
+.fullscreen-button {
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, .18);
+  border-radius: .65rem;
+  color: white;
+  background: rgba(8, 10, 14, .78);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, .35);
+  backdrop-filter: blur(8px);
+  cursor: pointer;
+  transition: background .2s ease, transform .2s ease;
+}
+
+.fullscreen-button:hover { background: rgba(32, 37, 50, .94); }
+.fullscreen-button:active { transform: scale(.96); }
+.fullscreen-button:focus-visible { outline: 2px solid var(--accent-hover); outline-offset: 2px; }
+.fullscreen-button svg {
+  width: 1.25rem; height: 1.25rem; fill: none; stroke: currentColor;
+  stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+}
+
+.video-shell:fullscreen,
+.video-shell:-webkit-full-screen,
+.video-shell.pseudo-fullscreen {
+  width: 100vw;
+  height: 100vh;
+  aspect-ratio: auto;
+  background: #000;
+}
+
+.video-shell.pseudo-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  margin: 0;
+  border-radius: 0;
+}
+
+.video-placeholder[hidden] {
+  display: none;
+}
+
+.video-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: .5rem;
+  padding: 2rem;
+  text-align: center;
+  color: var(--muted);
+  pointer-events: none;
+  background:
+    radial-gradient(circle at center, rgba(124, 92, 255, .08), transparent 55%),
+    #050608;
+}
+
+.video-placeholder strong {
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.video-placeholder span:last-child {
+  max-width: 25rem;
+  font-size: .78rem;
+  line-height: 1.5;
+}
+
+.placeholder-icon {
+  display: grid;
+  place-items: center;
+  width: 3.25rem;
+  height: 3.25rem;
+  margin-bottom: .35rem;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  color: var(--accent);
+  background: var(--surface);
+}
+
+.player-info {
+  display: flex;
+  flex-direction: column;
+  gap: .65rem;
+  padding: .9rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.player-info h3 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: .92rem;
+}
+
+.sync-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: .7rem;
+}
+
+.player-local-controls {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: .45rem;
+}
+
+.caption-control {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  color: var(--muted);
+  font-size: .7rem;
+}
+
+.caption-control[hidden] { display: none; }
+
+.caption-control select {
+  max-width: 13rem;
+  min-height: 1.9rem;
+  padding: .25rem 1.7rem .25rem .5rem;
+  border: 1px solid var(--border);
+  border-radius: .45rem;
+  color: var(--text);
+  background: var(--surface-2);
+  font: inherit;
+}
+
+.host-controls {
+  padding: .9rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.file-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .5rem;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: .7rem 1rem;
+  border-radius: .65rem;
+  color: white;
+  background: var(--accent);
+  font-weight: 750;
+  font-size: .82rem;
+  cursor: pointer;
+  transition: background .2s ease, transform .2s ease;
+}
+
+.file-button:hover {
+  background: var(--accent-hover);
+}
+
+.file-button:active {
+  transform: translateY(1px);
+}
+
+.file-button:disabled { opacity: .65; cursor: wait; }
+
+.control-help {
+  margin: .55rem 0 0;
+  color: var(--muted);
+  font-size: .68rem;
+  line-height: 1.45;
+}

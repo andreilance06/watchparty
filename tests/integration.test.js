@@ -1,0 +1,121 @@
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+const os = require("node:os");
+const { execFileSync } = require("node:child_process");
+const { createApplication } = require("../server/application");
+const { CPU_ENCODER } = require("../server/encoders");
+const { connectPeer } = require("./helpers/peer");
+
+test("HTTP modules, chat names, host-only picker, and host handoff work together", async (t) => {
+  let pickerCalls = 0;
+  const app = createApplication({
+    config: { port: 0 },
+    encoderPromise: Promise.resolve(CPU_ENCODER),
+    chooseVideoFile: (callback) => { pickerCalls++; callback(null, ""); }
+  });
+  const address = await app.listen();
+  t.after(() => app.close());
+  const base = `http://127.0.0.1:${address.port}`;
+  const host = await connectPeer(base.replace("http", "ws"), "Alex");
+  const viewer = await connectPeer(base.replace("http", "ws"), "alex");
+  assert.equal(host.role.role, "host");
+  assert.equal(viewer.role.role, "viewer");
+  assert.equal(viewer.role.nameRejected, "alex");
+  assert.notEqual(viewer.role.name, "alex");
+
+  const modules = ["js/app.js", "js/chat.js", "js/connection.js", "js/player/controller.js", "js/player/sync.js", "js/player/fullscreen.js", "js/player/subtitles.js"];
+  for (const file of modules) {
+    const response = await fetch(`${base}/${file}`);
+    assert.equal(response.status, 200, file);
+    assert.match(response.headers.get("content-type"), /javascript/);
+  }
+  for (const file of ["base", "layout", "player", "chat", "responsive"]) {
+    const response = await fetch(`${base}/css/${file}.css`, { method: "HEAD" });
+    assert.equal(response.status, 200, file);
+    assert.match(response.headers.get("content-type"), /text\/css/);
+    assert.equal(await response.text(), "");
+  }
+  viewer.send({ type: "set-name", name: "Bob" });
+  assert.equal((await viewer.next("name-updated")).name, "Bob");
+  host.send({ type: "set-name", name: "bOb" });
+  assert.equal((await host.next("name-rejected")).name, "Alex");
+  viewer.send({ type: "chat", message: "Hi from Bob" });
+  assert.equal((await host.next("chat")).name, "Bob");
+
+  const denied = await fetch(`${base}/api/select-video`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ clientId: viewer.role.clientId })
+  });
+  assert.equal(denied.status, 403);
+  assert.equal(pickerCalls, 0);
+  host.ws.close();
+  await viewer.next("host-left");
+  assert.equal((await viewer.next("role")).role, "host");
+});
+
+test("captions remain separate, seeks encode the requested segment, and segments are cached", async (t) => {
+  const ffmpegPath = require("ffmpeg-static");
+  if (!ffmpegPath || !fs.existsSync(ffmpegPath)) { t.skip("FFmpeg is not installed"); return; }
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "watchparty-test-media-"));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const source = path.join(directory, "movie.mkv");
+  fs.copyFileSync(path.join(__dirname, "fixtures/movie.style.ass"), path.join(directory, "movie.style.ass"));
+  execFileSync(ffmpegPath, [
+    "-hide_banner", "-loglevel", "error", "-y",
+    "-f", "lavfi", "-i", "testsrc2=size=160x90:rate=15",
+    "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
+    "-i", path.join(__dirname, "fixtures/captions.srt"),
+    "-map", "0:v", "-map", "1:a", "-map", "2:s", "-t", "12",
+    "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-c:s", "srt", source
+  ], { timeout: 20000, stdio: "pipe" });
+
+  const app = createApplication({
+    config: { port: 0, ffmpegPath },
+    encoderPromise: Promise.resolve(CPU_ENCODER),
+    chooseVideoFile: (callback) => callback(null, source)
+  });
+  const address = await app.listen();
+  t.after(() => app.close());
+  const base = `http://127.0.0.1:${address.port}`;
+  const host = await connectPeer(base.replace("http", "ws"), "Host");
+  const select = await fetch(`${base}/api/select-video`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ clientId: host.role.clientId })
+  });
+  assert.equal(select.status, 202);
+  const ready = await host.next("session-state", (message) => message.hasVideo);
+  assert.equal(ready.captions.length, 2);
+  const viewer = await connectPeer(base.replace("http", "ws"), "Viewer");
+  const viewerState = await viewer.next("session-state", (message) => message.hasVideo);
+  assert.deepEqual(viewerState.captions, ready.captions);
+  const master = await (await fetch(base + ready.mediaUrl)).text();
+  assert.doesNotMatch(master, /SUBTITLES|captions_/);
+  for (const track of ready.captions) {
+    const caption = await fetch(base + track.url);
+    assert.equal(caption.status, 200);
+    assert.match(await caption.text(), /\[Events\]/);
+  }
+  const first = await fetch(`${base}/hls/segment_000000.ts?v=1`);
+  assert.equal(first.status, 200);
+  assert.ok((await first.arrayBuffer()).byteLength > 188);
+
+  host.send({ type: "video-state", syncMode: "seek", paused: true, time: 8, playbackRate: 1 });
+  await viewer.next("session-state", (message) => message.syncMode === "seek");
+  const middleUrl = `${base}/hls/segment_000002.ts?v=1`;
+  const middle = await fetch(middleUrl);
+  assert.equal(middle.status, 200);
+  const middleBytes = Buffer.from(await middle.arrayBuffer());
+  assert.deepEqual(Buffer.from(await (await fetch(middleUrl)).arrayBuffer()), middleBytes);
+  const segments = fs.readdirSync(app.state.hlsDirectory).filter((file) => file.endsWith(".ts"));
+  assert.deepEqual(segments.sort(), ["segment_000000.ts", "segment_000002.ts"]);
+  assert.equal((await fetch(`${base}/hls/master.m3u8?v=999`)).status, 404);
+
+  viewer.send({ type: "video-state", syncMode: "play", time: 8, playbackRate: 4 });
+  const playing = await host.next("session-state", (message) => message.syncMode === "play");
+  assert.equal(playing.paused, false);
+  assert.equal(playing.playbackRate, 1);
+  viewer.send({ type: "video-state", syncMode: "pause", time: 8 });
+  assert.equal((await host.next("session-state", (message) => message.syncMode === "pause")).paused, true);
+});

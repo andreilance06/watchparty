@@ -5,7 +5,8 @@
   "description": "A synchronized HLS watch party with Movi Player and chat.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --experimental-vm-modules --test"
   },
   "dependencies": {
     "ffmpeg-static": "^5.2.0",

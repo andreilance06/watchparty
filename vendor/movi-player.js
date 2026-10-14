@@ -5630,10 +5630,6 @@ class CanvasRenderer {
     this.updateActiveSubtitle(), this.renderSubtitles();
   };
   getCurrentPlaybackTime() {
-    if (this.subtitleTimeProvider) {
-      const A3 = this.subtitleTimeProvider();
-      if (Number.isFinite(A3)) return A3;
-    }
     if (!this.isPlaying) return this.lastPresentedPts >= 0 ? this.lastPresentedPts : this.presentationStartPts > 0 ? this.presentationStartPts : -1;
     let A2 = -1;
     if (this.presentationStartTime > 0) {
@@ -5805,9 +5801,6 @@ class CanvasRenderer {
   }
   setSubtitleOverlay(A2) {
     this.subtitleOverlay = A2, g.debug(nA, "Subtitle overlay " + (A2 ? "set" : "cleared"));
-  }
-  setSubtitleTimeProvider(A2) {
-    this.subtitleTimeProvider = "function" == typeof A2 ? A2 : null;
   }
   setSubtitleFormat(A2) {
     this.subtitleOverlay && this.subtitleOverlay.classList.toggle("movi-subtitle-format-vtt", "vtt" === A2);
@@ -63239,8 +63232,6 @@ class MoviPlayer extends Q {
     return !!this.config.enablePreviews && 0 !== this.trackManager.getVideoTracks().length;
   }
   wireStreamWrapper(A2) {
-    const I2 = this.videoRenderer?.getSubtitleOverlay?.() ?? null;
-    this.videoRenderer && this.videoRenderer !== A2.canvasRenderer && this.videoRenderer.destroy(), A2.canvasRenderer && (this.videoRenderer = A2.canvasRenderer), I2 && this.videoRenderer?.setSubtitleOverlay(I2), this.videoRenderer?.setSubtitleTimeProvider?.(() => this.getCurrentTime());
     ["loadStart", "loadEnd", "play", "pause", "ended", "timeUpdate", "durationChange", "stateChange", "error", "buffering", "seeking", "seeked"].forEach((I2) => {
       A2.on(I2, (A3) => this.emit(I2, A3));
     }), A2.trackManager.on("tracksChange", (A3) => {
@@ -63379,7 +63370,6 @@ class MoviPlayer extends Q {
   async load(A2) {
     if (!this.stateManager.is("idle") && !A2) throw new Error("Player must be idle to load");
     A2 && (this.config.source = A2, this._playbackStartedAt = performance.now(), this.stateManager.getState()), this.stateManager.setState("loading"), this.emit("loadStart", void 0), this.lastBufferedTime = 0, this.bufferedRangeStart = 0, this.coverArt?.close?.(), this.coverArt = null, this.destroyPreviewPipeline();
-    this.config.subtitleTracks && this.config.subtitleTracks.length > 0 && (this._subtitleTracks = [...this.config.subtitleTracks], g.info(ut, `External subtitles: ${this._subtitleTracks.length} tracks`));
     const I2 = this.config.source, C2 = !this.config.sourceAdapter && I2 && "url" === I2.type && I2.url && !$(I2.url) ? I2.url : null, B2 = C2?.toLowerCase() ?? "";
     if (C2 && (B2.includes(".m3u8") || B2.includes(".mpd") || B2.includes(".ism"))) {
       const A3 = B2.includes(".m3u8"), Q2 = B2.includes(".mpd"), E2 = A3 ? "HLS" : B2.includes(".ism") ? "Smooth Streaming" : "DASH";
@@ -64662,8 +64652,7 @@ class MoviPlayer extends Q {
     return this.trackManager.getAudioTracks();
   }
   getSubtitleTracks() {
-    const A2 = this.trackManager.getSubtitleTracks(), I2 = this._subtitleTracks.map((g2, C2) => ({ id: `external:${C2}`, type: "subtitle", codec: g2.format || "", language: g2.lang || "", label: g2.label || g2.lang || `Subtitle ${C2 + 1}`, subtitleType: "external", forced: !!g2.forced }));
-    return [...A2, ...I2];
+    return this.trackManager.getSubtitleTracks();
   }
   selectAudioTrack(A2) {
     return this.trackManager.selectAudioTrack(A2);
@@ -64676,10 +64665,6 @@ class MoviPlayer extends Q {
   }
   async selectSubtitleTrack(A2) {
     g.info(ut, `selectSubtitleTrack called: trackId=${A2}`);
-    if ("string" == typeof A2 && A2.startsWith("external:")) {
-      const I2 = Number(A2.slice(9)), C2 = this._subtitleTracks[I2];
-      return !!C2 && this.selectSubtitleLang(C2.lang);
-    }
     const I2 = this.trackManager.selectSubtitleTrack(A2);
     if (g.debug(ut, `TrackManager.selectSubtitleTrack returned: ${I2}`), this.prefetchedSubtitleStream !== A2 && (this.prefetchedSubtitleStream = null), null === A2) {
       if (g.info(ut, "Disabling subtitles"), this.videoRenderer && (this.videoRenderer.clearSubtitles(), g.debug(ut, "Cleared subtitles from video renderer")), this.subtitleDecoder && (this.subtitleDecoder.close(), g.debug(ut, "Closed subtitle decoder")), this._customSubtitleRenderer) try {
@@ -64771,7 +64756,7 @@ class MoviPlayer extends Q {
     this._externalChapters = I2.length ? I2 : null;
   }
   resizeCanvas(A2, I2) {
-    this.streamWrapper ? this.streamWrapper.resizeCanvas(A2, I2) : this.videoRenderer?.resize(A2, I2), this.ensureWakeLock();
+    this.streamWrapper ? this.streamWrapper.resizeCanvas(A2, I2) : this.videoRenderer && this.videoRenderer.resize(A2, I2), this.ensureWakeLock();
   }
   setHDREnabled(A2) {
     this.thumbnailHDREnabled = A2, this.videoRenderer && this.videoRenderer.setHDREnabled && this.videoRenderer.setHDREnabled(A2), this.thumbnailRenderer && this.thumbnailRenderer.setHDREnabled(A2);
@@ -65074,7 +65059,7 @@ class MoviPlayer extends Q {
       const C2 = await fetch(I2.url, { signal: this.lifetimeSignal });
       if (!C2.ok) throw new Error(`HTTP ${C2.status}`);
       const B2 = await C2.text(), Q2 = I2.format || (/\.(ttml|dfxp)(\?|#|$)/i.test(I2.url) ? "ttml" : I2.url.includes(".srt") ? "srt" : "vtt");
-      return this.videoRenderer?.setSubtitleFormat("ttml" === Q2 || "ass" === Q2 || "ssa" === Q2 ? "vtt" : Q2), this._externalSubCues = "srt" === Q2 ? this.parseSRT(B2) : "ttml" === Q2 ? this.parseTTML(B2) : "ass" === Q2 || "ssa" === Q2 ? this.parseASS(B2) : this.parseVTT(B2), this._activeSubtitleLang = A2, this.selectSubtitleTrack(null), this.startExternalSubtitles(), g.info(ut, `Subtitle loaded: ${I2.label} (${this._externalSubCues.length} cues)`), this.emit("subtitleTrackChange", { lang: A2, label: I2.label }), true;
+      return this.videoRenderer?.setSubtitleFormat("ttml" === Q2 ? "vtt" : Q2), this._externalSubCues = "srt" === Q2 ? this.parseSRT(B2) : "ttml" === Q2 ? this.parseTTML(B2) : this.parseVTT(B2), this._activeSubtitleLang = A2, this.selectSubtitleTrack(null), this.startExternalSubtitles(), g.info(ut, `Subtitle loaded: ${I2.label} (${this._externalSubCues.length} cues)`), this.emit("subtitleTrackChange", { lang: A2, label: I2.label }), true;
     } catch (A3) {
       return g.error(ut, `Failed to load subtitle: ${I2.url}`, A3), false;
     }
@@ -65096,31 +65081,6 @@ class MoviPlayer extends Q {
   }
   parseSRT(A2) {
     return this.parseVTT(A2);
-  }
-  parseASS(A2) {
-    const I2 = [], g2 = String(A2 || "").split(/\r?\n/);
-    let C2 = false, B2 = ["layer", "start", "end", "style", "name", "marginl", "marginr", "marginv", "effect", "text"];
-    const Q2 = (A3) => {
-      const I3 = /^(\d+):(\d{2}):(\d{2})(?:[.,](\d+))?$/.exec(String(A3 || "").trim());
-      return I3 ? 3600 * +I3[1] + 60 * +I3[2] + +I3[3] + +(I3[4] || 0) / 10 ** (I3[4] || "").length : NaN;
-    };
-    for (const A3 of g2) {
-      const I3 = A3.trim();
-      if (/^\[events\]$/i.test(I3)) { C2 = true; continue; }
-      if (/^\[/.test(I3)) { C2 = false; continue; }
-      if (!C2) continue;
-      const g3 = /^format\s*:\s*(.*)$/i.exec(I3);
-      if (g3) { B2 = g3[1].split(",").map((A4) => A4.trim().toLowerCase()); continue; }
-      const E2 = /^dialogue\s*:\s*(.*)$/i.exec(I3);
-      if (!E2) continue;
-      const t2 = E2[1].split(","), s2 = B2.indexOf("text");
-      if (s2 < 0 || t2.length < B2.length) continue;
-      const n2 = Object.fromEntries(B2.slice(0, s2).map((A4, I4) => [A4, t2[I4]?.trim() || ""]));
-      n2.text = t2.slice(s2).join(",");
-      const h2 = Q2(n2.start), D2 = Q2(n2.end), w2 = n2.text.replace(/\{[^}]*\}/g, "").replace(/\\[Nn]/g, "\n").replace(/\\h/g, " ").trim();
-      w2 && Number.isFinite(h2) && Number.isFinite(D2) && D2 > h2 && I2.push({ start: h2, end: D2, text: w2 });
-    }
-    return I2;
   }
   parseTTML(A2) {
     const I2 = [];
@@ -65167,7 +65127,7 @@ class MoviPlayer extends Q {
     let A2 = -1;
     this._externalSubTimer = window.setInterval(() => {
       if (!this.videoRenderer) return;
-      const I2 = this.getCurrentTime(), g2 = this._externalSubCues.findIndex((A3) => I2 >= A3.start && I2 <= A3.end);
+      const I2 = this.clock.getTime(), g2 = this._externalSubCues.findIndex((A3) => I2 >= A3.start && I2 <= A3.end);
       g2 !== A2 && (A2 = g2, g2 >= 0 ? this.videoRenderer.setSubtitleCues([this._externalSubCues[g2]]) : this.videoRenderer.setSubtitleCues([]));
     }, 100);
   }
@@ -65697,8 +65657,7 @@ class MoviPlayer extends Q {
       }
       this.audioSource = null;
     }
-    const A2 = this.streamWrapper?.canvasRenderer ?? null;
-    this.streamWrapper && (this.streamWrapper.destroy(), this.streamWrapper = null), this.pendingPrebufferPackets = [], this.videoDecoder.close(), this.audioDecoder.close(), this.videoRenderer && this.videoRenderer !== A2 && this.videoRenderer.destroy(), this.videoRenderer = null, this.audioRenderer.destroy(), this.demuxer && (this.demuxer.close(), this.demuxer = null), this.stopExternalSubtitles(), this._externalSubCues = [], this._subtitleTracks = [], this.destroyPreviewPipeline(), this.source && (this.source.close(), this.source = null), this.cache.clear(), this.trackManager.clear(), this.coverArt?.close?.(), this.coverArt = null, this.stateManager.reset(), this.mediaInfo = null, document.removeEventListener("visibilitychange", this.handleVisibilityChange), window.removeEventListener("online", this.handleNetworkOnline), this.removeAllListeners(), g.info(ut, "Player destroyed");
+    this.streamWrapper && (this.streamWrapper.destroy(), this.streamWrapper = null), this.pendingPrebufferPackets = [], this.videoDecoder.close(), this.audioDecoder.close(), this.videoRenderer && this.videoRenderer.destroy(), this.audioRenderer.destroy(), this.demuxer && (this.demuxer.close(), this.demuxer = null), this.stopExternalSubtitles(), this._externalSubCues = [], this._subtitleTracks = [], this.destroyPreviewPipeline(), this.source && (this.source.close(), this.source = null), this.cache.clear(), this.trackManager.clear(), this.coverArt?.close?.(), this.coverArt = null, this.stateManager.reset(), this.mediaInfo = null, document.removeEventListener("visibilitychange", this.handleVisibilityChange), window.removeEventListener("online", this.handleNetworkOnline), this.removeAllListeners(), g.info(ut, "Player destroyed");
   }
 }
 const Ot = "NativeVideoWrapper";
@@ -65926,35 +65885,6 @@ class NativeVideoWrapper extends Q {
   getSubtitleDelay() {
     return this.subDelay;
   }
-  subtitleTextToVTT(A2, I2) {
-    if ("srt" === A2) return "WEBVTT\n\n" + I2.replace(/\r/g, "").replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
-    const g2 = [], C2 = String(I2 || "").split(/\r?\n/);
-    let B2 = false, Q2 = ["layer", "start", "end", "style", "name", "marginl", "marginr", "marginv", "effect", "text"];
-    const E2 = (A3) => {
-      const I3 = /^(\d+):(\d{2}):(\d{2})(?:[.,](\d+))?$/.exec(String(A3 || "").trim());
-      return I3 ? 3600 * +I3[1] + 60 * +I3[2] + +I3[3] + +(I3[4] || 0) / 10 ** (I3[4] || "").length : NaN;
-    }, t2 = (A3) => {
-      const I3 = Math.max(0, A3), g3 = Math.floor(I3 / 3600), C3 = Math.floor(I3 % 3600 / 60), B3 = Math.floor(I3 % 60), Q3 = Math.round(I3 % 1 * 1e3);
-      return `${String(g3).padStart(2, "0")}:${String(C3).padStart(2, "0")}:${String(B3).padStart(2, "0")}.${String(Q3).padStart(3, "0")}`;
-    };
-    for (const A3 of C2) {
-      const I3 = A3.trim();
-      if (/^\[events\]$/i.test(I3)) { B2 = true; continue; }
-      if (/^\[/.test(I3)) { B2 = false; continue; }
-      if (!B2) continue;
-      const C3 = /^format\s*:\s*(.*)$/i.exec(I3);
-      if (C3) { Q2 = C3[1].split(",").map((A4) => A4.trim().toLowerCase()); continue; }
-      const s2 = /^dialogue\s*:\s*(.*)$/i.exec(I3);
-      if (!s2) continue;
-      const n2 = s2[1].split(","), h2 = Q2.indexOf("text");
-      if (h2 < 0 || n2.length < Q2.length) continue;
-      const D2 = Object.fromEntries(Q2.slice(0, h2).map((A4, I4) => [A4, n2[I4]?.trim() || ""]));
-      D2.text = n2.slice(h2).join(",");
-      const w2 = E2(D2.start), R2 = E2(D2.end), y2 = D2.text.replace(/\{[^}]*\}/g, "").replace(/\\[Nn]/g, "\n").replace(/\\h/g, " ").trim();
-      y2 && Number.isFinite(w2) && Number.isFinite(R2) && R2 > w2 && g2.push(`${t2(w2)} --> ${t2(R2)}\n${y2}`);
-    }
-    return `WEBVTT\n\n${g2.join("\n\n")}`;
-  }
   async selectSubtitleLang(A2) {
     if (this.detachTrackElement(), !A2) return this.activeSubLang = "", this.clearCueDisplay(), true;
     const I2 = this.subs.find((I3) => I3.lang === A2);
@@ -65962,12 +65892,10 @@ class NativeVideoWrapper extends Q {
     this.activeSubLang = A2;
     try {
       let A3 = I2.url;
-      if (["srt", "ass", "ssa"].includes(I2.format) || /\.(srt|ass|ssa)(\?|#|$)/i.test(I2.url)) {
+      if ("srt" === I2.format || /\.srt(\?|#|$)/i.test(I2.url)) {
         const g2 = await fetch(I2.url, { signal: this.lifetimeAbort.signal });
         if (!g2.ok) throw new Error(`HTTP ${g2.status}`);
-        C2 = await g2.text();
-        const B3 = I2.format || (/\.srt(\?|#|$)/i.test(I2.url) ? "srt" : /\.ssa(\?|#|$)/i.test(I2.url) ? "ssa" : "ass");
-        this.cueBlobUrl = URL.createObjectURL(new Blob([this.subtitleTextToVTT(B3, C2)], { type: "text/vtt" })), A3 = this.cueBlobUrl;
+        this.cueBlobUrl = URL.createObjectURL(new Blob([(C2 = await g2.text(), "WEBVTT\n\n" + C2.replace(/\r/g, "").replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2"))], { type: "text/vtt" })), A3 = this.cueBlobUrl;
       }
       const B2 = document.createElement("track");
       B2.kind = "subtitles", B2.label = I2.label, B2.srclang = I2.lang, B2.src = A3, B2.addEventListener("error", () => {

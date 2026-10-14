@@ -1,0 +1,45 @@
+@media (min-width: 700px) {
+  .site-header {
+    padding-inline: 1.5rem;
+  }
+
+  .watch-layout {
+    padding: 1.25rem;
+  }
+
+  .player-info {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .file-button {
+    width: auto;
+  }
+
+  .chat-panel {
+    height: clamp(24rem, 50vh, 32rem);
+    height: clamp(24rem, 50dvh, 32rem);
+    min-height: 24rem;
+    max-height: 32rem;
+  }
+}
+
+@media (min-width: 1100px) {
+  .watch-layout {
+    grid-template-columns: minmax(0, 1fr) 340px;
+    grid-template-areas: "player chat";
+    align-items: stretch;
+    padding: 1.5rem;
+  }
+
+  .chat-panel {
+    min-height: 0;
+    height: clamp(32rem, calc(100vh - 8rem), 48rem);
+    max-height: 48rem;
+  }
+
+  .site-header {
+    padding-inline: max(1.5rem, calc((100vw - 1470px) / 2));
+  }
+}

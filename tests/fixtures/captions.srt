@@ -1,0 +1,7 @@
+1
+00:00:00,500 --> 00:00:03,000
+Test caption at the start.
+
+2
+00:00:08,000 --> 00:00:11,000
+Test caption after seeking.
