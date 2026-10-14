@@ -82,6 +82,19 @@
         </button>
         <p class="control-help">The file stays on this device. WatchParty creates one high-quality, GPU-accelerated stream for everyone.</p>
       </div>
+
+      <section class="vote-panel" aria-labelledby="vote-title">
+        <div class="vote-heading">
+          <div>
+            <p class="eyebrow">UP NEXT</p>
+            <h2 id="vote-title">Vote for the next video</h2>
+          </div>
+          <span id="voteStatus" class="vote-status" aria-live="polite">Waiting for the host</span>
+        </div>
+        <div id="voteOptions" class="vote-options" aria-live="polite" aria-label="Next-video options">
+          <p class="vote-empty">No videos are up for a vote yet.</p>
+        </div>
+      </section>
     </section>
 
     <aside class="chat-panel" aria-labelledby="chat-title">

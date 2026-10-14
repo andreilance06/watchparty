@@ -3,6 +3,7 @@ import { createClientState } from "./state.js";
 import { createConnection } from "./connection.js";
 import { createChat } from "./chat.js";
 import { createPlayer } from "./player/controller.js";
+import { createVoting } from "./voting.js";
 
 const elements = getElements();
 const state = createClientState();
@@ -13,6 +14,7 @@ const connection = createConnection({
 });
 const chat = createChat({ elements, state, send: connection.send });
 const player = createPlayer({ elements, state, send: connection.send, report: chat.addSystemMessage });
+const voting = createVoting({ elements, send: connection.send });
 
 function handleMessage(message) {
   switch (message.type) {
@@ -28,6 +30,7 @@ function handleMessage(message) {
     case "transcode-info": player.updateEncoder(message.encoder); break;
     case "media-error": player.showMediaError(message.message); break;
     case "chat": chat.receive(message); break;
+    case "vote-state": voting.applyState(message); break;
     case "name-updated":
     case "name-rejected": chat.handleNameMessage(message); break;
     case "host-left":
