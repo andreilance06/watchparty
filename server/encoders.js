@@ -9,7 +9,7 @@ function testEncoder(ffmpegPath, name) {
   return new Promise((resolve) => {
     const child = spawn(ffmpegPath, [
       "-hide_banner", "-loglevel", "error", "-f", "lavfi",
-      "-i", "color=c=black:s=64x64:d=0.05", "-frames:v", "1",
+      "-i", "color=c=black:s=256x256:d=0.05", "-frames:v", "1",
       "-c:v", name, "-f", "null", "-"
     ], { windowsHide: true });
     let settled = false;
