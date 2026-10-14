@@ -1,12 +1,35 @@
 const { sanitizeDisplayName, createNameRegistry } = require("./names");
 const { currentTime, sessionState } = require("./state");
 
+const ALLOWED_REACTIONS = new Set(["❤️", "😂", "😮", "👏", "😢"]);
+const MAX_VIDEO_SUGGESTIONS = 30;
+
 function createMessageHandler({ state, transport, media }) {
   const { send, broadcast } = transport;
   const { isDisplayNameTaken } = createNameRegistry(state.clients);
 
+  function participants() {
+    return [...state.clients].map(([clientId, client]) => ({
+      clientId, name: client.name, role: client.role
+    }));
+  }
+
+  function updatePartyState() {
+    const suggestions = state.videoSuggestions.map((suggestion) => ({
+      ...suggestion,
+      votes: [...state.videoVotes.values()].filter((id) => id === suggestion.id).length
+    }));
+    for (const [clientId, client] of state.clients) {
+      send(client.ws, {
+        type: "party-state", participants: participants(), suggestions,
+        myVoteId: state.videoVotes.get(clientId) ?? null
+      });
+    }
+  }
+
   function updatePresence() {
-    broadcast({ type: "presence", count: state.clients.size });
+    broadcast({ type: "presence", count: state.clients.size, participants: participants() });
+    updatePartyState();
   }
 
   function handleMessage(ws, message) {
@@ -39,6 +62,7 @@ function createMessageHandler({ state, transport, media }) {
         }
         client.name = requestedName;
         send(ws, { type: "name-updated", name: client.name });
+        updatePresence();
         break;
       }
       case "chat": {
@@ -46,6 +70,43 @@ function createMessageHandler({ state, transport, media }) {
         if (!text) return;
         broadcast({ type: "chat", clientId: ws.clientId, name: client.name || "Guest", message: text,
           time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) });
+        break;
+      }
+      case "reaction": {
+        if (!ALLOWED_REACTIONS.has(message.emoji)) {
+          send(ws, { type: "error", message: "That emoji reaction is not supported." });
+          break;
+        }
+        broadcast({ type: "reaction", clientId: ws.clientId, name: client.name, emoji: message.emoji });
+        break;
+      }
+      case "suggest-video": {
+        const title = String(message.title || "").replace(/\s+/g, " ").trim().slice(0, 100);
+        if (!title) {
+          send(ws, { type: "error", message: "Enter a video title to suggest." });
+          break;
+        }
+        const existing = state.videoSuggestions.find(
+          (suggestion) => suggestion.title.toLocaleLowerCase() === title.toLocaleLowerCase()
+        );
+        if (!existing) {
+          if (state.videoSuggestions.length >= MAX_VIDEO_SUGGESTIONS) {
+            send(ws, { type: "error", message: "The next-video suggestion list is full." });
+            break;
+          }
+          state.videoSuggestions.push({ id: state.nextSuggestionId++, title });
+        }
+        updatePartyState();
+        break;
+      }
+      case "vote-video": {
+        const suggestionId = Number(message.suggestionId);
+        if (!Number.isInteger(suggestionId) || !state.videoSuggestions.some((suggestion) => suggestion.id === suggestionId)) {
+          send(ws, { type: "error", message: "That video suggestion is no longer available." });
+          break;
+        }
+        state.videoVotes.set(ws.clientId, suggestionId);
+        updatePartyState();
         break;
       }
       case "video-state": {
@@ -81,7 +142,7 @@ function createMessageHandler({ state, transport, media }) {
     }
   }
 
-  return { handleMessage, updatePresence };
+  return { handleMessage, updatePresence, updatePartyState };
 }
 
 module.exports = { createMessageHandler };

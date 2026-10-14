@@ -9,7 +9,7 @@ export function createClientState() {
   } catch {}
 
   return {
-    clientId, clientName, role: "viewer",
+    clientId, clientName, role: "viewer", voteId: null,
     activeMediaUrl: "", activeEncoder: "",
     suppressVideoEvents: false, latestHostPaused: true
   };

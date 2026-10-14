@@ -39,10 +39,29 @@ test("HTTP modules, chat names, host-only picker, and host handoff work together
   }
   viewer.send({ type: "set-name", name: "Bob" });
   assert.equal((await viewer.next("name-updated")).name, "Bob");
+  assert.ok((await host.next("presence", (message) => message.participants.some((participant) => participant.name === "Bob"))).count === 2);
   host.send({ type: "set-name", name: "bOb" });
   assert.equal((await host.next("name-rejected")).name, "Alex");
   viewer.send({ type: "chat", message: "Hi from Bob" });
   assert.equal((await host.next("chat")).name, "Bob");
+  viewer.send({ type: "reaction", emoji: "😂" });
+  assert.equal((await host.next("reaction")).emoji, "😂");
+  viewer.send({ type: "reaction", emoji: "unsupported" });
+  assert.equal((await viewer.next("error")).message, "That emoji reaction is not supported.");
+  viewer.send({ type: "suggest-video", title: "  Movie   One " });
+  await host.next("party-state", (message) => message.suggestions.some((suggestion) => suggestion.title === "Movie One"));
+  host.send({ type: "suggest-video", title: "Movie Two" });
+  await viewer.next("party-state", (message) => message.suggestions.some((suggestion) => suggestion.title === "Movie Two"));
+  viewer.send({ type: "vote-video", suggestionId: 1 });
+  await host.next("party-state", (message) => message.suggestions.find((suggestion) => suggestion.id === 1)?.votes === 1);
+  host.send({ type: "vote-video", suggestionId: 2 });
+  await viewer.next("party-state", (message) => message.suggestions.find((suggestion) => suggestion.id === 2)?.votes === 1);
+  viewer.send({ type: "vote-video", suggestionId: 2 });
+  const finalVotes = await host.next("party-state", (message) =>
+    message.suggestions.find((suggestion) => suggestion.id === 1)?.votes === 0 &&
+    message.suggestions.find((suggestion) => suggestion.id === 2)?.votes === 2
+  );
+  assert.equal(finalVotes.suggestions.find((suggestion) => suggestion.id === 2).votes, 2);
 
   const denied = await fetch(`${base}/api/select-video`, {
     method: "POST", headers: { "Content-Type": "application/json" },

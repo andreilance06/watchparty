@@ -3,7 +3,9 @@ export function getElements(root = document) {
     "video", "videoShell", "videoPlaceholder", "hostControls", "chooseVideoButton",
     "viewerControls", "fullscreenButton", "roleBadge", "connectionStatus", "statusDot",
     "fileName", "syncStatus", "captionControl", "captionSelect", "viewerCount", "nameForm",
-    "displayNameInput", "chatMessages", "chatForm", "chatInput"
+    "displayNameInput", "participantList", "reactionFeed", "reactLove", "reactLaugh", "reactWow",
+    "reactClap", "reactSad", "suggestionForm", "suggestionInput", "voteLeader",
+    "videoSuggestionList", "chatMessages", "chatForm", "chatInput"
   ];
   const elements = Object.fromEntries(ids.map((id) => [id, root.querySelector(`#${id}`)]));
   elements.placeholderTitle = elements.videoPlaceholder.querySelector("strong");

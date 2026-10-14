@@ -100,6 +100,35 @@
         </div>
       </div>
 
+      <section class="participant-section" aria-labelledby="participants-title">
+        <h3 id="participants-title">Participants</h3>
+        <ul id="participantList" class="participant-list" aria-live="polite"></ul>
+      </section>
+
+      <section class="reaction-section" aria-label="Send an emoji reaction">
+        <div id="reactionFeed" class="reaction-feed" role="log" aria-live="polite" aria-label="Recent reactions"></div>
+        <div class="reaction-buttons">
+          <button id="reactLove" type="button" aria-label="React with heart">❤️</button>
+          <button id="reactLaugh" type="button" aria-label="React with laughter">😂</button>
+          <button id="reactWow" type="button" aria-label="React with surprise">😮</button>
+          <button id="reactClap" type="button" aria-label="React with applause">👏</button>
+          <button id="reactSad" type="button" aria-label="React with sadness">😢</button>
+        </div>
+      </section>
+
+      <section class="vote-section" aria-labelledby="vote-title">
+        <div class="vote-heading">
+          <h3 id="vote-title">Next video</h3>
+          <p id="voteLeader" aria-live="polite">No suggestions yet.</p>
+        </div>
+        <form id="suggestionForm" class="suggestion-form" autocomplete="off">
+          <label class="sr-only" for="suggestionInput">Suggest a video title</label>
+          <input id="suggestionInput" name="title" type="text" maxlength="100" placeholder="Suggest a title..." required>
+          <button type="submit">Suggest</button>
+        </form>
+        <ul id="videoSuggestionList" class="video-suggestion-list" aria-label="Video suggestions and votes"></ul>
+      </section>
+
       <div id="chatMessages" class="chat-messages" role="log" aria-live="polite" aria-label="Chat messages">
         <div class="system-message">Welcome to WatchParty.</div>
       </div>

@@ -16,6 +16,8 @@ A local-network watch party that generates shared video segments on demand and g
 - Shared play/pause controls; host-only seeking, speed, looping, and Picture-in-Picture controls
 - Two-second WebSocket clock updates with gentle drift correction for viewers
 - Live chat and automatic host handoff
+- Live connected-participant list and emoji reactions
+- Shared next-video title suggestions with one replaceable vote per participant
 - LAN and Tailscale access
 
 ## Requirements
@@ -44,6 +46,7 @@ Open `http://localhost:3000`. Other devices can use `http://YOUR-COMPUTER-IP:300
 | `js/dom.js`, `js/state.js`, `js/utils/client-id.js` | DOM references, per-browser session state, and client identity |
 | `js/connection.js` | WebSocket transport and reconnection |
 | `js/chat.js` | Chat rendering, display names, and forms |
+| `js/party.js` | Participant list, emoji reactions, and next-video voting UI |
 | `js/player/controller.js` | Source selection, role-based controls, player events, and file-picker request |
 | `js/player/sync.js` | Shared playback state and drift correction |
 | `js/player/subtitles.js` | Caption selection, rendering, and resize handling |
@@ -51,7 +54,7 @@ Open `http://localhost:3000`. Other devices can use `http://YOUR-COMPUTER-IP:300
 | `server/application.js` | Backend composition, listener startup, and shutdown |
 | `server/config.js`, `server/state.js` | Runtime configuration and shared session/clock state |
 | `server/encoders.js`, `server/file-picker.js` | GPU encoder detection/fallback and native file picker |
-| `server/realtime.js`, `server/transport.js`, `server/messages.js`, `server/names.js` | WebSocket lifecycle, broadcasting, message permissions, and unique names |
+| `server/realtime.js`, `server/transport.js`, `server/messages.js`, `server/names.js` | WebSocket lifecycle, participant updates, reactions, voting, message permissions, and unique names |
 | `server/http/` | Request routing, static assets, and HLS/caption file responses |
 | `server/media/` | Probing, caption extraction, playlists, segment jobs, and temporary-file cleanup |
 | `css/` | Ordered entry stylesheet plus base, layout, player, chat, and responsive styles |
@@ -90,6 +93,7 @@ Viewers use the same stream, decoding path, and caption list as the host. Each b
 - ASS/SSA styling is preserved. SRT and WebVTT must be converted to ASS because JASSUB is a libass renderer. Bitmap formats such as PGS are skipped.
 - Fullscreen targets the complete video shell so Movi Player and the JASSUB surface stay together. Its transparent Canvas2D compositor avoids opaque-black subtitle layers on mobile browsers; video encoding still uses the selected GPU encoder.
 - Each participant can choose a chat display name. It updates without reconnecting and is remembered by that browser.
+- Participants can suggest video titles and change their vote; the leading title is shared live. Voting only chooses a title—the host still selects the local video file, which is never uploaded.
 - Display names are unique while connected (case-insensitive, first come first served). A rejected duplicate reverts to the participant's current name.
 - The chat panel has a responsive fixed height; its message history scrolls independently and automatically follows new messages.
 - Phone and tablet layouts explicitly stack the full-width player above the chat; the two-column layout begins only on wider desktop screens.

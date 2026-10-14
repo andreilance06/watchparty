@@ -45,6 +45,28 @@ test("frontend modules initialize and route playback, captions, fullscreen, chat
   el("chatInput").value = "  Hi  ";
   el("chatForm").dispatch("submit");
   assert.equal(socket.sent.at(-1).message, "Hi");
+  el("reactLove").dispatch("click");
+  assert.deepEqual(socket.sent.at(-1), { type: "reaction", emoji: "❤️" });
+  socket.receive({ type: "reaction", clientId: "host-id", name: "Host", emoji: "❤️" });
+  assert.equal(el("reactionFeed").children[0].textContent, "❤️ Host");
+  el("suggestionInput").value = "  The   Next Movie ";
+  el("suggestionForm").dispatch("submit");
+  assert.deepEqual(socket.sent.at(-1), { type: "suggest-video", title: "The Next Movie" });
+  socket.receive({
+    type: "party-state",
+    myVoteId: 2,
+    participants: [
+      { clientId: "host-id", name: "Host", role: "host" },
+      { clientId: "viewer-id", name: "Viewer", role: "viewer" }
+    ],
+    suggestions: [{ id: 2, title: "The Next Movie", votes: 1 }]
+  });
+  assert.equal(el("participantList").children.length, 2);
+  assert.equal(el("voteLeader").textContent, "Leading: The Next Movie (1 vote)");
+  const voteButton = el("videoSuggestionList").children[0].children[0];
+  assert.equal(voteButton.getAttribute("aria-pressed"), "true");
+  voteButton.dispatch("click");
+  assert.deepEqual(socket.sent.at(-1), { type: "vote-video", suggestionId: 2 });
   socket.receive({ type: "name-rejected", name: "Host", message: "Already used" });
   assert.equal(el("displayNameInput").getAttribute("aria-invalid"), "true");
 
