@@ -69,6 +69,7 @@ function createBrowserDouble() {
     elements.set(match[1], element);
   }
   const document = new EventTargetDouble();
+  document.documentElement = new ElementDouble("html");
   document.querySelector = (selector) => elements.get(selector.slice(1));
   document.createElement = (tag) => new ElementDouble(tag);
   document.body = new ElementDouble("body"); document.body.connected = true;

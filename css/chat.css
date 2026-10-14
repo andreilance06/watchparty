@@ -97,7 +97,7 @@
 }
 
 .chat-message .name {
-  color: #cfc8ff;
+  color: var(--accent-soft-text);
   font-size: .68rem;
   font-weight: 800;
 }
@@ -110,7 +110,7 @@
 .chat-message p {
   margin: 0;
   overflow-wrap: anywhere;
-  color: #e6e9f0;
+  color: var(--content-strong);
   font-size: .78rem;
   line-height: 1.4;
 }

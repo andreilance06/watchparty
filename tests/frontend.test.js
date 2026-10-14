@@ -8,6 +8,15 @@ test("frontend modules initialize and route playback, captions, fullscreen, chat
   await browser.load("js/app.js");
   const socket = browser.sockets[0];
   const el = (id) => browser.elements.get(id);
+  assert.equal(browser.document.documentElement.dataset.theme, "dark");
+  assert.equal(el("video").getAttribute("theme"), "dark");
+  el("themeToggle").dispatch("click");
+  assert.equal(browser.document.documentElement.dataset.theme, "light");
+  assert.equal(el("video").getAttribute("theme"), "light");
+  assert.equal(browser.storage.get("watchparty-theme"), "light");
+  assert.equal(el("themeToggle").getAttribute("aria-label"), "Switch to dark mode");
+  el("themeToggle").dispatch("click");
+  assert.equal(browser.document.documentElement.dataset.theme, "dark");
   socket.open();
   assert.equal(socket.sent[0].type, "join");
   assert.equal(el("connectionStatus").textContent, "Connected");

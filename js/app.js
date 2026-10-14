@@ -4,8 +4,10 @@ import { createConnection } from "./connection.js";
 import { createChat } from "./chat.js";
 import { createPlayer } from "./player/controller.js";
 import { createVoting } from "./voting.js";
+import { initializeTheme } from "./theme.js";
 
 const elements = getElements();
+initializeTheme(elements.themeToggle, localStorage, document.documentElement, elements.video);
 const state = createClientState();
 const connection = createConnection({
   getIdentity: () => ({ clientId: state.clientId, name: state.clientName }),

@@ -117,7 +117,7 @@
 }
 
 .vote-button:disabled {
-  color: #d2cbff;
+  color: var(--accent-soft-text);
   opacity: .75;
   cursor: default;
 }
