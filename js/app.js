@@ -38,6 +38,7 @@ function handleMessage(message) {
       voting.applyState(message);
       break;
     case "reaction": party.receiveReaction(message); break;
+    case "comment-reaction": chat.receiveCommentReaction(message); break;
     case "session-state": player.applySessionState(message); break;
     case "transcode-info": player.updateEncoder(message.encoder); break;
     case "media-error": player.showMediaError(message.message); break;

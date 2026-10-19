@@ -58,6 +58,81 @@ test("frontend modules initialize and route playback, captions, fullscreen, chat
   assert.deepEqual(socket.sent.at(-1), { type: "reaction", emoji: "❤️" });
   socket.receive({ type: "reaction", clientId: "host-id", name: "Host", emoji: "❤️" });
   assert.equal(el("reactionFeed").children[0].textContent, "❤️ Host");
+  assert.equal(el("floatingReactions").children.length, 6);
+  assert.ok(el("floatingReactions").children.every((reaction) => reaction.textContent === "❤️"));
+  socket.receive({
+    type: "chat", commentId: "12345678-1234-4321-8123-123456789abc",
+    clientId: "host-id", name: "Host", message: "A comment", time: "12:00"
+  });
+  const comment = el("chatMessages").children.at(-1);
+  const reactionBar = comment.children[2];
+  assert.equal(reactionBar.children.length, 2);
+  assert.equal(reactionBar.children.some((button) => button.textContent.includes("0")), false);
+  const commentPickerButton = reactionBar.children.find((button) => button.classList.contains("comment-reaction-more"));
+  commentPickerButton.dispatch("click");
+  const heartEmojiChoice = el("emojiPickerGrid").children.find((button) => button.textContent === "❤️");
+  assert.ok(heartEmojiChoice);
+  heartEmojiChoice.dispatch("click");
+  assert.deepEqual(socket.sent.at(-1), {
+    type: "comment-reaction", commentId: "12345678-1234-4321-8123-123456789abc", emoji: "❤️"
+  });
+  let heartReaction = reactionBar.children.find((button) => button.children[0]?.textContent === "❤️");
+  assert.ok(heartReaction);
+  assert.equal(heartReaction.children[1].textContent, "1");
+  assert.equal(heartReaction.getAttribute("aria-pressed"), "true");
+  socket.receive({
+    type: "comment-reaction", commentId: "12345678-1234-4321-8123-123456789abc",
+    reactions: [{ clientId: "host-id", name: "Host", emoji: "❤️" }]
+  });
+  assert.equal(heartReaction.getAttribute("aria-pressed"), "true");
+  assert.equal(heartReaction.children[1].textContent, "1");
+  assert.equal(reactionBar.children.at(-1).classList.contains("pop"), true);
+  heartReaction.dispatch("click");
+  assert.equal(socket.sent.at(-1).emoji, null);
+  assert.equal(reactionBar.children.includes(heartReaction), false);
+  assert.equal(reactionBar.children.length, 2);
+  socket.receive({
+    type: "comment-reaction", commentId: "12345678-1234-4321-8123-123456789abc",
+    reactions: []
+  });
+  assert.equal(heartReaction.getAttribute("aria-pressed"), "false");
+  assert.equal(reactionBar.children.includes(heartReaction), false);
+  assert.equal(reactionBar.children.length, 2);
+  el("chatInput").value = "Hello";
+  el("chatInput").selectionStart = 5;
+  el("chatInput").selectionEnd = 5;
+  el("chatEmojiButton").dispatch("click");
+  assert.equal(el("emojiPicker").hidden, false);
+  const smiley = el("emojiPickerGrid").children.find((button) => button.textContent === "🥰");
+  assert.ok(smiley);
+  smiley.dispatch("click");
+  assert.equal(el("chatInput").value, "Hello🥰");
+  assert.equal(el("emojiPicker").hidden, true);
+  commentPickerButton.dispatch("click");
+  assert.equal(el("emojiPicker").hidden, false);
+  const customEmoji = el("emojiPickerGrid").children.find((button) => button.textContent === "🫶");
+  assert.ok(customEmoji);
+  customEmoji.dispatch("click");
+  assert.deepEqual(socket.sent.at(-1), {
+    type: "comment-reaction", commentId: "12345678-1234-4321-8123-123456789abc", emoji: "🫶"
+  });
+  socket.receive({
+    type: "comment-reaction", commentId: "12345678-1234-4321-8123-123456789abc",
+    reactions: [{ clientId: "host-id", name: "Host", emoji: "🫶" }]
+  });
+  const customReaction = comment.children[2].children.find((button) => button.children[0]?.textContent === "🫶");
+  assert.ok(customReaction);
+  assert.equal(customReaction.children[1].textContent, "1");
+  socket.receive({
+    type: "comment-reaction", commentId: "12345678-1234-4321-8123-123456789abc",
+    reactions: [
+      { clientId: "host-id", name: "Host", emoji: "🫶" },
+      { clientId: "viewer-id", name: "Viewer", emoji: "🫶" }
+    ]
+  });
+  assert.equal(customReaction.children[1].textContent, "2");
+  assert.equal(customReaction.title, "🫶: Host, Viewer");
+  assert.match(customReaction.getAttribute("aria-label"), /Host, Viewer/);
   el("suggestionInput").value = "  The   Next Movie ";
   el("suggestionForm").dispatch("submit");
   assert.deepEqual(socket.sent.at(-1), { type: "suggest-video", title: "The Next Movie" });

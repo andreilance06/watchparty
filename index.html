@@ -33,6 +33,8 @@
     </div>
   </header>
 
+  <div id="floatingReactions" class="floating-reactions" aria-hidden="true"></div>
+
   <main class="watch-layout">
     <section class="player-panel" aria-labelledby="player-title">
       <div class="panel-heading">
@@ -152,7 +154,14 @@
       <form id="chatForm" class="chat-form" autocomplete="off">
         <label class="sr-only" for="chatInput">Message</label>
         <input id="chatInput" name="message" type="text" maxlength="300" placeholder="Say something..." required>
+        <button id="chatEmojiButton" class="chat-emoji-button" type="button" aria-label="Choose an emoji" aria-expanded="false" aria-controls="emojiPicker">😊</button>
         <button type="submit" aria-label="Send message">Send</button>
+        <div id="emojiPicker" class="emoji-picker" role="dialog" aria-label="Choose an emoji" hidden>
+          <label class="sr-only" for="emojiSearch">Search emojis</label>
+          <input id="emojiSearch" class="emoji-search" type="search" placeholder="Search emojis..." autocomplete="off">
+          <div id="emojiPickerGrid" class="emoji-picker-grid" aria-label="Emoji choices"></div>
+          <p id="emojiPickerEmpty" class="emoji-picker-empty" hidden>No matching emojis.</p>
+        </div>
       </form>
     </aside>
   </main>

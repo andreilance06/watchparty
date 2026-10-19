@@ -1,8 +1,18 @@
+const { randomUUID } = require("crypto");
 const { sanitizeDisplayName, createNameRegistry } = require("./names");
 const { currentTime, sessionState } = require("./state");
 
-const ALLOWED_REACTIONS = new Set(["❤️", "😂", "😮", "👏", "😢"]);
 const MAX_VIDEO_SUGGESTIONS = 30;
+
+function isSingleEmoji(value) {
+  if (typeof value !== "string" || !value || [...value].length > 16) return false;
+  const segments = [...new Intl.Segmenter(undefined, { granularity: "grapheme" }).segment(value)];
+  if (segments.length !== 1) return false;
+  const hasEmoji = /\p{Extended_Pictographic}|\p{Emoji_Presentation}/u.test(value) ||
+    /^[\u{1F1E6}-\u{1F1FF}]{2}$/u.test(value) ||
+    /^[#*0-9]\uFE0F?\u20E3$/u.test(value);
+  return hasEmoji && /^[\p{Extended_Pictographic}\p{Emoji_Presentation}\p{Emoji_Modifier}\uFE0F\u200D\u{1F1E6}-\u{1F1FF}\u20E3#*0-9]+$/u.test(value);
+}
 
 function createMessageHandler({ state, transport, media }) {
   const { send, broadcast } = transport;
@@ -32,6 +42,19 @@ function createMessageHandler({ state, transport, media }) {
     updatePartyState();
   }
 
+  function commentReactionMessage(commentId, reactions = state.commentReactions.get(commentId) || new Map()) {
+    return {
+      type: "comment-reaction", commentId,
+      reactions: [...reactions].map(([clientId, reaction]) => ({
+        clientId, name: reaction.name, emoji: reaction.emoji
+      }))
+    };
+  }
+
+  function broadcastCommentReactions(commentId) {
+    broadcast(commentReactionMessage(commentId));
+  }
+
   function handleMessage(ws, message) {
     const client = state.clients.get(ws.clientId);
     if (!client) return;
@@ -48,6 +71,9 @@ function createMessageHandler({ state, transport, media }) {
             ...(nameRejected ? { nameRejected: requestedName } : {})
           });
           send(ws, sessionState(state, "join"));
+          for (const [commentId, reactions] of state.commentReactions) {
+            if (reactions.size) send(ws, commentReactionMessage(commentId, reactions));
+          }
           updatePresence();
         }
         break;
@@ -68,12 +94,27 @@ function createMessageHandler({ state, transport, media }) {
       case "chat": {
         const text = String(message.message || "").trim().slice(0, 300);
         if (!text) return;
-        broadcast({ type: "chat", clientId: ws.clientId, name: client.name || "Guest", message: text,
+        const commentId = randomUUID();
+        state.commentReactions.set(commentId, new Map());
+        broadcast({ type: "chat", commentId, clientId: ws.clientId, name: client.name || "Guest", message: text,
           time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) });
         break;
       }
+      case "comment-reaction": {
+        if (typeof message.commentId !== "string" || !/^[\da-f]{8}-(?:[\da-f]{4}-){3}[\da-f]{12}$/i.test(message.commentId) ||
+            !state.commentReactions.has(message.commentId) ||
+            (message.emoji !== null && !isSingleEmoji(message.emoji))) {
+          send(ws, { type: "error", message: "That comment reaction is not supported." });
+          break;
+        }
+        const reactions = state.commentReactions.get(message.commentId);
+        if (message.emoji === null) reactions.delete(ws.clientId);
+        else reactions.set(ws.clientId, { name: client.name || "Guest", emoji: message.emoji });
+        broadcastCommentReactions(message.commentId);
+        break;
+      }
       case "reaction": {
-        if (!ALLOWED_REACTIONS.has(message.emoji)) {
+        if (!isSingleEmoji(message.emoji)) {
           send(ws, { type: "error", message: "That emoji reaction is not supported." });
           break;
         }
