@@ -4,6 +4,7 @@ const { MIME_TYPES } = require("../config");
 
 function serveFile(req, res, filePath) {
   fs.stat(filePath, (error, stat) => {
+    if (res.destroyed) return;
     if (error || !stat.isFile()) { res.writeHead(404); res.end("Not found"); return; }
     const extension = path.extname(filePath).toLowerCase();
     res.writeHead(200, {
@@ -11,7 +12,13 @@ function serveFile(req, res, filePath) {
       "Content-Length": stat.size,
       "Cache-Control": extension === ".m3u8" ? "no-store" : "private, max-age=3600, immutable"
     });
-    if (req.method === "HEAD") res.end(); else fs.createReadStream(filePath).pipe(res);
+    if (req.method === "HEAD") res.end();
+    else {
+      const stream = fs.createReadStream(filePath);
+      stream.once("error", () => res.destroy());
+      res.once("close", () => stream.destroy());
+      stream.pipe(res);
+    }
   });
 }
 

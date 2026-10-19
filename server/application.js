@@ -1,52 +1,48 @@
 const http = require("http");
 const { createConfig } = require("./config");
-const { createSession } = require("./state");
-const { createTransport } = require("./transport");
 const { detectVideoEncoder } = require("./encoders");
-const { createMediaService } = require("./media");
-const { chooseVideoFile } = require("./file-picker");
+const { createRoomRegistry } = require("./rooms");
+const { createSourceBridge } = require("./source-relay");
 const { createRequestHandler } = require("./http/routes");
 const { createRealtimeServer } = require("./realtime");
 
-// Composition root: creates one session and passes explicit dependencies to each service.
+// Rooms share encoder detection and the internal byte bridge, never playback state.
 function createApplication(options = {}) {
   const config = createConfig(options.config);
-  const state = createSession();
-  const transport = createTransport(state.clients);
   const encoderPromise = options.encoderPromise || detectVideoEncoder(config.ffmpegPath);
-  const media = createMediaService({ state, config, encoderPromise, broadcast: transport.broadcast });
-  const handler = createRequestHandler({
-    state, config, media, pickVideo: options.chooseVideoFile || chooseVideoFile
-  });
+  const bridge = createSourceBridge(config);
+  const registry = createRoomRegistry({ config, encoderPromise, bridge });
+  const { state, media } = registry.defaultRoom;
+  const handler = createRequestHandler({ registry, config });
   const server = http.createServer(handler);
-  const wss = createRealtimeServer(server, { state, transport, media });
+  const wss = createRealtimeServer(server, { registry, config });
   let closePromise;
 
-  function listen() {
-    return new Promise((resolve, reject) => {
+  async function listen() {
+    await bridge.listen();
+    try { return await new Promise((resolve, reject) => {
       server.once("error", reject);
       server.listen(config.port, "0.0.0.0", () => {
         server.removeListener("error", reject);
         resolve(server.address());
       });
-    });
+    }); } catch (error) { await close(); throw error; }
   }
 
   function close() {
     if (closePromise) return closePromise;
-    state.shuttingDown = true;
-    media.reset();
+    registry.close();
     closePromise = new Promise((resolve, reject) => {
       for (const ws of wss.clients) ws.terminate();
       wss.close();
       if (!server.listening) { resolve(); return; }
       server.close((error) => error ? reject(error) : resolve());
       server.closeIdleConnections?.();
-    });
+    }).finally(() => bridge.close());
     return closePromise;
   }
 
-  return { server, wss, state, config, media, listen, close };
+  return { server, wss, state, config, media, rooms: registry.rooms, listen, close };
 }
 
 module.exports = { createApplication };

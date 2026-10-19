@@ -35,7 +35,7 @@ function createSegmentService({ state, config, encoderPromise, broadcast }) {
         : [];
       const args = [
         "-hide_banner", "-loglevel", "warning", "-y", ...attempt.input,
-        "-ss", start.toFixed(3), "-i", state.mediaPath, "-t", duration.toFixed(3),
+        "-ss", start.toFixed(3), ...(state.mediaPath.startsWith("http:") ? ["-rw_timeout", "30000000"] : []), "-i", state.mediaPath, "-t", duration.toFixed(3),
         "-map", "0:v:0", "-map", "0:a:0?", ...videoFilter,
         "-c:v", attempt.name, ...attempt.args,
         "-maxrate", "25000k", "-bufsize", "50000k", "-pix_fmt", "yuv420p",

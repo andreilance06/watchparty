@@ -90,7 +90,11 @@
           <span aria-hidden="true">＋</span>
           Choose Video
         </button>
-        <p class="control-help">The file stays on this device. WatchParty creates one high-quality, GPU-accelerated stream for everyone.</p>
+        <p class="control-help">Choose one video and optional subtitle files from this device. Keep this page open while sharing.</p>
+        <div class="caption-actions">
+          <button id="addCaptionsButton" type="button" disabled>Add captions</button>
+          <button id="removeCaptionButton" type="button" disabled>Remove selected caption</button>
+        </div>
       </div>
 
       <section class="vote-panel" aria-labelledby="vote-title">
@@ -160,7 +164,7 @@
   <footer class="site-footer">
     <span>WatchParty</span>
     <span>•</span>
-    <span id="networkHint">One shared session · No file uploads</span>
+    <span id="networkHint">Browser-hosted video · Shared playback</span>
   </footer>
 
   <script type="module" src="js/app.js"></script>

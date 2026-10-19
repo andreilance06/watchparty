@@ -6,14 +6,12 @@ const os = require("node:os");
 const { execFileSync } = require("node:child_process");
 const { createApplication } = require("../server/application");
 const { CPU_ENCODER } = require("../server/encoders");
-const { connectPeer } = require("./helpers/peer");
+const { connectPeer, serveHostFiles } = require("./helpers/peer");
 
-test("HTTP modules, chat names, host-only picker, and host handoff work together", async (t) => {
-  let pickerCalls = 0;
+test("HTTP modules, chat names, host-only file sharing, and host handoff work together", async (t) => {
   const app = createApplication({
     config: { port: 0 },
-    encoderPromise: Promise.resolve(CPU_ENCODER),
-    chooseVideoFile: (callback) => { pickerCalls++; callback(null, ""); }
+    encoderPromise: Promise.resolve(CPU_ENCODER)
   });
   const address = await app.listen();
   t.after(() => app.close());
@@ -82,8 +80,9 @@ test("HTTP modules, chat names, host-only picker, and host handoff work together
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ clientId: viewer.role.clientId })
   });
-  assert.equal(denied.status, 403);
-  assert.equal(pickerCalls, 0);
+  assert.equal(denied.status, 410);
+  viewer.send({ type: "source-register", video: { id: "file", name: "movie.mkv", size: 100 }, captions: [] });
+  assert.match((await viewer.next("error")).message, /Only the room host/);
   host.ws.close();
   await viewer.next("host-left");
   assert.equal((await viewer.next("role")).role, "host");
@@ -112,18 +111,15 @@ test("captions remain separate, seeks encode the requested segment, and segments
 
   const app = createApplication({
     config: { port: 0, ffmpegPath },
-    encoderPromise: Promise.resolve(CPU_ENCODER),
-    chooseVideoFile: (callback) => callback(null, source)
+    encoderPromise: Promise.resolve(CPU_ENCODER)
   });
   const address = await app.listen();
   t.after(() => app.close());
   const base = `http://127.0.0.1:${address.port}`;
   const host = await connectPeer(base.replace("http", "ws"), "Host");
-  const select = await fetch(`${base}/api/select-video`, {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ clientId: host.role.clientId })
-  });
-  assert.equal(select.status, 202);
+  const relay = await serveHostFiles(host, base,
+    { name: "movie.mkv", bytes: fs.readFileSync(source) },
+    [{ name: "movie.style.ass", bytes: fs.readFileSync(path.join(directory, "movie.style.ass")) }]);
   const ready = await host.next("session-state", (message) => message.hasVideo);
   assert.equal(ready.captions.length, 2);
   const viewer = await connectPeer(base.replace("http", "ws"), "Viewer");
@@ -150,6 +146,40 @@ test("captions remain separate, seeks encode the requested segment, and segments
   const segments = fs.readdirSync(app.state.hlsDirectory).filter((file) => file.endsWith(".ts"));
   assert.deepEqual(segments.sort(), ["segment_000000.ts", "segment_000002.ts"]);
   assert.equal((await fetch(`${base}/hls/master.m3u8?v=999`)).status, 404);
+  assert.ok(relay.reads.length > 0);
+  assert.equal(ready.fileName, "movie.mkv");
+
+  // Caption edits do not replace the stream, playback clock, or cached segments.
+  const beforeVersion = app.state.mediaVersion;
+  const beforeUrl = viewerState.mediaUrl;
+  const added = relay.declare({ name: "extra.srt", bytes: fs.readFileSync(path.join(__dirname, "fixtures/captions.srt")) });
+  host.send({ type: "captions-add", sourceId: relay.sourceId, files: [added] });
+  const updated = await viewer.next("captions-updated", (message) => message.captions.length === 3);
+  assert.equal(app.state.mediaVersion, beforeVersion);
+  assert.equal(app.state.playback.time, 8);
+  assert.equal(app.state.playback.paused, true);
+  assert.equal(`/hls/master.m3u8?v=${updated.mediaVersion}`, beforeUrl);
+  assert.equal((await fetch(base + updated.captions[2].url)).status, 200);
+  const removedTrack = updated.captions[0];
+  host.send({ type: "caption-remove", sourceId: relay.sourceId, trackId: removedTrack.id });
+  await viewer.next("captions-updated", (message) => !message.captions.some((track) => track.id === removedTrack.id));
+  assert.equal((await fetch(base + removedTrack.url)).status, 404);
+  assert.deepEqual(Buffer.from(await (await fetch(middleUrl)).arrayBuffer()), middleBytes);
+
+  const countBeforeFailure = app.state.captionTracks.length;
+  const validCaption = relay.declare({ name: "valid.srt", bytes: fs.readFileSync(path.join(__dirname, "fixtures/captions.srt")) });
+  const invalidCaption = relay.declare({ name: "broken.srt", bytes: Buffer.from("This is not a subtitle file") });
+  host.send({ type: "captions-add", requestId: "partial-batch", sourceId: relay.sourceId, files: [validCaption, invalidCaption] });
+  await host.next("error", (message) => message.requestId === "partial-batch");
+  assert.equal(app.state.captionTracks.length, countBeforeFailure, "Failed caption batches leave the active list intact");
+
+  const pendingCaption = relay.declare({ name: "pending.srt", bytes: fs.readFileSync(path.join(__dirname, "fixtures/captions.srt")) });
+  host.send({ type: "captions-add", requestId: "source-changing", sourceId: relay.sourceId, files: [pendingCaption] });
+  const replaced = await serveHostFiles(host, base, { name: "replacement.mkv", bytes: fs.readFileSync(source) });
+  const replacementState = await host.next("session-state", (message) => message.hasVideo && message.fileName === "replacement.mkv");
+  assert.notEqual(replacementState.mediaVersion, beforeVersion);
+  assert.equal(replacementState.captions.length, 1, "Old caption conversions cannot appear in a replacement source");
+  assert.notEqual(replaced.sourceId, relay.sourceId);
 
   viewer.send({ type: "video-state", syncMode: "play", time: 8, playbackRate: 4 });
   const playing = await host.next("session-state", (message) => message.syncMode === "play");

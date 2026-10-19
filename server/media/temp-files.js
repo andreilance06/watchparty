@@ -9,7 +9,7 @@ function isWatchPartyTempDirectory(directory) {
 }
 
 function removeTempDirectory(directory) {
-  if (isWatchPartyTempDirectory(directory)) fs.rm(directory, { recursive: true, force: true }, () => {});
+  if (isWatchPartyTempDirectory(directory)) fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }, () => {});
 }
 
 module.exports = { isWatchPartyTempDirectory, removeTempDirectory };

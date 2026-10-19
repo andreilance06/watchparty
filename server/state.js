@@ -8,6 +8,8 @@ function createSession() {
   return {
     clients: new Map(),
     hostId: null,
+    basePath: "",
+    fileName: null,
     mediaPath: null,
     mediaVersion: 0,
     mediaDuration: 0,
@@ -34,10 +36,10 @@ function currentTime(state) {
 function sessionState(state, syncMode = "tick") {
   return {
     type: "session-state", hasVideo: Boolean(state.mediaPath && state.mediaReady),
-    processing: state.mediaProcessing,
-    mediaUrl: state.mediaPath && state.mediaReady ? `/hls/master.m3u8?v=${state.mediaVersion}` : null,
+    processing: state.mediaProcessing, mediaVersion: state.mediaVersion,
+    mediaUrl: state.mediaPath && state.mediaReady ? `${state.basePath || ""}/hls/master.m3u8?v=${state.mediaVersion}` : null,
     captions: state.captionTracks,
-    fileName: state.mediaPath ? path.basename(state.mediaPath) : null,
+    fileName: state.mediaPath ? state.fileName || path.basename(state.mediaPath) : null,
     duration: state.mediaDuration, encoder: state.selectedEncoder,
     paused: state.playback.paused, time: currentTime(state), playbackRate: state.playback.rate,
     syncMode

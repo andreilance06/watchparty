@@ -3,10 +3,10 @@ import { createSubtitles } from "./subtitles.js";
 import { createFullscreen } from "./fullscreen.js";
 import { createPlaybackSync } from "./sync.js";
 
-export function createPlayer({ elements, state: session, send, report }) {
+export function createPlayer({ elements, state: session, send, report, files }) {
   const {
     video, videoPlaceholder, placeholderTitle, placeholderText, viewerControls,
-    chooseVideoButton, hostControls, roleBadge, fileName, syncStatus
+    chooseVideoButton, hostControls, roleBadge, fileName, syncStatus, addCaptionsButton, removeCaptionButton
   } = elements;
   const subtitles = createSubtitles({ elements, report });
   const sync = createPlaybackSync({ elements, state: session, send });
@@ -36,6 +36,8 @@ export function createPlayer({ elements, state: session, send, report }) {
   }
 
   function applySessionState(state) {
+    session.mediaVersion = state.mediaVersion;
+    addCaptionsButton.disabled = !state.hasVideo;
     session.latestHostPaused = Boolean(state.paused);
     if (state.encoder) session.activeEncoder = state.encoder;
     if (state.processing) {
@@ -60,7 +62,7 @@ export function createPlayer({ elements, state: session, send, report }) {
     const sourceChanged = session.activeMediaUrl !== state.mediaUrl;
     if (sourceChanged) {
       session.activeMediaUrl = state.mediaUrl;
-      subtitles.setTracks(state.captions);
+      subtitles.setTracks(state.captions, { reset: true });
       setVideoSource(state.mediaUrl);
     } else if (state.captions) {
       subtitles.setTracks(state.captions);
@@ -69,6 +71,7 @@ export function createPlayer({ elements, state: session, send, report }) {
   }
 
   function applyRole(role) {
+    files.setRole(role);
     session.role = role;
     roleBadge.textContent = role === "host" ? "Host" : "Viewer";
     roleBadge.classList.toggle("host", role === "host");
@@ -106,21 +109,13 @@ export function createPlayer({ elements, state: session, send, report }) {
     report(message);
   }
 
-  chooseVideoButton.addEventListener("click", async () => {
-    chooseVideoButton.disabled = true;
-    chooseVideoButton.textContent = "Opening file picker...";
-    try {
-      const response = await fetch("/api/select-video", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId: session.clientId })
-      });
-      const result = await response.json();
-      if (!response.ok || result.error) throw new Error(result.error || "Could not choose a video.");
-    } catch (error) { report(error.message); }
-    finally {
-      chooseVideoButton.disabled = false;
-      chooseVideoButton.innerHTML = '<span aria-hidden="true">＋</span> Choose Video';
-    }
-  });
+  chooseVideoButton.addEventListener("click", files.chooseVideo);
+  addCaptionsButton.addEventListener("click", files.chooseCaptions);
+  removeCaptionButton.addEventListener("click", () => files.removeCaption(subtitles.selectedId()));
+
+  function updateCaptions(message) {
+    if (message.mediaVersion === session.mediaVersion) subtitles.setTracks(message.captions);
+  }
 
   video.addEventListener("pointerdown", () => {
     if (session.role !== "viewer") return;
@@ -141,5 +136,5 @@ export function createPlayer({ elements, state: session, send, report }) {
     report(event.detail?.message || video.error?.message || "The player could not decode this video format.");
   });
 
-  return { applyRole, applySessionState, updateEncoder, showMediaError, showNoVideo };
+  return { applyRole, applySessionState, updateCaptions, updateEncoder, showMediaError, showNoVideo };
 }

@@ -12,6 +12,10 @@ function createConfig(overrides = {}) {
     publicDirectory: path.resolve(__dirname, ".."),
     segmentSeconds: 4,
     maxSegmentsAhead: 2,
+    roomIdleMs: 30 * 60 * 1000,
+    sourceReadTimeoutMs: 30000,
+    sourceChunkBytes: 256 * 1024,
+    sourceMaxReads: 4,
     ffmpegPath: resolveFfmpegPath(),
     ...overrides
   };

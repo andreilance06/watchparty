@@ -10,11 +10,11 @@ function createSubtitleService({ state, config }) {
     const outputPath = path.join(state.hlsDirectory, subtitle.fileName);
     const job = { process: null, promise: null };
     job.promise = new Promise((resolve, reject) => {
-      if (!subtitle.map && (subtitle.codec === "ass" || subtitle.codec === "ssa")) {
+      if (!subtitle.remote && !subtitle.map && (subtitle.codec === "ass" || subtitle.codec === "ssa")) {
         fs.copyFile(subtitle.input, outputPath, (error) => error ? reject(error) : resolve(outputPath));
         return;
       }
-      const args = ["-hide_banner", "-loglevel", "error", "-y", "-i", subtitle.input];
+      const args = ["-hide_banner", "-loglevel", "error", "-y", ...(subtitle.input.startsWith("http:") ? ["-rw_timeout", "30000000"] : []), "-i", subtitle.input];
       if (subtitle.map) args.push("-map", subtitle.map);
       args.push("-c:s", subtitle.codec === "ass" || subtitle.codec === "ssa" ? "copy" : "ass", outputPath);
       job.process = spawn(FFMPEG_PATH, args, { windowsHide: true });
@@ -26,7 +26,9 @@ function createSubtitleService({ state, config }) {
     }).catch((error) => { job.error = error; return null; });
     captionJobs.set(subtitle.fileName, job);
     return job.promise.then((result) => result ? {
-      url: `/hls/${subtitle.fileName}?v=${version}`,
+      id: subtitle.id,
+      fileId: subtitle.fileId,
+      url: `${state.basePath || ""}/hls/${subtitle.fileName}?v=${version}`,
       label: subtitle.label,
       lang: subtitle.lang || "und",
       format: "ass",
@@ -46,7 +48,14 @@ function createSubtitleService({ state, config }) {
     if (job) await job.promise;
   }
 
-  return { extract: extractCaption, stop, wait };
+  function remove(fileName) {
+    const job = captionJobs.get(fileName);
+    if (job?.process && job.process.exitCode === null) job.process.kill();
+    captionJobs.delete(fileName);
+    if (state.hlsDirectory) fs.rm(path.join(state.hlsDirectory, fileName), { force: true }, () => {});
+  }
+
+  return { extract: extractCaption, stop, wait, remove };
 }
 
 module.exports = { createSubtitleService };

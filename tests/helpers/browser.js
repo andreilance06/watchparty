@@ -59,6 +59,7 @@ class ElementDouble extends EventTargetDouble {
   }
   querySelector(selector) { return this.specialChildren?.[selector] || null; }
   focus() { this.focused = true; }
+  click() { this.dispatch("click"); }
 }
 
 function createBrowserDouble({ storageFailure } = {}) {
@@ -89,9 +90,9 @@ function createBrowserDouble({ storageFailure } = {}) {
   let nextId = 1;
   class WebSocketDouble extends EventTargetDouble {
     static OPEN = 1;
-    constructor(url) { super(); this.url = url; this.readyState = 0; this.sent = []; sockets.push(this); }
+    constructor(url) { super(); this.url = url; this.readyState = 0; this.bufferedAmount = 0; this.sent = []; sockets.push(this); }
     open() { this.readyState = 1; this.dispatch("open"); }
-    send(text) { this.sent.push(JSON.parse(text)); }
+    send(text) { this.sent.push(typeof text === "string" ? JSON.parse(text) : text); }
     receive(message) { this.dispatch("message", { data: JSON.stringify(message) }); }
     close() { this.readyState = 3; this.dispatch("close"); }
   }
@@ -102,8 +103,9 @@ function createBrowserDouble({ storageFailure } = {}) {
     async manualRender(frame) { this.lastFrame = frame; }
   }
   const context = vm.createContext({
-    console, document, window, WebSocket: WebSocketDouble, location: { protocol: "http:", host: "localhost:3000" },
-    crypto: { randomUUID: () => "12345678-1234-4321-8123-123456789abc" },
+    console, document, window, URL, URLSearchParams, Blob, Uint8Array, DataView,
+    WebSocket: WebSocketDouble, location: { protocol: "http:", host: "localhost:3000", search: "" },
+    crypto: { randomUUID: () => require("node:crypto").randomUUID() },
     localStorage: {
       getItem: (key) => {
         if (storageFailure === "read") throw new Error("Storage read blocked");

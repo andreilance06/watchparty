@@ -101,9 +101,19 @@ export function createSubtitles({ elements, report }) {
     }
   }
   
-  function setCaptionTracks(tracks) {
+  function selectedId() {
+    const track = captionTracks[Number(captionSelect.value)];
+    return track?.id || track?.url || null;
+  }
+
+  function updateRemoveButton() {
+    if (elements.removeCaptionButton) elements.removeCaptionButton.disabled = !selectedId();
+  }
+
+  function setCaptionTracks(tracks, { reset = false } = {}) {
     const next = Array.isArray(tracks) ? tracks : [];
-    const nextSignature = JSON.stringify(next.map((track) => [track.url, track.label, track.lang, track.format]));
+    const previousId = selectedId();
+    const nextSignature = JSON.stringify(next.map((track) => [track.id, track.url, track.label, track.lang, track.format]));
     if (nextSignature === captionSignature) return;
     captionSignature = nextSignature;
     captionTracks = next;
@@ -118,8 +128,10 @@ export function createSubtitles({ elements, report }) {
     });
     captionControl.hidden = next.length === 0;
     captionSelect.disabled = next.length === 0;
-    captionSelect.value = next.length ? "0" : "-1";
-    selectCaption(next.length ? 0 : -1);
+    const index = reset ? (next.length ? 0 : -1) : previousId == null ? -1 : next.findIndex((track) => (track.id || track.url) === previousId);
+    captionSelect.value = String(index);
+    updateRemoveButton();
+    if (reset || previousId !== selectedId()) selectCaption(index);
   }
 
   function refreshSubtitlesAfterResize() {
@@ -146,7 +158,7 @@ export function createSubtitles({ elements, report }) {
   video.addEventListener("loadedmetadata", refreshSubtitlesAfterResize);
   window.addEventListener("orientationchange", refreshSubtitlesAfterResize);
 
-  captionSelect.addEventListener("change", () => selectCaption(Number(captionSelect.value)));
+  captionSelect.addEventListener("change", () => { updateRemoveButton(); selectCaption(Number(captionSelect.value)); });
 
   function renderSubtitleFrame(now) {
     requestAnimationFrame(renderSubtitleFrame);
@@ -175,5 +187,5 @@ export function createSubtitles({ elements, report }) {
   }
   requestAnimationFrame(renderSubtitleFrame);
 
-  return { setTracks: setCaptionTracks, refreshLayout: refreshSubtitlesAfterResize };
+  return { setTracks: setCaptionTracks, selectedId, refreshLayout: refreshSubtitlesAfterResize };
 }
