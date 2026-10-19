@@ -24,6 +24,7 @@ function createRealtimeServer(server, { state, transport, media }) {
     ws.on("close", () => {
       const wasHost = ws.clientId === state.hostId;
       state.clients.delete(ws.clientId);
+      state.videoVotes.delete(ws.clientId);
       if (state.shuttingDown) return;
       if (wasHost) {
         state.hostId = null;

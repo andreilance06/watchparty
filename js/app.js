@@ -2,6 +2,7 @@ import { getElements, setConnectionStatus } from "./dom.js";
 import { createClientState } from "./state.js";
 import { createConnection } from "./connection.js";
 import { createChat } from "./chat.js";
+import { createParty } from "./party.js";
 import { createPlayer } from "./player/controller.js";
 
 const elements = getElements();
@@ -12,6 +13,7 @@ const connection = createConnection({
   onStatus: (connected, text) => setConnectionStatus(elements, connected, text)
 });
 const chat = createChat({ elements, state, send: connection.send });
+const party = createParty({ elements, state, send: connection.send });
 const player = createPlayer({ elements, state, send: connection.send, report: chat.addSystemMessage });
 
 function handleMessage(message) {
@@ -23,7 +25,12 @@ function handleMessage(message) {
       player.applyRole(message.role);
       elements.viewerCount.textContent = `${message.viewerCount} online`;
       break;
-    case "presence": elements.viewerCount.textContent = `${message.count} online`; break;
+    case "presence":
+      elements.viewerCount.textContent = `${message.count} online`;
+      party.updateParticipants(message.participants);
+      break;
+    case "party-state": party.updateState(message); break;
+    case "reaction": party.receiveReaction(message); break;
     case "session-state": player.applySessionState(message); break;
     case "transcode-info": player.updateEncoder(message.encoder); break;
     case "media-error": player.showMediaError(message.message); break;
