@@ -61,14 +61,19 @@
   background: var(--accent-hover);
 }
 
+.chat-heading,
 .participant-section,
-.vote-section {
+.reaction-section,
+.chat-form {
+  flex-shrink: 0;
+}
+
+.participant-section {
   padding: .65rem .8rem;
   border-bottom: 1px solid var(--border);
 }
 
-.participant-section h3,
-.vote-heading h3 {
+.participant-section h3 {
   margin: 0;
   color: var(--muted);
   font-size: .66rem;
@@ -77,14 +82,15 @@
   text-transform: uppercase;
 }
 
-.participant-list,
-.video-suggestion-list {
+.participant-list {
   display: flex;
   flex-wrap: wrap;
   gap: .35rem;
   padding: 0;
   margin: .45rem 0 0;
   list-style: none;
+  max-height: 5rem;
+  overflow-y: auto;
 }
 
 .participant {
@@ -161,82 +167,6 @@
   background: var(--surface-3);
 }
 
-.vote-heading {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: .5rem;
-}
-
-.vote-heading p {
-  margin: 0;
-  color: var(--muted);
-  font-size: .62rem;
-  text-align: right;
-}
-
-.suggestion-form {
-  display: flex;
-  gap: .35rem;
-  margin-top: .45rem;
-}
-
-.suggestion-form input {
-  min-width: 0;
-  flex: 1;
-  padding: .38rem .5rem;
-  border: 1px solid var(--border);
-  border-radius: .45rem;
-  outline: none;
-  color: var(--text);
-  background: var(--surface-2);
-  font-size: .68rem;
-}
-
-.suggestion-form input:focus {
-  border-color: rgba(124, 92, 255, .65);
-  box-shadow: 0 0 0 3px rgba(124, 92, 255, .1);
-}
-
-.suggestion-form button {
-  border: 0;
-  border-radius: .45rem;
-  padding: .38rem .55rem;
-  color: white;
-  background: var(--accent);
-  font-size: .68rem;
-  font-weight: 750;
-  cursor: pointer;
-}
-
-.video-suggestion-list {
-  max-height: 5rem;
-  overflow-y: auto;
-}
-
-.video-suggestion {
-  max-width: 100%;
-}
-
-.vote-button {
-  max-width: 100%;
-  overflow: hidden;
-  padding: .22rem .45rem;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  color: var(--text);
-  background: var(--surface-2);
-  cursor: pointer;
-  font-size: .62rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.vote-button[aria-pressed="true"] {
-  border-color: rgba(124, 92, 255, .65);
-  background: rgba(124, 92, 255, .18);
-}
-
 .chat-messages {
   display: flex;
   flex: 1 1 0;
@@ -273,7 +203,7 @@
 }
 
 .chat-message .name {
-  color: #cfc8ff;
+  color: var(--accent-soft-text);
   font-size: .68rem;
   font-weight: 800;
 }
@@ -286,7 +216,7 @@
 .chat-message p {
   margin: 0;
   overflow-wrap: anywhere;
-  color: #e6e9f0;
+  color: var(--content-strong);
   font-size: .78rem;
   line-height: 1.4;
 }

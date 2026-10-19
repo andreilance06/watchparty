@@ -43,3 +43,29 @@
     padding-inline: max(1.5rem, calc((100vw - 1470px) / 2));
   }
 }
+
+@media (max-width: 520px) {
+  .site-header {
+    align-items: flex-start;
+    padding: .75rem;
+  }
+
+  .brand { gap: .55rem; }
+  .brand-mark { width: 2rem; height: 2rem; }
+  .brand p { font-size: .64rem; }
+  .connection { padding-top: .25rem; font-size: .65rem; }
+  .header-actions { gap: .55rem; }
+  .theme-toggle { width: 2.2rem; height: 2.2rem; }
+
+  .watch-layout { gap: .6rem; padding: .6rem; }
+
+  .chat-panel {
+    height: clamp(20rem, 58dvh, 28rem);
+    min-height: 20rem;
+  }
+
+  .chat-heading { align-items: flex-start; }
+  .chat-heading-actions { max-width: 65%; }
+  .name-form { max-width: 100%; }
+  .name-form input { width: min(38vw, 9rem); }
+}

@@ -18,6 +18,7 @@ A local-network watch party that generates shared video segments on demand and g
 - Live chat and automatic host handoff
 - Live connected-participant list and emoji reactions
 - Shared next-video title suggestions with one replaceable vote per participant
+- Light/dark theme toggle remembered by each browser
 - LAN and Tailscale access
 
 ## Requirements
@@ -46,7 +47,8 @@ Open `http://localhost:3000`. Other devices can use `http://YOUR-COMPUTER-IP:300
 | `js/dom.js`, `js/state.js`, `js/utils/client-id.js` | DOM references, per-browser session state, and client identity |
 | `js/connection.js` | WebSocket transport and reconnection |
 | `js/chat.js` | Chat rendering, display names, and forms |
-| `js/party.js` | Participant list, emoji reactions, and next-video voting UI |
+| `js/party.js` | Participant list and emoji reactions |
+| `js/voting.js`, `js/theme.js` | Next-video suggestions/votes and per-browser theme preference |
 | `js/player/controller.js` | Source selection, role-based controls, player events, and file-picker request |
 | `js/player/sync.js` | Shared playback state and drift correction |
 | `js/player/subtitles.js` | Caption selection, rendering, and resize handling |
@@ -57,7 +59,7 @@ Open `http://localhost:3000`. Other devices can use `http://YOUR-COMPUTER-IP:300
 | `server/realtime.js`, `server/transport.js`, `server/messages.js`, `server/names.js` | WebSocket lifecycle, participant updates, reactions, voting, message permissions, and unique names |
 | `server/http/` | Request routing, static assets, and HLS/caption file responses |
 | `server/media/` | Probing, caption extraction, playlists, segment jobs, and temporary-file cleanup |
-| `css/` | Ordered entry stylesheet plus base, layout, player, chat, and responsive styles |
+| `css/` | Ordered entry stylesheet plus base, layout, player, chat, voting, and responsive styles |
 | `tests/` | Unit tests, frontend wiring tests, and HTTP/WebSocket/FFmpeg regression tests |
 
 The third-party files in `vendor/` remain bundled and unchanged. Do not split or edit those generated bundles when changing application features.
@@ -70,7 +72,7 @@ After `npm install`, run:
 npm test
 ```
 
-Tests cover host/viewer permissions, duplicate names, chat, host handoff, frontend module loading, fullscreen wiring, caption delivery, cancellation, seeking, and segment caching. The media integration test creates a tiny temporary video and uses FFmpeg; it skips if the executable is unavailable. Frontend tests use DOM/player doubles to exercise module wiring, not to certify browser decoding or visual subtitle output. The VM-modules experimental warning is expected for these tests.
+Tests cover host/viewer permissions, duplicate names, chat, participants, reactions, suggestions, changing votes, disconnect cleanup, themes, host handoff, frontend module loading, fullscreen wiring, caption delivery, cancellation, seeking, and segment caching. The media integration test creates a tiny temporary video and uses FFmpeg; it skips if the executable is unavailable. Frontend tests use DOM/player doubles to exercise module wiring, not to certify browser decoding or visual subtitle output. The VM-modules experimental warning is expected for these tests.
 
 ## How playback works
 
@@ -94,6 +96,8 @@ Viewers use the same stream, decoding path, and caption list as the host. Each b
 - Fullscreen targets the complete video shell so Movi Player and the JASSUB surface stay together. Its transparent Canvas2D compositor avoids opaque-black subtitle layers on mobile browsers; video encoding still uses the selected GPU encoder.
 - Each participant can choose a chat display name. It updates without reconnecting and is remembered by that browser.
 - Participants can suggest video titles and change their vote; the leading title is shared live. Voting only chooses a title—the host still selects the local video file, which is never uploaded.
+- Voting appears beneath the player with live counts, percentages, and ties. Suggestions stay in server memory until restart; votes are removed when a participant disconnects.
+- The theme toggle updates the page and player. It remembers the choice when browser storage is available and still works when storage is blocked.
 - Display names are unique while connected (case-insensitive, first come first served). A rejected duplicate reverts to the participant's current name.
 - The chat panel has a responsive fixed height; its message history scrolls independently and automatically follows new messages.
 - Phone and tablet layouts explicitly stack the full-width player above the chat; the two-column layout begins only on wider desktop screens.

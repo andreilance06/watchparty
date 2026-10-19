@@ -74,6 +74,61 @@ test("GPU fallback order and media duration parsing are preserved", () => {
   assert.equal(parseDuration("Duration: 01:02:03.500, start: 0"), 3723.5);
 });
 
+test("suggestions are normalized, deduplicated, bounded, and validated", () => {
+  const state = createSession();
+  const ws = { clientId: "host" };
+  state.clients.set("host", { ws, role: "host", name: "Host" });
+  const sent = [];
+  const handler = createMessageHandler({
+    state, transport: { send: (_, message) => sent.push(message), broadcast() {} }, media: {}
+  });
+  const suggest = (title) => handler.handleMessage(ws, { type: "suggest-video", title });
+  suggest("  Movie   One ");
+  suggest("movie one");
+  assert.deepEqual(state.videoSuggestions, [{ id: 1, title: "Movie One" }]);
+  suggest("   ");
+  assert.equal(sent.at(-1).type, "error");
+  assert.equal(state.videoSuggestions.length, 1);
+  suggest("x".repeat(120));
+  assert.equal(state.videoSuggestions[1].title.length, 100);
+  for (let i = 2; i < 30; i++) suggest(`Movie ${i}`);
+  suggest("Overflow");
+  assert.equal(state.videoSuggestions.length, 30);
+  assert.equal(sent.at(-1).message, "The next-video suggestion list is full.");
+  suggest("MOVIE ONE");
+  assert.equal(sent.at(-1).type, "party-state");
+
+  for (const suggestionId of [null, "invalid", 999, 1.5]) {
+    handler.handleMessage(ws, { type: "vote-video", suggestionId });
+    assert.equal(sent.at(-1).type, "error");
+    assert.equal(state.videoVotes.size, 0);
+  }
+});
+
+test("votes are replaceable and party snapshots personalize each participant's selection", () => {
+  const state = createSession();
+  const host = { clientId: "host" }, viewer = { clientId: "viewer" };
+  state.clients.set("host", { ws: host, role: "host", name: "Host" });
+  state.clients.set("viewer", { ws: viewer, role: "viewer", name: "Viewer" });
+  state.videoSuggestions.push({ id: 1, title: "One" }, { id: 2, title: "Two" });
+  const latest = new Map();
+  const handler = createMessageHandler({
+    state, transport: { send: (ws, message) => latest.set(ws.clientId, message), broadcast() {} }, media: {}
+  });
+  const vote = (ws, suggestionId) => handler.handleMessage(ws, { type: "vote-video", suggestionId });
+  vote(host, 1);
+  vote(viewer, 2);
+  assert.equal(latest.get("host").myVoteId, 1);
+  assert.equal(latest.get("viewer").myVoteId, 2);
+  assert.deepEqual(latest.get("host").suggestions.map((suggestion) => suggestion.votes), [1, 1]);
+  vote(viewer, 1);
+  vote(viewer, 1);
+  assert.deepEqual(latest.get("host").suggestions.map((suggestion) => suggestion.votes), [2, 0]);
+  assert.equal(latest.get("viewer").myVoteId, 1);
+  assert.equal(state.videoVotes.size, 2);
+  assert.equal(latest.get("viewer").participants.length, 2);
+});
+
 test("waiting segment jobs can be cancelled without starting an encoder", async () => {
   const state = createSession();
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "watchparty-test-cancel-"));

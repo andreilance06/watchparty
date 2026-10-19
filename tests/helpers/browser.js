@@ -61,7 +61,7 @@ class ElementDouble extends EventTargetDouble {
   focus() { this.focused = true; }
 }
 
-function createBrowserDouble() {
+function createBrowserDouble({ storageFailure } = {}) {
   const elements = new Map();
   const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
   for (const match of html.matchAll(/id="([^"]+)"/g)) {
@@ -69,6 +69,7 @@ function createBrowserDouble() {
     elements.set(match[1], element);
   }
   const document = new EventTargetDouble();
+  document.documentElement = new ElementDouble("html");
   document.querySelector = (selector) => elements.get(selector.slice(1));
   document.createElement = (tag) => new ElementDouble(tag);
   document.body = new ElementDouble("body"); document.body.connected = true;
@@ -103,7 +104,16 @@ function createBrowserDouble() {
   const context = vm.createContext({
     console, document, window, WebSocket: WebSocketDouble, location: { protocol: "http:", host: "localhost:3000" },
     crypto: { randomUUID: () => "12345678-1234-4321-8123-123456789abc" },
-    localStorage: { getItem: (key) => storage.get(key), setItem: (key, value) => storage.set(key, value) },
+    localStorage: {
+      getItem: (key) => {
+        if (storageFailure === "read") throw new Error("Storage read blocked");
+        return storage.get(key);
+      },
+      setItem: (key, value) => {
+        if (storageFailure === "write") throw new Error("Storage write blocked");
+        storage.set(key, value);
+      }
+    },
     requestAnimationFrame: (fn) => { const id = nextId++; frames.set(id, fn); return id; },
     cancelAnimationFrame: (id) => frames.delete(id),
     setTimeout: (fn, delay) => { const id = nextId++; timers.set(id, { fn, delay }); return id; },
@@ -111,6 +121,9 @@ function createBrowserDouble() {
     setInterval: (fn, delay) => { const id = nextId++; timers.set(id, { fn, delay, interval: true }); return id; },
     fetch: async (url, options) => { requests.push({ url, options }); return { ok: true, json: async () => ({}) }; }
   });
+  if (storageFailure === "access") {
+    Object.defineProperty(context, "localStorage", { get() { throw new Error("Storage access blocked"); } });
+  }
   const modules = new Map();
   function getModule(filename) {
     if (modules.has(filename)) return modules.get(filename);

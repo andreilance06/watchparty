@@ -25,13 +25,17 @@ test("HTTP modules, chat names, host-only picker, and host handoff work together
   assert.equal(viewer.role.nameRejected, "alex");
   assert.notEqual(viewer.role.name, "alex");
 
-  const modules = ["js/app.js", "js/chat.js", "js/connection.js", "js/player/controller.js", "js/player/sync.js", "js/player/fullscreen.js", "js/player/subtitles.js"];
+  const html = await (await fetch(base)).text();
+  const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
+  assert.equal(new Set(ids).size, ids.length, "HTML IDs must be unique");
+  assert.equal((html.match(/class="vote-panel"/g) || []).length, 1);
+  const modules = ["js/app.js", "js/chat.js", "js/party.js", "js/voting.js", "js/theme.js", "js/connection.js", "js/player/controller.js", "js/player/sync.js", "js/player/fullscreen.js", "js/player/subtitles.js"];
   for (const file of modules) {
     const response = await fetch(`${base}/${file}`);
     assert.equal(response.status, 200, file);
     assert.match(response.headers.get("content-type"), /javascript/);
   }
-  for (const file of ["base", "layout", "player", "chat", "responsive"]) {
+  for (const file of ["base", "layout", "player", "chat", "voting", "responsive"]) {
     const response = await fetch(`${base}/css/${file}.css`, { method: "HEAD" });
     assert.equal(response.status, 200, file);
     assert.match(response.headers.get("content-type"), /text\/css/);
@@ -62,6 +66,17 @@ test("HTTP modules, chat names, host-only picker, and host handoff work together
     message.suggestions.find((suggestion) => suggestion.id === 2)?.votes === 2
   );
   assert.equal(finalVotes.suggestions.find((suggestion) => suggestion.id === 2).votes, 2);
+  assert.equal(finalVotes.myVoteId, 2);
+  assert.equal((await viewer.next("party-state", (message) =>
+    message.myVoteId === 2 && message.suggestions.find((suggestion) => suggestion.id === 2)?.votes === 2
+  )).myVoteId, 2);
+
+  const newcomer = await connectPeer(base.replace("http", "ws"), "Newcomer");
+  const joined = await newcomer.next("party-state", (message) => message.participants.length === 3);
+  assert.equal(joined.myVoteId, null);
+  assert.equal(joined.suggestions.find((suggestion) => suggestion.id === 2).votes, 2);
+  newcomer.ws.close();
+  await host.next("presence", (message) => message.count === 2);
 
   const denied = await fetch(`${base}/api/select-video`, {
     method: "POST", headers: { "Content-Type": "application/json" },
@@ -72,6 +87,11 @@ test("HTTP modules, chat names, host-only picker, and host handoff work together
   host.ws.close();
   await viewer.next("host-left");
   assert.equal((await viewer.next("role")).role, "host");
+  const afterHandoff = await viewer.next("party-state", (message) => message.participants.length === 1);
+  assert.equal(afterHandoff.participants[0].role, "host");
+  assert.equal(afterHandoff.suggestions.find((suggestion) => suggestion.id === 2).votes, 1);
+  assert.equal(afterHandoff.myVoteId, 2);
+  assert.equal(app.state.videoVotes.has(host.role.clientId), false);
 });
 
 test("captions remain separate, seeks encode the requested segment, and segments are cached", async (t) => {

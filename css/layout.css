@@ -15,7 +15,7 @@
 .chat-panel {
   width: 100%;
   min-width: 0;
-  background: rgba(18, 21, 29, .94);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 1rem;
   overflow: hidden;
@@ -61,7 +61,7 @@
 }
 
 .role-badge.host {
-  color: #dcd5ff;
+  color: var(--accent-soft-text);
   border-color: rgba(124, 92, 255, .35);
   background: rgba(124, 92, 255, .12);
 }
