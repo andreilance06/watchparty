@@ -42,7 +42,7 @@ function createRequestHandler({ registry, config }) {
   return async (req, res) => {
     try {
       const url = new URL(req.url, "http://localhost");
-      if (req.method === "POST" && !validOrigin(req)) throw failure(403, "Request origin is not allowed.");
+      if (req.method === "POST" && !validOrigin(req, config)) throw failure(403, "Request origin is not allowed.");
       if (url.pathname === "/api/rooms" || url.pathname === "/api/rooms/join") {
         if (req.method !== "POST") { res.setHeader("Allow", "POST"); throw failure(405, "Use POST for this endpoint."); }
         const body = await readJson(req);
@@ -74,6 +74,9 @@ function createRequestHandler({ registry, config }) {
       const member = match ? registry.authenticate(req, room) : null;
       if (match && !member) throw failure(401, "Join this room first.");
       const pathname = match ? match[2] || "/" : url.pathname;
+      if (pathname === "/media/original" && ["GET", "HEAD"].includes(req.method)) {
+        await room.source.serveOriginal(req, res, url); return;
+      }
       if (match && pathname === "/api/session") {
         if (req.method !== "GET") throw failure(405, "Use GET for this endpoint.");
         json(res, 200, registry.describe(room, member)); return;

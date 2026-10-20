@@ -13,6 +13,7 @@ class EventTargetDouble {
   removeEventListener(type, fn) {
     this.listeners.set(type, (this.listeners.get(type) || []).filter((item) => item.fn !== fn));
   }
+  dispatchEvent(event) { this.dispatch(event.type, event); return true; }
   dispatch(type, properties = {}) {
     const event = { type, preventDefault() {}, ...properties };
     for (const item of [...(this.listeners.get(type) || [])]) {
@@ -62,7 +63,7 @@ class ElementDouble extends EventTargetDouble {
   click() { this.dispatch("click"); }
 }
 
-function createBrowserDouble({ storageFailure } = {}) {
+function createBrowserDouble({ storageFailure, rendererReady } = {}) {
   const elements = new Map();
   const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
   for (const match of html.matchAll(/id="([^"]+)"/g)) {
@@ -87,6 +88,17 @@ function createBrowserDouble({ storageFailure } = {}) {
   video.applyFullscreenUiState = (active) => { video.fullscreenUiActive = active; };
   const window = new EventTargetDouble(); window.innerWidth = 1000;
   const sockets = [], renderers = [], requests = [], timers = new Map(), frames = new Map(), storage = new Map();
+  video.customControls = new Map(); video.overlays = new Map();
+  video.addControl = (spec) => video.customControls.set(spec.id, spec);
+  video.removeControl = (id) => video.customControls.delete(id);
+  video.showOverlay = (spec) => { video.hideOverlay(spec.id); video.overlays.set(spec.id, spec); video.appendChild(spec.content); };
+  video.hideOverlay = (id) => {
+    const overlay = video.overlays.get(id);
+    if (!overlay) return;
+    overlay.content.remove(); video.overlays.delete(id); overlay.onDismiss?.('host');
+  };
+  video.isOverlayVisible = (id) => video.overlays.has(id);
+  video.setSubtitleRenderer = (renderer) => { video.subtitleRenderer = renderer; };
   let nextId = 1;
   class WebSocketDouble extends EventTargetDouble {
     static OPEN = 1;
@@ -97,13 +109,15 @@ function createBrowserDouble({ storageFailure } = {}) {
     close() { this.readyState = 3; this.dispatch("close"); }
   }
   class SubtitleRendererDouble {
-    constructor(options) { this.options = options; this.ready = Promise.resolve(); this.busy = false; renderers.push(this); }
+    constructor(options) { this.options = options; this.ready = rendererReady || Promise.resolve(); this.busy = false; renderers.push(this); }
     async destroy() { this.destroyed = true; }
     async resize() { this.resized = true; }
     async manualRender(frame) { this.lastFrame = frame; }
   }
   const context = vm.createContext({
-    console, document, window, URL, URLSearchParams, Blob, Uint8Array, DataView,
+    console, document, window, URL, URLSearchParams, Blob, Uint8Array, DataView, performance,
+    Event: class { constructor(type) { this.type = type; } },
+    CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options?.detail; } },
     WebSocket: WebSocketDouble, location: { protocol: "http:", host: "localhost:3000", search: "" },
     crypto: { randomUUID: () => require("node:crypto").randomUUID() },
     localStorage: {
@@ -118,10 +132,12 @@ function createBrowserDouble({ storageFailure } = {}) {
     },
     requestAnimationFrame: (fn) => { const id = nextId++; frames.set(id, fn); return id; },
     cancelAnimationFrame: (id) => frames.delete(id),
+    queueMicrotask,
     setTimeout: (fn, delay) => { const id = nextId++; timers.set(id, { fn, delay }); return id; },
     clearTimeout: (id) => timers.delete(id),
     setInterval: (fn, delay) => { const id = nextId++; timers.set(id, { fn, delay, interval: true }); return id; },
-    fetch: async (url, options) => { requests.push({ url, options }); return { ok: true, json: async () => ({}) }; }
+    fetch: async (url, options) => { requests.push({ url, options }); return { ok: true, json: async () => ({}),
+      text: async () => "[Script Info]\n[Events]\n", arrayBuffer: async () => new ArrayBuffer(1) }; }
   });
   if (storageFailure === "access") {
     Object.defineProperty(context, "localStorage", { get() { throw new Error("Storage access blocked"); } });
@@ -130,7 +146,9 @@ function createBrowserDouble({ storageFailure } = {}) {
   function getModule(filename) {
     if (modules.has(filename)) return modules.get(filename);
     let module;
-    if (filename === path.join(root, "vendor/movi-player.js")) module = new vm.SyntheticModule([], function () {}, { context, identifier: filename });
+    if (filename === path.join(root, "vendor/movi-player.js")) module = new vm.SyntheticModule(["MoviPlayer"], function () {
+      this.setExport("MoviPlayer", { assessPlayback: async () => ({ playable: true, smooth: true }) });
+    }, { context, identifier: filename });
     else if (filename === path.join(root, "vendor/jassub/jassub.js")) {
       module = new vm.SyntheticModule(["default"], function () { this.setExport("default", SubtitleRendererDouble); }, { context, identifier: filename });
     } else module = new vm.SourceTextModule(fs.readFileSync(filename, "utf8"), { context, identifier: filename });
@@ -149,7 +167,7 @@ function createBrowserDouble({ storageFailure } = {}) {
   function runFrame(now = 1000) {
     const pending = [...frames]; frames.clear(); pending.forEach(([, fn]) => fn(now));
   }
-  return { load, elements, sockets, renderers, requests, storage, document, window, runTimers, runFrame };
+  return { load, elements, sockets, renderers, requests, storage, document, window, runTimers, runFrame, context };
 }
 
 module.exports = { createBrowserDouble };

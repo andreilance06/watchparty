@@ -48,7 +48,10 @@
           id="video"
           playsinline
           preload="auto"
-          engine="hlsjs native"
+          engine="native wasm"
+          wasmurl="/vendor/movi.wasm"
+          controlslist="nocc"
+          smoothwarning
           theme="dark"
           themecolor="#7c5cff"
           objectfit="contain"
@@ -75,12 +78,6 @@
           <h3 id="fileName">No video selected</h3>
         </div>
         <div class="player-local-controls">
-          <label id="captionControl" class="caption-control" for="captionSelect" hidden>
-            <span>Captions</span>
-            <select id="captionSelect" aria-label="Caption track">
-              <option value="-1">Off</option>
-            </select>
-          </label>
           <p id="syncStatus" class="sync-status">Waiting for host</p>
         </div>
       </div>

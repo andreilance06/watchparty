@@ -12,7 +12,11 @@ function createSession() {
     fileName: null,
     mediaPath: null,
     mediaVersion: 0,
+    playbackRevision: 0,
+    streamGeneration: 0,
+    compatibilityStartIndex: 0,
     mediaDuration: 0,
+    mediaInfo: null,
     mediaReady: false,
     mediaProcessing: false,
     captionTracks: [],
@@ -34,11 +38,18 @@ function currentTime(state) {
 }
 
 function sessionState(state, syncMode = "tick") {
+  const compatibilityUrl = state.mediaPath && state.mediaReady
+    ? `${state.basePath || ""}/hls/master.m3u8?v=${state.mediaVersion}&g=${state.streamGeneration || 0}` : null;
   return {
     type: "session-state", hasVideo: Boolean(state.mediaPath && state.mediaReady),
     processing: state.mediaProcessing, mediaVersion: state.mediaVersion,
-    mediaUrl: state.mediaPath && state.mediaReady ? `${state.basePath || ""}/hls/master.m3u8?v=${state.mediaVersion}` : null,
+    mediaUrl: compatibilityUrl,
+    playbackRevision: state.playbackRevision,
+    streamGeneration: state.streamGeneration,
     captions: state.captionTracks,
+    originalUrl: state.mediaPath && state.mediaReady ? `${state.basePath || ""}/media/original?v=${state.mediaVersion}` : null,
+    compatibilityUrl,
+    mediaInfo: state.mediaInfo,
     fileName: state.mediaPath ? state.fileName || path.basename(state.mediaPath) : null,
     duration: state.mediaDuration, encoder: state.selectedEncoder,
     paused: state.playback.paused, time: currentTime(state), playbackRate: state.playback.rate,

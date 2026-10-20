@@ -57,7 +57,7 @@ test("host relay bounds concurrent reads, rejects corrupt frames, and closes pen
   const get = () => fetch(state.mediaPath, { headers: { Range: "bytes=0-15" } }).then((response) => response.arrayBuffer());
   const operations = Promise.allSettled([get(), get(), get()]);
   await new Promise((resolve) => setTimeout(resolve, 30));
-  assert.equal(sent.filter((message) => message.type === "source-read").length, 2);
+  assert.equal(sent.filter((message) => message.type === "source-read").length, 1, "identical reads share one host request");
   const first = sent.find((message) => message.type === "source-read");
   const corrupt = Buffer.alloc(5); corrupt.writeUInt32BE(first.requestId);
   socket.emit("message", corrupt, true);

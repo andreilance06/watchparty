@@ -25,8 +25,12 @@ function createMediaService({ state, config, encoderPromise, broadcast }) {
   function select(sourcePath, fileName = path.basename(sourcePath)) {
     state.mediaPath = sourcePath;
     state.mediaVersion += 1;
+    state.playbackRevision += 1;
+    state.streamGeneration = 0;
+    state.compatibilityStartIndex = 0;
     state.fileName = fileName;
     state.mediaDuration = 0;
+    state.mediaInfo = null;
     state.captionTracks = [];
     state.mediaReady = false;
     state.mediaProcessing = true;
@@ -51,13 +55,15 @@ function createMediaService({ state, config, encoderPromise, broadcast }) {
     if (oldDirectory) removeTempDirectory(oldDirectory);
     const version = state.mediaVersion;
     try {
-      const [encoder, probe] = await Promise.all([encoderPromise, probeMedia(sourcePath, config.ffmpegPath, controller.signal)]);
+      const probe = await probeMedia(sourcePath, config.ffmpegPath, controller.signal, state.fileName);
       if (version !== state.mediaVersion || !state.mediaPath || !state.hlsDirectory) return;
-      state.selectedEncoder = encoder.label;
+      state.selectedEncoder = "Direct playback";
       state.mediaDuration = probe.duration;
+      state.mediaInfo = probe.info;
+      subtitlesService.setFonts(probe.fonts, version);
       const subtitles = [...probe.subtitles, ...externalCaptions].slice(0, 16).map(assignCaption);
       writePlaylists(state, config.segmentSeconds);
-      const extracted = (await Promise.all(subtitles.map((subtitle) => subtitlesService.extract(subtitle, version)))).filter(Boolean);
+      const extracted = subtitles.map((subtitle) => subtitlesService.register(subtitle, version));
       if (version !== state.mediaVersion || !state.mediaPath || !state.hlsDirectory) return;
       const languageCounts = new Map();
       state.captionTracks = extracted.map((track) => {
@@ -77,12 +83,14 @@ function createMediaService({ state, config, encoderPromise, broadcast }) {
 
   function reset() {
     if (state.mediaPath || state.hlsDirectory || state.mediaProcessing) state.mediaVersion += 1;
+    state.playbackRevision += 1;
     state.mediaPath = null;
     state.sourceId = null;
     state.fileName = null;
     state.mediaReady = false;
     state.mediaProcessing = false;
     state.mediaDuration = 0;
+    state.mediaInfo = null;
     state.captionTracks = [];
     state.playback = createPlayback();
     stop();
@@ -138,7 +146,10 @@ function createMediaService({ state, config, encoderPromise, broadcast }) {
     stop,
     ensureSegment: segments.ensure,
     cancelSegmentJobs: segments.cancel,
-    waitForCaption: subtitlesService.wait
+    restartStream: segments.restart,
+    waitForCaption: subtitlesService.wait,
+    waitForFonts: subtitlesService.waitForFonts,
+    fontFiles: subtitlesService.fontFiles
   };
 }
 

@@ -22,7 +22,7 @@ function createApplication(options = {}) {
     await bridge.listen();
     try { return await new Promise((resolve, reject) => {
       server.once("error", reject);
-      server.listen(config.port, "0.0.0.0", () => {
+      server.listen(config.port, config.host, () => {
         server.removeListener("error", reject);
         resolve(server.address());
       });

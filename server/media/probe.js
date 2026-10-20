@@ -1,26 +1,52 @@
 const { execFile } = require("child_process");
+const path = require("node:path");
+
+function parseMediaInfo(output, fileName = "") {
+  const videoLine = output.split(/\r?\n/).find((line) => /Stream #0:.*Video:/.test(line)) || "";
+  const audioLine = output.split(/\r?\n/).find((line) => /Stream #0:.*Audio:/.test(line)) || "";
+  const dimensions = /\b(\d{2,5})x(\d{2,5})\b/.exec(videoLine);
+  const layout = /\b(\d+)\.(\d+)\b/.exec(audioLine);
+  const channels = /\bmono\b/.test(audioLine) ? 1 : /\bstereo\b/.test(audioLine) ? 2 :
+    Number(/(\d+) channels/.exec(audioLine)?.[1]) || (layout ? Number(layout[1]) + Number(layout[2]) : 2);
+  const extension = path.extname(fileName).toLowerCase();
+  const mime = ({ ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
+    ".mkv": "video/x-matroska", ".avi": "video/x-msvideo", ".ts": "video/mp2t" })[extension] || "application/octet-stream";
+  return { mime, videoCodec: /Video:\s*(\w+)/.exec(videoLine)?.[1] || "",
+    audioCodec: /Audio:\s*(\w+)/.exec(audioLine)?.[1] || "", hasAudio: Boolean(audioLine),
+    sampleRate: Number(/(\d+) Hz/.exec(audioLine)?.[1]) || 48000,
+    channels,
+    pixelFormat: /Video:.*?,\s*((?:yuv|yuva|gbr|rgb|nv12|p010)[a-zA-Z0-9]*)/.exec(videoLine)?.[1] || "",
+    width: Number(dimensions?.[1]) || 0, height: Number(dimensions?.[2]) || 0,
+    fps: Number(/([\d.]+) fps/.exec(videoLine)?.[1]) || 0,
+    bitDepth: /(?:10le|12le|p010|p012)/.test(videoLine) ? 10 : 8,
+    hdr: /smpte2084|arib-std-b67/.test(videoLine) };
+}
 
 function parseDuration(stderr) {
   const match = /Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(stderr);
   return match ? Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]) : 0;
 }
 
-function probeMedia(sourcePath, ffmpegPath, signal) {
+function probeMedia(sourcePath, ffmpegPath, signal, fileName) {
   return new Promise((resolve, reject) => {
     execFile(ffmpegPath, ["-hide_banner", ...(sourcePath.startsWith("http:") ? ["-rw_timeout", "30000000"] : []), "-i", sourcePath], { windowsHide: true, maxBuffer: 4 * 1024 * 1024, signal }, (error, _stdout, stderr) => {
       const output = String(stderr || "");
       const duration = parseDuration(output);
       if (!duration) { reject(new Error(error?.message || "Could not determine the video duration.")); return; }
       const subtitles = [];
+      const fonts = [];
       for (const line of output.split(/\r?\n/)) {
+        const attachment = /Stream #0:(\d+).*Attachment:\s*(ttf|otf)/.exec(line);
+        if (attachment && fonts.length < 16) fonts.push({ map: attachment[1], extension: attachment[2] });
         const match = /Stream #0:(\d+)(?:\[[^\]]+\])?(?:\(([^)]+)\))?: Subtitle:/.exec(line);
         if (!match || subtitles.length >= 8) continue;
         const codec = (/Subtitle:\s*([a-zA-Z0-9_]+)/.exec(line)?.[1] || "").toLowerCase();
+        if (!["ass", "ssa", "subrip", "srt", "webvtt", "mov_text", "text"].includes(codec)) continue;
         subtitles.push({ input: sourcePath, map: `0:${match[1]}`, codec, lang: match[2] || "und", label: `Embedded ${subtitles.length + 1}${match[2] ? ` (${match[2]})` : ""}` });
       }
-      resolve({ duration, subtitles });
+      resolve({ duration, subtitles, fonts, info: parseMediaInfo(output, fileName) });
     });
   });
 }
 
-module.exports = { parseDuration, probeMedia };
+module.exports = { parseDuration, parseMediaInfo, probeMedia };

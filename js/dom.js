@@ -2,7 +2,7 @@ export function getElements(root = document) {
   const ids = [
     "video", "videoShell", "videoPlaceholder", "hostControls", "chooseVideoButton",
     "viewerControls", "fullscreenButton", "roleBadge", "connectionStatus", "statusDot",
-    "fileName", "syncStatus", "captionControl", "captionSelect", "viewerCount", "nameForm",
+    "fileName", "syncStatus", "viewerCount", "nameForm",
     "displayNameInput", "participantList", "reactionFeed", "reactLove", "reactLaugh", "reactWow",
     "reactClap", "reactSad", "suggestionForm", "suggestionInput", "voteLeader",
     "chatMessages", "chatForm", "chatInput", "voteOptions", "voteStatus", "themeToggle",

@@ -2,7 +2,7 @@ const { spawn } = require("child_process");
 
 const CPU_ENCODER = {
   name: "libx264", label: "CPU fallback (libx264)", input: [],
-  args: ["-preset", "veryfast", "-crf", "18"]
+  args: ["-preset", "veryfast", "-crf", "20", "-profile:v", "high", "-level:v", "4.2"]
 };
 
 function testEncoder(ffmpegPath, name) {
@@ -28,7 +28,7 @@ async function detectVideoEncoder(ffmpegPath) {
     {
       name: "h264_nvenc", label: "NVIDIA NVENC (h264_nvenc + CUDA decode)",
       input: ["-hwaccel", "cuda", "-hwaccel_output_format", "cuda"],
-      args: ["-preset", "p6", "-tune", "hq", "-rc", "vbr", "-cq", "18", "-b:v", "0", "-spatial_aq", "1", "-temporal_aq", "1"]
+      args: ["-preset", "p3", "-tune", "ll", "-rc", "vbr", "-cq", "20", "-b:v", "0", "-profile:v", "high", "-level:v", "4.2"]
     },
     {
       name: "h264_qsv", label: "Intel Quick Sync (h264_qsv + QSV decode)",

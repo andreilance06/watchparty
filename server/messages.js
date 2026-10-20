@@ -36,6 +36,17 @@ function createMessageHandler({ state, transport, media }) {
     const client = state.clients.get(ws.clientId);
     if (!client) return;
     switch (message.type) {
+      case "compatibility-request": {
+        if (!state.mediaReady || message.mediaVersion !== state.mediaVersion) {
+          send(ws, { type: "error", requestId: message.requestId, message: "The video source changed." });
+          break;
+        }
+        const snapshot = sessionState(state);
+        send(ws, { type: "compatibility-ready", requestId: message.requestId, mediaVersion: state.mediaVersion,
+          playbackRevision: state.playbackRevision, streamGeneration: state.streamGeneration,
+          url: snapshot.compatibilityUrl, time: snapshot.time, paused: snapshot.paused, playbackRate: snapshot.playbackRate });
+        break;
+      }
       case "join":
         {
           const requestedName = sanitizeDisplayName(message.name, client.name);
@@ -112,9 +123,15 @@ function createMessageHandler({ state, transport, media }) {
       case "video-state": {
         const syncMode = String(message.syncMode || "tick");
         if (!state.mediaPath || !state.mediaReady) return;
+        if (message.mediaVersion !== undefined && message.mediaVersion !== state.mediaVersion) return;
+        if (message.commandSequence !== undefined) {
+          if (!Number.isSafeInteger(message.commandSequence) || message.commandSequence <= (client.lastPlaybackCommand || 0)) return;
+          client.lastPlaybackCommand = message.commandSequence;
+        }
+        // A seek establishes a new clock epoch. Old timer ticks must not undo it.
+        if (syncMode !== "seek" && message.playbackRevision !== undefined && message.playbackRevision !== state.playbackRevision) return;
         const viewerPlayPause = client.role === "viewer" && (syncMode === "play" || syncMode === "pause");
         if (client.role !== "host" && !viewerPlayPause) return;
-        const wasPaused = state.playback.paused;
         if (viewerPlayPause) {
           const sharedTime = currentTime(state);
           const reportedTime = Math.min(state.mediaDuration, Math.max(0, Number(message.time) || 0));
@@ -133,10 +150,14 @@ function createMessageHandler({ state, transport, media }) {
             updatedAt: Date.now()
           };
         }
-        if ((!wasPaused && state.playback.paused) || syncMode === "seek") media.cancelSegmentJobs(false);
+        if (syncMode === "seek") {
+          state.playbackRevision += 1;
+          media.restartStream();
+        }
         // Echo viewer play/pause back to its sender so its local shared-state
         // flag is updated too. Host-originated state already matches locally.
-        broadcast(sessionState(state, syncMode), viewerPlayPause ? null : ws.clientId);
+        broadcast({ ...sessionState(state, syncMode), ...(syncMode === "seek" ? { seekSequence: message.commandSequence } : {}) },
+          viewerPlayPause || syncMode === "seek" ? null : ws.clientId);
         break;
       }
     }

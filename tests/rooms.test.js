@@ -165,6 +165,8 @@ test("two browser hosts stream independently and replacing/disconnecting one pre
     assert.equal(states[index].fileName, inputs[index].name);
     assert.doesNotMatch(JSON.stringify(states[index]), /127\.0\.0\.1/);
     const headers = { Cookie: sessions[index].cookie };
+    assert.equal((await fetch(base + states[index].originalUrl, { method: "HEAD", headers })).status, 200);
+    assert.equal((await fetch(base + states[index].originalUrl, { headers: { Cookie: sessions[1 - index].cookie } })).status, 401);
     const master = await fetch(base + states[index].mediaUrl, { headers });
     assert.equal(master.status, 200);
     const segmentUrl = states[index].mediaUrl.replace("master.m3u8", "segment_000000.ts");

@@ -1,0 +1,5 @@
+# Use a resolvable LAN hostname/IP; install Caddy's root CA on every client.
+{$WATCHPARTY_LOCAL_HOST:localhost} {
+    tls internal
+    reverse_proxy 127.0.0.1:3000
+}

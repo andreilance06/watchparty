@@ -1,100 +1,250 @@
-const fs = require("fs");
-const path = require("path");
-const { spawn } = require("child_process");
-const { encoderAttempts } = require("../encoders");
-const { currentTime } = require("../state");
+const fs = require("node:fs");
+const path = require("node:path");
+const http = require("node:http");
+const crypto = require("node:crypto");
+const { pipeline } = require("node:stream/promises");
+const { spawn } = require("node:child_process");
+const { encoderAttempts, CPU_ENCODER } = require("../encoders");
+const { currentTime, sessionState } = require("../state");
+const { segmentSchedule, streamDirectory, writePlaylists } = require("./playlists");
+const { isWatchPartyTempDirectory } = require("./temp-files");
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-function createSegmentService({ state, config, encoderPromise, broadcast }) {
-  const FFMPEG_PATH = config.ffmpegPath;
-  const SEGMENT_SECONDS = config.segmentSeconds;
-  const MAX_SEGMENTS_AHEAD = config.maxSegmentsAhead;
-  const segmentJobs = new Map();
-
-  function cancelSegmentJobs(includeWaiting = true) {
-    for (const [index, job] of segmentJobs) {
-      if (!includeWaiting && !job.started) continue;
-      job.cancelled = true;
-      if (job.process && job.process.exitCode === null) job.process.kill();
-      segmentJobs.delete(index);
-    }
-  }
-  
-  async function waitForSegmentPermission(index, version, job) {
-    while (version === state.mediaVersion && !job.cancelled) {
-      const target = Math.floor(currentTime(state) / SEGMENT_SECONDS);
-      if ((!state.playback.paused && index <= target + MAX_SEGMENTS_AHEAD) || (state.playback.paused && index === target)) return;
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-    throw new Error("The requested stream was replaced.");
-  }
-  
-  function runSegmentAttempt(job, attempt, start, duration, tempPath, version) {
-    return new Promise((resolve, reject) => {
-      const videoFilter = attempt.name === "libx264"
-        ? ["-vf", "scale=w='trunc(iw/2)*2':h='trunc(ih/2)*2':flags=lanczos"]
-        : [];
-      const args = [
-        "-hide_banner", "-loglevel", "warning", "-y", ...attempt.input,
-        "-ss", start.toFixed(3), ...(state.mediaPath.startsWith("http:") ? ["-rw_timeout", "30000000"] : []), "-i", state.mediaPath, "-t", duration.toFixed(3),
-        "-map", "0:v:0", "-map", "0:a:0?", ...videoFilter,
-        "-c:v", attempt.name, ...attempt.args,
-        "-maxrate", "25000k", "-bufsize", "50000k", "-pix_fmt", "yuv420p",
-        "-g", "120", "-keyint_min", "1", "-sc_threshold", "0",
-        "-c:a", "aac", "-b:a", "192k", "-ac", "2",
-        "-output_ts_offset", start.toFixed(3), "-muxdelay", "0", "-muxpreload", "0",
-        "-f", "mpegts", tempPath
-      ];
-      let errorOutput = "";
-      job.process = spawn(FFMPEG_PATH, args, { windowsHide: true });
-      job.process.stderr.on("data", (chunk) => { errorOutput = `${errorOutput}${chunk}`.slice(-4000); });
-      job.process.once("error", reject);
-      job.process.once("exit", (code) => {
-        if (job.cancelled || version !== state.mediaVersion) { reject(new Error("Segment encoding was paused or replaced.")); return; }
-        if (code === 0) resolve(attempt.label);
-        else reject(new Error(errorOutput.trim().split("\n").slice(-2).join(" ") || `${attempt.name} failed.`));
-      });
-    });
-  }
-  
-  async function ensureSegment(index) {
-    const version = state.mediaVersion;
-    const outputPath = path.join(state.hlsDirectory, `segment_${String(index).padStart(6, "0")}.ts`);
-    if (fs.existsSync(outputPath)) return outputPath;
-    if (segmentJobs.has(index)) return segmentJobs.get(index).promise;
-  
-    const job = { process: null, cancelled: false, started: false, promise: null };
-    job.promise = (async () => {
-      await waitForSegmentPermission(index, version, job);
-      if (job.cancelled || version !== state.mediaVersion) throw new Error("Segment encoding was cancelled.");
-      job.started = true;
-      const start = index * SEGMENT_SECONDS;
-      const duration = Math.min(SEGMENT_SECONDS, state.mediaDuration - start);
-      const tempPath = `${outputPath}.tmp`;
-      const encoder = await encoderPromise;
-      let lastError;
-      for (const attempt of encoderAttempts(encoder)) {
-        try {
-          const activeLabel = await runSegmentAttempt(job, attempt, start, duration, tempPath, version);
-          if (job.cancelled || version !== state.mediaVersion) throw new Error("Segment encoding was cancelled.");
-          fs.renameSync(tempPath, outputPath);
-          if (state.selectedEncoder !== activeLabel) {
-            state.selectedEncoder = activeLabel;
-            broadcast({ type: "transcode-info", encoder: activeLabel });
-          }
-          return outputPath;
-        } catch (error) {
-          lastError = error;
-          fs.rmSync(tempPath, { force: true });
-          if (job.cancelled || version !== state.mediaVersion) throw error;
-        }
-      }
-      throw lastError || new Error("Segment encoding failed.");
-    })().finally(() => { if (segmentJobs.get(index) === job) segmentJobs.delete(index); });
-    segmentJobs.set(index, job);
-    return job.promise;
-  }
-
-  return { ensure: ensureSegment, cancel: cancelSegmentJobs };
+function compatibilityFilter(info = {}) {
+  const filters = [];
+  if (info.hdr) filters.push("zscale=t=linear:npl=100", "format=gbrpf32le", "zscale=p=bt709", "tonemap=tonemap=hable:desat=0", "zscale=t=bt709:m=bt709:r=tv");
+  filters.push("scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2", "format=yuv420p");
+  return filters.join(",");
 }
 
-module.exports = { createSegmentService };
+function createSegmentService({ state, config, encoderPromise, broadcast, spawnEncoder = spawn }) {
+  const jobs = new Set(), failedEncoders = new Set();
+  let preferredEncoder = CPU_ENCODER, failureVersion = -1, cancelEpoch = 0, recoveryFailures = 0;
+  encoderPromise.then(encoder => { preferredEncoder = encoder; }).catch(() => {});
+  const filename = (directory, index) => path.join(directory, `segment_${String(index).padStart(6, "0")}.ts`);
+  const valid = job => !job.cancelled && !job.signal?.aborted && job.epoch === cancelEpoch &&
+    job.version === state.mediaVersion && job.generation === (state.streamGeneration || 0);
+
+  function cancel() {
+    cancelEpoch++;
+    for (const job of jobs) {
+      job.cancelled = true;
+      job.process?.kill();
+      job.sink?.close();
+      job.sink?.closeAllConnections();
+    }
+    jobs.clear();
+  }
+
+  function restart(recovery = false) {
+    if (!recovery) recoveryFailures = 0;
+    const directory = streamDirectory(state), parent = state.hlsDirectory;
+    const retired = [...jobs].map(job => job.promise);
+    cancel();
+    state.streamGeneration = (state.streamGeneration || 0) + 1;
+    const { seconds } = segmentSchedule(state, config.segmentSeconds);
+    state.compatibilityStartIndex = Math.max(0, Math.floor(currentTime(state) / seconds) - 1);
+    writePlaylists(state, config.segmentSeconds);
+    // Drain cancelled writes before reclaiming a retired generation. The
+    // bootstrap fragment lives separately and remains available to native HLS.
+    if (isWatchPartyTempDirectory(parent) && path.dirname(directory) === parent && /^run_\d+$/.test(path.basename(directory))) {
+      Promise.allSettled(retired).then(() => fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }, () => {}));
+    }
+  }
+
+  async function permission(index, job) {
+    while (valid(job)) {
+      // Near a boundary, a paused seek needs a little decoded media after its
+      // target to finish. Permit at most one following fragment for that case.
+      const lead = state.playback.paused ? Math.min(job.schedule.seconds, Math.max(0.25, 2 / job.schedule.fps)) : 0;
+      const target = Math.floor((currentTime(state) + lead) / job.schedule.seconds);
+      if (index === 0 || index <= target + (state.playback.paused ? 0 : config.maxSegmentsAhead)) return;
+      await delay(25);
+    }
+    throw new Error("Segment encoding was cancelled.");
+  }
+
+  async function encode(job, encoder) {
+    const token = crypto.randomBytes(24).toString("hex");
+    const partials = new Set(), uploads = new Set();
+    // HTTP supplies portable backpressure, retaining the live AAC codec while
+    // FFmpeg waits for permission to upload the next segment.
+    async function receive(req, res) {
+      let partial, name;
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      req.once("aborted", abort);
+      res.once("close", abort);
+      try {
+        if (!valid(job) || req.method !== "PUT" || !req.url.startsWith(`/${token}/`)) {
+          res.writeHead(403); res.end(); return;
+        }
+        if (req.headers.expect !== "100-continue") throw new Error("Encoder did not request upload permission.");
+        name = req.url.slice(token.length + 2);
+        const match = /^segment_(\d{6})\.ts$/.exec(name);
+        if (!match && name !== "encoder.m3u8") { res.writeHead(404); res.end(); return; }
+        if (match) {
+          const index = Number(match[1]);
+          if (index < job.index || index >= job.end) throw new Error("Invalid encoder output.");
+          req.pause();
+          await permission(index, { ...job, signal: controller.signal });
+          if (!valid(job)) throw new Error("Segment encoding was cancelled.");
+          res.writeContinue();
+          partial = `${filename(job.directory, index)}.partial`;
+          partials.add(partial);
+          await pipeline(req, fs.createWriteStream(partial));
+          if (!valid(job)) throw new Error("Segment encoding was cancelled.");
+          fs.renameSync(partial, filename(job.directory, index));
+          partials.delete(partial);
+          job.published++;
+          if (index === 0) fs.copyFileSync(filename(job.directory, index), path.join(state.hlsDirectory, "bootstrap.ts"));
+          if (!job.announced) {
+            job.announced = true;
+            state.selectedEncoder = encoder.label;
+            broadcast({ type: "transcode-info", encoder: encoder.label });
+          }
+        } else {
+          res.writeContinue();
+          const chunks = []; let length = 0;
+          for await (const chunk of req) {
+            if ((length += chunk.length) > 4 * 1024 * 1024) throw new Error("Encoder playlist is too large.");
+            chunks.push(chunk);
+          }
+          const durations = [...Buffer.concat(chunks).toString().matchAll(/#EXTINF:([\d.]+)/g)].map(m => Number(m[1]));
+          if (durations.slice(0, -1).some(d => Math.abs(d - job.schedule.seconds) > 1 / job.schedule.fps + 0.002)) {
+            throw new Error("Encoder segment timing differs from its playlist.");
+          }
+        }
+        res.writeHead(200); res.end();
+      } catch (error) {
+        error.message = `${name || "encoder output"}: ${error.message}`;
+        if (partial) { fs.rmSync(partial, { force: true }); partials.delete(partial); }
+        if (valid(job)) { job.outputError = error; job.process?.kill(); }
+        if (!res.destroyed) { res.writeHead(503); res.end(); }
+      } finally {
+        req.removeListener("aborted", abort);
+        res.removeListener("close", abort);
+      }
+    }
+    const receiveRequest = (req, res) => {
+      const upload = receive(req, res);
+      uploads.add(upload);
+      upload.finally(() => uploads.delete(upload)).catch(() => {});
+    };
+    const sink = job.sink = http.createServer(receiveRequest);
+    sink.on("checkContinue", receiveRequest);
+    sink.requestTimeout = 0;
+    sink.timeout = 0;
+    sink.keepAliveTimeout = 0;
+    try {
+      await new Promise((resolve, reject) => {
+        sink.once("error", reject);
+        sink.listen(0, "127.0.0.1", resolve);
+      });
+      if (!valid(job)) throw new Error("Segment encoding was cancelled.");
+      // An HTTP userinfo component makes FFmpeg's HTTP writer negotiate
+      // Expect: 100-continue on every upload (auth remains unset). Withhold
+      // that response until permission is granted, before any body is sent.
+      const output = `http://encoder@127.0.0.1:${sink.address().port}/${token}`;
+      const start = job.index * job.schedule.seconds;
+      const duration = Math.min(state.mediaDuration, job.end * job.schedule.seconds) - start;
+      const args = ["-hide_banner", "-loglevel", "warning", "-y", ...encoder.input,
+        "-ss", start.toFixed(9), ...(state.mediaPath.startsWith("http:") ? ["-rw_timeout", "30000000"] : []),
+        "-i", state.mediaPath, "-t", duration.toFixed(9), "-map", "0:v:0", "-map", "0:a:0?",
+        "-vf", `${compatibilityFilter(state.mediaInfo)},fps=${job.schedule.fps}`, "-c:v", encoder.name, ...encoder.args,
+        "-maxrate", "8000k", "-bufsize", "16000k", "-pix_fmt", "yuv420p", "-bf", "0",
+        "-r", String(job.schedule.fps), "-profile:v", "high", "-level:v", "4.1",
+        "-g", String(job.schedule.frames), "-keyint_min", String(job.schedule.frames),
+        "-force_key_frames", `expr:gte(n,n_forced*${job.schedule.frames})`, "-sc_threshold", "0",
+        "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-ar", "48000",
+        "-output_ts_offset", start.toFixed(9), "-muxdelay", "0", "-muxpreload", "0",
+        "-f", "hls", "-hls_time", String(job.schedule.seconds), "-hls_list_size", "3",
+        "-hls_flags", "independent_segments", "-start_number", String(job.index),
+        "-method", "PUT", "-http_persistent", "1",
+        "-hls_segment_filename", `${output}/segment_%06d.ts`, `${output}/encoder.m3u8`];
+      await new Promise((resolve, reject) => {
+        let stderr = "";
+        job.process = spawnEncoder(config.ffmpegPath, args, { windowsHide: true });
+        job.process.stderr.on("data", chunk => { stderr = `${stderr}${chunk}`.slice(-4000); });
+        job.process.once("error", reject);
+        job.process.once("close", code => {
+          job.process = null;
+          if (!valid(job)) reject(new Error("Segment encoding was cancelled."));
+          else if (job.outputError) reject(job.outputError);
+          else if (code === 0) resolve();
+          else reject(new Error(stderr.trim() || `${encoder.name} failed.`));
+        });
+      });
+      // FFmpeg may exit after its final write before Node finishes the atomic
+      // rename. Wait for uploads before declaring the run complete.
+      while (uploads.size) await Promise.all([...uploads]);
+      if (job.outputError) throw job.outputError;
+    } finally {
+      sink.close(); sink.closeAllConnections();
+      while (uploads.size) await Promise.allSettled([...uploads]);
+      for (const file of partials) fs.rmSync(file, { force: true });
+    }
+  }
+
+  function start(bootstrap = false) {
+    const schedule = segmentSchedule(state, config.segmentSeconds);
+    const index = bootstrap ? 0 : state.compatibilityStartIndex || 0;
+    const job = { index, end: bootstrap ? 1 : schedule.count, schedule, version: state.mediaVersion,
+      generation: state.streamGeneration || 0, epoch: cancelEpoch, directory: streamDirectory(state), published: 0 };
+    fs.mkdirSync(job.directory, { recursive: true });
+    jobs.add(job);
+    job.promise = (async () => {
+      if (failureVersion !== job.version) { failedEncoders.clear(); recoveryFailures = 0; failureVersion = job.version; }
+      let lastError;
+      for (const encoder of encoderAttempts(preferredEncoder).filter(e => !e.input.length)) {
+        if (failedEncoders.has(encoder.name)) continue;
+        try { await encode(job, encoder); return; }
+        catch (error) {
+          lastError = error;
+          if (!valid(job)) throw error;
+          if (encoder.name !== "libx264") failedEncoders.add(encoder.name);
+          if (job.published && recoveryFailures++ < 2) {
+            // Never change published bytes or splice encoder timelines.
+            restart(true);
+            broadcast(sessionState(state, "recovery"));
+            throw error;
+          }
+          job.outputError = null;
+        }
+      }
+      if (valid(job)) broadcast({ type: "media-error", message: "Compatibility encoding failed. Check the server encoder or choose another video." });
+      throw lastError || new Error("No compatible encoder is available.");
+    })();
+    job.promise.then(() => { job.done = true; }, error => { job.done = true; job.error = error; });
+    return job;
+  }
+
+  async function ensure(index, signal, generation = state.streamGeneration || 0) {
+    const directory = streamDirectory(state), version = state.mediaVersion;
+    const output = filename(directory, index);
+    if (generation !== (state.streamGeneration || 0) || signal?.aborted) throw new Error("Segment encoding was cancelled.");
+    if (fs.existsSync(output)) return output;
+    const bootstrap = index === 0 && state.compatibilityStartIndex > 0;
+    const saved = path.join(state.hlsDirectory, "bootstrap.ts");
+    if (bootstrap && fs.existsSync(saved)) {
+      fs.mkdirSync(directory, { recursive: true }); fs.copyFileSync(saved, output); return output;
+    }
+    if (index < (state.compatibilityStartIndex || 0) && !bootstrap) throw new Error("Segment belongs to an earlier playback run.");
+    const request = { version, generation, epoch: cancelEpoch, signal, schedule: segmentSchedule(state, config.segmentSeconds) };
+    await permission(index, request);
+    if (!valid(request)) throw new Error("Segment encoding was cancelled.");
+    const job = [...jobs].find(j => valid(j) && j.index <= index && index < j.end) || start(bootstrap);
+    while (!job.done) {
+      if (signal?.aborted || !valid(job) || version !== state.mediaVersion) throw new Error("Segment encoding was cancelled.");
+      if (fs.existsSync(output)) return output;
+      await delay(25);
+    }
+    if (job.error) throw job.error;
+    if (!fs.existsSync(output)) throw new Error("Encoder did not produce the requested segment.");
+    return output;
+  }
+
+  return { ensure, cancel, restart };
+}
+
+module.exports = { createSegmentService, compatibilityFilter };

@@ -55,8 +55,8 @@ export function createFullscreen({ elements, getHostPaused, afterResize }) {
     } catch { syncStatus.textContent = "Fullscreen is not available in this browser"; }
   });
   
-  // Movi normally fullscreens only its custom element. Keep its fullscreen
-  // button, but route the request to the shell that also owns JASSUB's canvas.
+  // Keep the responsive shell and player together, including the mobile
+  // pseudo-fullscreen fallback. The caption surface now lives inside Movi.
   video.addEventListener("movi-fullscreen-request", (event) => {
     event.preventDefault();
     toggleFullscreenSurface().catch(() => {

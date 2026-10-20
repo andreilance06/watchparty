@@ -13,16 +13,6 @@
   background: #050608;
 }
 
-.subtitle-canvas {
-  position: absolute;
-  top: 0;
-  left: 0;
-  z-index: 3;
-  display: block;
-  pointer-events: none;
-  background: transparent;
-}
-
 .viewer-controls {
   position: absolute;
   right: .75rem;
@@ -142,27 +132,6 @@
   align-items: flex-start;
   flex-direction: column;
   gap: .45rem;
-}
-
-.caption-control {
-  display: flex;
-  align-items: center;
-  gap: .45rem;
-  color: var(--muted);
-  font-size: .7rem;
-}
-
-.caption-control[hidden] { display: none; }
-
-.caption-control select {
-  max-width: 13rem;
-  min-height: 1.9rem;
-  padding: .25rem 1.7rem .25rem .5rem;
-  border: 1px solid var(--border);
-  border-radius: .45rem;
-  color: var(--text);
-  background: var(--surface-2);
-  font: inherit;
 }
 
 .host-controls {

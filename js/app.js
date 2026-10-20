@@ -60,6 +60,7 @@ function handleMessage(message) {
     case "reaction": party.receiveReaction(message); break;
     case "session-state": player.applySessionState(message); break;
     case "captions-updated": player.updateCaptions(message); break;
+    case "compatibility-ready": player.applyCompatibility(message); break;
     case "transcode-info": player.updateEncoder(message.encoder); break;
     case "media-error": player.showMediaError(message.message); break;
     case "chat": chat.receive(message); break;

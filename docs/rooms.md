@@ -74,11 +74,29 @@ The server requests `{ type: "source-read", requestId, fileId, offset, length }`
 
 Requests are at most 256 KiB, with four outstanding per room and a bounded queue. Honor browser `bufferedAmount` backpressure. Reads time out after 30 seconds. Unsolicited/expired request IDs cannot fulfill another request; corrupt lengths or invalid attachment close the connection. Source identity is bound to the data socket, so old sockets cannot contribute bytes to a replacement source.
 
-Only server-side FFmpeg receives a capability-protected loopback HTTP URL with ordinary GET, HEAD, and single-range support. Viewers receive authenticated room-prefixed HLS/caption URLs; playlists use relative child URLs. Original bytes are transient, while generated HLS segments and ASS captions are cached on disk. This is an on-demand relay, not a full-file upload; probing/subtitle extraction and playback may nevertheless read a large portion or all of the file.
+Only server-side FFmpeg receives the capability-protected loopback URL. Viewers receive a room-authenticated `/rooms/:roomId/media/original?v=:mediaVersion` URL supporting GET, HEAD, and single byte ranges (206/416), together with compatibility HLS/caption URLs. No host attachment token or internal URL is exposed. Original bytes use a bounded 16 MiB per-source memory cache with shared in-flight reads; generated segments, captions, and fonts are cached on disk. This is an on-demand relay, not a full-file upload; probing/subtitle extraction and playback may nevertheless read a large portion or all of the file.
+
+## Playback selection and compatibility
+
+`session-state` adds `originalUrl`, `compatibilityUrl`, and `mediaInfo` (MIME type, video/audio codecs, audio presence/sample rate/channels, pixel format, dimensions, fps, bit depth, and HDR flag). `mediaUrl` remains the compatibility playlist URL for older clients. Readiness depends on basic metadata, not encoder detection or subtitle conversion. Initial caption descriptors may refer to tracks not yet extracted; GET of a selected caption starts its extraction. Unsupported bitmap tracks are omitted.
+
+Each viewer chooses native original playback, Movi WASM/WebCodecs playback, or compatibility streaming independently. A connected room client can send `{ type: "compatibility-request", requestId, mediaVersion }`. A current generation receives only on that client's socket:
+
+```json
+{ "type": "compatibility-ready", "requestId": "client-request-id", "mediaVersion": 1,
+  "url": "/rooms/room-uuid/hls/master.m3u8?v=1&g=0", "time": 12, "paused": false, "playbackRate": 1,
+  "playbackRevision": 1, "streamGeneration": 0 }
+```
+
+The client applies this shared clock snapshot while replacing its local playback path. No room media version, caption ID, or playback state changes. Stale generations receive an error with the requestId. Private-room HTTP and WebSocket authentication apply to both paths.
+
+Compatibility output uses frame-aligned segments near two seconds, produced by a continuous encoder. AAC is retained across segment boundaries and pause/resume. A private loopback HTTP sink withholds upload permission beyond the shared playhead (plus two segments while playing). Paused playback permits the target, preceding preroll, and a bounded fragment-zero bootstrap; seeks near a segment end may also decode one following fragment. Playlists advertise the shared start position for late joins. Seeks create a new stream generation, cancel old output, and reclaim retired files; clients must use the new compatibility URL. Output is H.264 High/Level 4.1, YUV420/AAC, at most 30 fps and 1920×1080 without upscaling, with HDR-to-SDR tone mapping. Direct playback retains the original source resolution.
+
+`session-state` also includes `playbackRevision` and `streamGeneration`. Playback commands include `mediaVersion`, `playbackRevision`, and an increasing per-connection `commandSequence`. A host seek advances the revision and broadcasts an acknowledgement to all clients, including the host, with `seekSequence` matching the command. Ignore superseded seek acknowledgements; hold host ticks until the latest acknowledgement. Ticks from an older revision are rejected. Legacy commands without these fields remain accepted. Native HLS recovery seeks are local events and must not be sent as host commands. Encoder recovery also advances the compatibility generation, preserving the room clock.
 
 ## Caption changes during playback
 
-`session-state` includes `mediaVersion`. Each caption has a stable `id`, URL, label, language, format, and optional source `fileId`.
+`session-state` includes `mediaVersion`. Each caption has a stable `id`, URL, label, language, format, optional source `fileId`, and a `fonts` array of room-scoped attachment URLs. Captions and fonts are fetched only when needed. A caption failure does not invalidate video readiness.
 
 - Add: `{ type: "captions-add", requestId, sourceId, files: [fileMetadata] }`. Retain the newly declared browser files on the same data connection. One batch accepts up to eight files, with at most 16 active tracks including embedded captions.
 - Remove: `{ type: "caption-remove", requestId, sourceId, trackId }`. Both embedded and added tracks may be removed.
@@ -87,7 +105,7 @@ Only server-side FFmpeg receives a capability-protected loopback HTTP URL with o
 - Preserve each viewer's selection by track ID, including Off. Removing the selected track switches that viewer to Off; additions never override their choice.
 - `source-release-file { sourceId, fileId }` instructs the host to release an unused sidecar `File` object only for that source generation. Source replacement/connection loss releases the whole set.
 
-The existing player provides Choose Video, Add captions, and Remove selected caption. The last action removes the host's currently selected track for the room; ordinary caption selection and Off remain local to each viewer.
+The player provides Choose Video, Add captions, and Remove selected caption. The last action removes the host's currently selected track for the room; caption selection and Off live in Movi's Captions control and remain local to each viewer. JASSUB renders normalized ASS inside Movi's public overlay/renderer interfaces.
 
 ## Lifecycle and configuration
 

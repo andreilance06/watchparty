@@ -20,7 +20,7 @@ test("session clocks are isolated and bounded by the video duration", () => {
   first.mediaPath = "/example/movie.mkv";
   first.mediaReady = true;
   first.mediaVersion = 3;
-  assert.equal(sessionState(first, "join").mediaUrl, "/hls/master.m3u8?v=3");
+  assert.equal(sessionState(first, "join").mediaUrl, "/hls/master.m3u8?v=3&g=0");
   assert.equal(sessionState(second).hasVideo, false);
 });
 
@@ -48,7 +48,7 @@ test("viewer play/pause is shared, while seeking and speed changes are host-only
   const handler = createMessageHandler({
     state,
     transport: { send() {}, broadcast: (...args) => broadcasts.push(args) },
-    media: { cancelSegmentJobs: (...args) => cancellations.push(args) }
+    media: { restartStream: (...args) => cancellations.push(args) }
   });
   handler.handleMessage({ clientId: "viewer" }, { type: "video-state", syncMode: "seek", time: 90, playbackRate: 4 });
   assert.equal(state.playback.time, 10);
@@ -59,7 +59,7 @@ test("viewer play/pause is shared, while seeking and speed changes are host-only
   assert.equal(broadcasts.at(-1)[1], null);
   handler.handleMessage({ clientId: "viewer" }, { type: "video-state", syncMode: "pause", time: 10 });
   assert.equal(state.playback.paused, true);
-  assert.deepEqual(cancellations, [[false]]);
+  assert.deepEqual(cancellations, [], "pause retains the encoder and its AAC state");
   handler.handleMessage({ clientId: "host" }, { type: "video-state", syncMode: "seek", time: 60, playbackRate: 1.5, paused: true });
   assert.equal(state.playback.time, 60);
   assert.equal(state.playback.rate, 1.5);

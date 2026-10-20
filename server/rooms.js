@@ -9,10 +9,17 @@ const scrypt = promisify(crypto.scrypt);
 
 function failure(status, message) { return Object.assign(new Error(message), { status }); }
 
-function validOrigin(req) {
+function requestProtocol(req, config = {}) {
+  if (req.socket.encrypted) return "https:";
+  const address = req.socket.remoteAddress;
+  const trusted = config.trustProxy === "loopback" && ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(address);
+  return trusted && req.headers["x-forwarded-proto"] === "https" ? "https:" : "http:";
+}
+
+function validOrigin(req, config = {}) {
   if (!req.headers.origin) return true;
-  const protocol = req.socket.encrypted ? "https:" : "http:";
-  return req.headers.origin === `${protocol}//${req.headers.host}`;
+  const expected = config.publicOrigin || `${requestProtocol(req, config)}//${req.headers.host}`;
+  return req.headers.origin === expected;
 }
 
 function createRoomRegistry({ config, encoderPromise, bridge }) {
@@ -67,7 +74,7 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
   }
 
   function setCookie(req, res, room, member) {
-    res.setHeader("Set-Cookie", `watchparty-member=${member?.token || ""}; Path=/rooms/${room.id}/; HttpOnly; SameSite=Strict${req.socket.encrypted ? "; Secure" : ""}${member ? "" : "; Max-Age=0"}`);
+    res.setHeader("Set-Cookie", `watchparty-member=${member?.token || ""}; Path=/rooms/${room.id}/; HttpOnly; SameSite=Strict${requestProtocol(req, config) === "https:" ? "; Secure" : ""}${member ? "" : "; Max-Age=0"}`);
   }
 
   function describe(room, member) {
@@ -127,4 +134,4 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
     get: (id) => rooms.get(id), close: () => { closing = true; for (const room of [...rooms.values()]) destroy(room); } };
 }
 
-module.exports = { createRoomRegistry, validOrigin, failure };
+module.exports = { createRoomRegistry, validOrigin, requestProtocol, failure };

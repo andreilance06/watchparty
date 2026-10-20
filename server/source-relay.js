@@ -1,7 +1,7 @@
 const http = require("node:http");
 const crypto = require("node:crypto");
-const { once } = require("node:events");
 const { sessionState } = require("./state");
+const { serveByteSource } = require("./http/ranges");
 
 // Only FFmpeg sees these capability URLs. The browser supplies bytes, never URLs.
 function createSourceBridge(config) {
@@ -12,34 +12,8 @@ function createSourceBridge(config) {
     const entry = !extra && entries.get(token);
     const file = entry?.files.get(fileId);
     if (!file || !["GET", "HEAD"].includes(req.method)) { res.writeHead(404); res.end(); return; }
-    let start = 0, end = file.size - 1;
-    const range = req.headers.range;
-    if (range) {
-      const match = /^bytes=(\d*)-(\d*)$/.exec(range);
-      if (!match || (!match[1] && !match[2])) { res.writeHead(416, { "Content-Range": `bytes */${file.size}` }); res.end(); return; }
-      if (!match[1]) start = Math.max(0, file.size - Number(match[2]));
-      else { start = Number(match[1]); if (match[2]) end = Math.min(end, Number(match[2])); }
-      if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start > end || start >= file.size) {
-        res.writeHead(416, { "Content-Range": `bytes */${file.size}` }); res.end(); return;
-      }
-    }
-    res.writeHead(range ? 206 : 200, {
-      "Content-Type": "application/octet-stream", "Accept-Ranges": "bytes", "Content-Length": end - start + 1,
-      "Cache-Control": "no-store", ...(range ? { "Content-Range": `bytes ${start}-${end}/${file.size}` } : {})
-    });
-    if (req.method === "HEAD") { res.end(); return; }
-    const controller = new AbortController();
-    const abort = () => { if (!res.writableEnded) controller.abort(); };
-    res.once("close", abort);
-    try {
-      for (let offset = start; offset <= end; offset += config.sourceChunkBytes) {
-        const length = Math.min(config.sourceChunkBytes, end - offset + 1);
-        const bytes = await entry.read(fileId, offset, length, controller.signal);
-        if (!res.write(bytes)) await once(res, "drain", { signal: controller.signal });
-      }
-      res.end();
-    } catch { res.destroy(); }
-    finally { res.removeListener("close", abort); controller.abort(); }
+    await serveByteSource(req, res, { size: file.size, chunkBytes: config.sourceChunkBytes,
+      concurrency: config.sourceMaxReads, read: (offset, length, signal) => entry.read(fileId, offset, length, signal) });
   });
   return {
     async listen() {
@@ -80,6 +54,9 @@ function createHostSource({ room, bridge, config }) {
     active = null;
     if (!source) return;
     source.closed = true;
+    source.cache.clear();
+    for (const entry of source.reads.values()) entry.controller.abort();
+    source.reads.clear();
     clearTimeout(source.attachTimer);
     source.bridge?.close();
     for (const job of [...source.pending.values(), ...source.queue]) job.fail(new Error("Source is no longer available."));
@@ -136,6 +113,57 @@ function createHostSource({ room, bridge, config }) {
     return { input: source.bridge.url(file.id), remote: true, fileId: file.id, codec: file.codec, label: file.name, lang: "und" };
   }
 
+  function cachedRead(source, fileId, offset, length, signal) {
+    const file = source.files.get(fileId);
+    const page = Math.floor(offset / config.sourceChunkBytes) * config.sourceChunkBytes;
+    const key = `${fileId}:${page}`;
+    const cached = source.cache.get(key);
+    if (cached) {
+      source.cache.delete(key); source.cache.set(key, cached);
+      return Promise.resolve(cached.subarray(offset - page, offset - page + length));
+    }
+    let entry = source.reads.get(key);
+    if (!entry) {
+      const controller = new AbortController();
+      entry = { controller, users: 0 };
+      entry.promise = read(source, fileId, page, Math.min(config.sourceChunkBytes, file.size - page), controller.signal)
+        .then((bytes) => {
+          if (!source.closed) {
+            source.cache.set(key, bytes);
+            const maxPages = Math.max(1, Math.floor(config.sourceCacheBytes / config.sourceChunkBytes));
+            while (source.cache.size > maxPages) source.cache.delete(source.cache.keys().next().value);
+          }
+          return bytes;
+        }).finally(() => { if (source.reads.get(key) === entry) source.reads.delete(key); });
+      source.reads.set(key, entry);
+    }
+    entry.users++;
+    return new Promise((resolve, reject) => {
+      let finished = false;
+      const finish = (error, bytes) => {
+        if (finished) return;
+        finished = true; signal.removeEventListener("abort", abort);
+        if (--entry.users === 0) entry.controller.abort();
+        if (error) reject(error); else resolve(bytes.subarray(offset - page, offset - page + length));
+      };
+      const abort = () => finish(new Error("Read cancelled."));
+      entry.promise.then((bytes) => finish(null, bytes), (error) => finish(error));
+      signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted) abort();
+    });
+  }
+
+  async function serveOriginal(req, res, url) {
+    const source = active;
+    if (!source || source.closed || !room.state.mediaReady || Number(url.searchParams.get("v")) !== room.state.mediaVersion) {
+      res.writeHead(404); res.end("Source is no longer available"); return;
+    }
+    const file = source.files.get(source.videoId);
+    await serveByteSource(req, res, { size: file.size, type: room.state.mediaInfo?.mime,
+      chunkBytes: config.sourceChunkBytes, concurrency: config.sourceMaxReads,
+      read: (offset, length, signal) => cachedRead(source, file.id, offset, length, signal) });
+  }
+
   function attach(ws, member) {
     let source;
     const timer = setTimeout(() => ws.close(1008, "Source attachment timed out"), 5000);
@@ -154,7 +182,7 @@ function createHostSource({ room, bridge, config }) {
           source.token = null;
           clearTimeout(timer);
           clearTimeout(source.attachTimer);
-          source.bridge = bridge.register({ files: source.files, read: (...args) => read(source, ...args) });
+          source.bridge = bridge.register({ files: source.files, read: (...args) => cachedRead(source, ...args) });
           const video = source.files.get(source.videoId);
           room.media.select(source.bridge.url(video.id), video.name);
           room.state.sourceId = source.id;
@@ -204,7 +232,8 @@ function createHostSource({ room, bridge, config }) {
         reset();
         room.media.reset();
         active = { id: crypto.randomUUID(), token: crypto.randomBytes(32).toString("base64url"), owner: ws,
-          files, videoId: video.id, captionIds: captions.map((file) => file.id), pending: new Map(), queue: [], nextRequest: 1, closed: false };
+          files, videoId: video.id, captionIds: captions.map((file) => file.id), pending: new Map(), queue: [],
+          cache: new Map(), reads: new Map(), nextRequest: 1, closed: false };
         const source = active;
         source.attachTimer = setTimeout(() => unavailable(source), config.sourceReadTimeoutMs);
         reply({ type: "source-registered", sourceId: source.id, token: source.token, relayPath: `${room.state.basePath}/source` });
@@ -236,7 +265,7 @@ function createHostSource({ room, bridge, config }) {
     return true;
   }
 
-  return { attach, handleControl, reset };
+  return { attach, handleControl, reset, serveOriginal };
 }
 
 module.exports = { createSourceBridge, createHostSource, validateFile };

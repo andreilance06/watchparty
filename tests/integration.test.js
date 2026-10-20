@@ -138,27 +138,27 @@ test("captions remain separate, seeks encode the requested segment, and segments
 
   host.send({ type: "video-state", syncMode: "seek", paused: true, time: 8, playbackRate: 1 });
   await viewer.next("session-state", (message) => message.syncMode === "seek");
-  const middleUrl = `${base}/hls/segment_000002.ts?v=1`;
+  const middleUrl = `${base}/hls/segment_000004.ts?v=1`;
   const middle = await fetch(middleUrl);
   assert.equal(middle.status, 200);
   const middleBytes = Buffer.from(await middle.arrayBuffer());
   assert.deepEqual(Buffer.from(await (await fetch(middleUrl)).arrayBuffer()), middleBytes);
-  const segments = fs.readdirSync(app.state.hlsDirectory).filter((file) => file.endsWith(".ts"));
-  assert.deepEqual(segments.sort(), ["segment_000000.ts", "segment_000002.ts"]);
+  const segments = fs.readdirSync(path.join(app.state.hlsDirectory, `run_${app.state.streamGeneration}`)).filter((file) => file.endsWith(".ts"));
+  assert.deepEqual(segments.sort(), ["segment_000003.ts", "segment_000004.ts"]);
   assert.equal((await fetch(`${base}/hls/master.m3u8?v=999`)).status, 404);
   assert.ok(relay.reads.length > 0);
   assert.equal(ready.fileName, "movie.mkv");
 
   // Caption edits do not replace the stream, playback clock, or cached segments.
   const beforeVersion = app.state.mediaVersion;
-  const beforeUrl = viewerState.mediaUrl;
+  const beforeUrl = require('../server/state').sessionState(app.state).mediaUrl;
   const added = relay.declare({ name: "extra.srt", bytes: fs.readFileSync(path.join(__dirname, "fixtures/captions.srt")) });
   host.send({ type: "captions-add", sourceId: relay.sourceId, files: [added] });
   const updated = await viewer.next("captions-updated", (message) => message.captions.length === 3);
   assert.equal(app.state.mediaVersion, beforeVersion);
   assert.equal(app.state.playback.time, 8);
   assert.equal(app.state.playback.paused, true);
-  assert.equal(`/hls/master.m3u8?v=${updated.mediaVersion}`, beforeUrl);
+  assert.equal(require('../server/state').sessionState(app.state).mediaUrl, beforeUrl);
   assert.equal((await fetch(base + updated.captions[2].url)).status, 200);
   const removedTrack = updated.captions[0];
   host.send({ type: "caption-remove", sourceId: relay.sourceId, trackId: removedTrack.id });

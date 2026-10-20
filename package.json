@@ -2,7 +2,7 @@
   "name": "watchparty",
   "version": "1.0.0",
   "private": true,
-  "description": "A synchronized HLS watch party with Movi Player and chat.",
+  "description": "A synchronized watch party with direct playback, compatibility streaming, Movi Player and chat.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

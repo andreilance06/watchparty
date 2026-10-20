@@ -1,0 +1,13 @@
+# Set WATCHPARTY_DOMAIN to your public DNS hostname before starting Caddy.
+{$WATCHPARTY_DOMAIN} {
+    # Public deployment uses admitted private rooms. Keep the legacy public
+    # default-room media/control endpoints off the Internet.
+    @defaultMedia path /ws /source /hls/* /media/*
+    respond @defaultMedia 404
+    @defaultSocket {
+        path /
+        header Upgrade websocket
+    }
+    respond @defaultSocket 404
+    reverse_proxy 127.0.0.1:3000
+}

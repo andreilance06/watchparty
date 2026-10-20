@@ -9,7 +9,7 @@ function createRealtimeServer(server, { registry, config }) {
   const wss = new WebSocket.Server({ noServer: true, maxPayload: config.sourceChunkBytes + 4, perMessageDeflate: false });
   server.on("upgrade", (req, socket, head) => {
     const reject = (status) => socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
-    if (!validOrigin(req)) { reject("403 Forbidden"); return; }
+    if (!validOrigin(req, config)) { reject("403 Forbidden"); return; }
     let pathname;
     try { pathname = new URL(req.url, "http://localhost").pathname; } catch { reject("400 Bad Request"); return; }
     const match = /^\/rooms\/([a-f0-9-]+)\/(ws|source)$/.exec(pathname);

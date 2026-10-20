@@ -1,24 +1,34 @@
-const fs = require("fs");
-const path = require("path");
+const fs = require("node:fs");
+const path = require("node:path");
 
-function writePlaylists(state, SEGMENT_SECONDS) {
-  const count = Math.ceil(state.mediaDuration / SEGMENT_SECONDS);
-  const video = [
-    "#EXTM3U", "#EXT-X-VERSION:3", `#EXT-X-TARGETDURATION:${SEGMENT_SECONDS}`,
-    "#EXT-X-PLAYLIST-TYPE:VOD", "#EXT-X-MEDIA-SEQUENCE:0", "#EXT-X-INDEPENDENT-SEGMENTS"
-  ];
-  for (let index = 0; index < count; index += 1) {
-    const duration = Math.min(SEGMENT_SECONDS, state.mediaDuration - index * SEGMENT_SECONDS);
-    if (index) video.push("#EXT-X-DISCONTINUITY");
-    video.push(`#EXTINF:${duration.toFixed(3)},`, `segment_${String(index).padStart(6, "0")}.ts?v=${state.mediaVersion}`);
+// Use whole output frames, including at fractional frame rates.
+function segmentSchedule(state, targetSeconds = 2) {
+  const fps = Math.min(30, state.mediaInfo?.fps || 30);
+  const frames = Math.max(1, Math.round(targetSeconds * fps));
+  const seconds = frames / fps;
+  return { fps, frames, seconds, count: Math.ceil(state.mediaDuration / seconds) };
+}
+
+function streamDirectory(state) {
+  return path.join(state.hlsDirectory, `run_${state.streamGeneration || 0}`);
+}
+
+function writePlaylists(state, targetSeconds) {
+  const { seconds, count } = segmentSchedule(state, targetSeconds);
+  const query = `v=${state.mediaVersion}&g=${state.streamGeneration || 0}`;
+  const video = ["#EXTM3U", "#EXT-X-VERSION:6", `#EXT-X-TARGETDURATION:${Math.ceil(seconds)}`,
+    "#EXT-X-PLAYLIST-TYPE:VOD", "#EXT-X-MEDIA-SEQUENCE:0", "#EXT-X-INDEPENDENT-SEGMENTS"];
+  for (let index = 0; index < count; index++) {
+    // The prefix is only for native bootstrap. The playable suffix is one run.
+    if (index && index === state.compatibilityStartIndex) video.push("#EXT-X-DISCONTINUITY");
+    video.push(`#EXTINF:${Math.min(seconds, state.mediaDuration - index * seconds).toFixed(9)},`,
+      `segment_${String(index).padStart(6, "0")}.ts?${query}`);
   }
   video.push("#EXT-X-ENDLIST", "");
   fs.writeFileSync(path.join(state.hlsDirectory, "video.m3u8"), video.join("\n"));
-
-  const master = ["#EXTM3U", "#EXT-X-VERSION:3"];
-  master.push("#EXT-X-STREAM-INF:BANDWIDTH=25200000,CODECS=\"avc1.640028,mp4a.40.2\"");
-  master.push(`video.m3u8?v=${state.mediaVersion}`, "");
-  fs.writeFileSync(path.join(state.hlsDirectory, "master.m3u8"), master.join("\n"));
+  const codec = `avc1.640029${state.mediaInfo?.hasAudio === false ? "" : ",mp4a.40.2"}`;
+  fs.writeFileSync(path.join(state.hlsDirectory, "master.m3u8"),
+    `#EXTM3U\n#EXT-X-VERSION:6\n#EXT-X-STREAM-INF:BANDWIDTH=8500000,CODECS="${codec}"\nvideo.m3u8?${query}\n`);
 }
 
-module.exports = { writePlaylists };
+module.exports = { writePlaylists, segmentSchedule, streamDirectory };

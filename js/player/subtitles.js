@@ -1,191 +1,142 @@
-import JASSUB from "../../vendor/jassub/jassub.js";
+import { createJassubAdapter } from "./jassub-adapter.js";
+
+const CONTROL_ID = "watchparty-captions";
+const MENU_ID = "watchparty-caption-menu";
+const CAPTIONS_ICON = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="2.5" y="4.5" width="19" height="15" rx="3"/><path d="M10 9.5a2.5 2.5 0 1 0 0 5m8-5a2.5 2.5 0 1 0 0 5"/></svg>';
 
 export function createSubtitles({ elements, report }) {
-  const { video, videoShell, videoPlaceholder, captionControl, captionSelect, syncStatus } = elements;
-  let subtitleCanvas = null;
-  let captionTracks = [];
-  let captionSignature = "";
-  let subtitleRenderer = null;
-  let subtitleGeneration = 0;
-  let lastSubtitleFrame = "";
-  let lastSubtitleRenderAt = 0;
-  let subtitleLayoutSignature = "";
-  let subtitleResizeFrame = 0;
-  let subtitleResizeTimer = 0;
+  const { video, removeCaptionButton } = elements;
+  let tracks = [], selected = null, adapter, sourceKey = "", initialized = false, canLoad = false;
+  const contents = new Map();
+  const panel = document.createElement("div");
+  Object.assign(panel.style, { padding: "14px", background: "#171722", color: "white", borderRadius: "10px",
+    font: "14px system-ui", maxHeight: "60vh", overflow: "auto", minWidth: "200px" });
 
-  function replaceSubtitleCanvas() {
-    const next = document.createElement("canvas");
-    next.id = "subtitleCanvas";
-    next.className = "subtitle-canvas";
-    next.setAttribute("aria-hidden", "true");
-    Object.assign(next.style, {
-      position: "absolute",
-      top: "0",
-      left: "0",
-      zIndex: "5",
-      width: "100%",
-      height: "100%",
-      display: "block",
-      pointerEvents: "none",
-      background: "transparent"
-    });
-    if (subtitleCanvas?.isConnected) subtitleCanvas.replaceWith(next);
-    else videoShell.insertBefore(next, videoPlaceholder);
-    subtitleCanvas = next;
-    subtitleLayoutSignature = "";
-    return next;
-  }
-  
-  function updateSubtitleCanvasLayout() {
-    if (!subtitleCanvas) return false;
-    const surfaceWidth = video.clientWidth || videoShell.clientWidth || 16;
-    const surfaceHeight = video.clientHeight || videoShell.clientHeight || 9;
-    const mediaWidth = video.videoWidth || surfaceWidth;
-    const mediaHeight = video.videoHeight || surfaceHeight;
-    const mediaRatio = mediaWidth / mediaHeight;
-    const surfaceRatio = surfaceWidth / surfaceHeight;
-    let width = surfaceWidth;
-    let height = surfaceHeight;
-    let left = 0;
-    let top = 0;
-    if (surfaceRatio > mediaRatio) {
-      width = surfaceHeight * mediaRatio;
-      left = (surfaceWidth - width) / 2;
-    } else {
-      height = surfaceWidth / mediaRatio;
-      top = (surfaceHeight - height) / 2;
+  function loadContent(url) {
+    if (!contents.has(url)) {
+      const pending = fetch(url).then((response) => {
+        if (!response.ok) throw new Error("This caption track could not be extracted.");
+        return response.text();
+      }).catch((error) => { contents.delete(url); throw error; });
+      contents.set(url, pending);
     }
-    const layout = [left, top, width, height].map(Math.round);
-    const signature = layout.join("x");
-    if (signature === subtitleLayoutSignature) return false;
-    subtitleLayoutSignature = signature;
-    subtitleCanvas.style.left = `${layout[0]}px`;
-    subtitleCanvas.style.top = `${layout[1]}px`;
-    subtitleCanvas.style.width = `${layout[2]}px`;
-    subtitleCanvas.style.height = `${layout[3]}px`;
-    return true;
+    return contents.get(url);
   }
-  
-  async function selectCaption(index) {
-    const generation = ++subtitleGeneration;
-    const previous = subtitleRenderer;
-    subtitleRenderer = null;
-    lastSubtitleFrame = "";
-    lastSubtitleRenderAt = 0;
-    if (previous) {
-      try { await previous.destroy(); } catch {}
+  function connect() {
+    if (!adapter || adapter.destroyed) {
+      adapter = createJassubAdapter({ video, report, loadContent });
+      video.showOverlay?.({ id: "watchparty-subtitles", content: adapter.surface, placement: "fill", interactive: false });
+      // Keep a dedicated public overlay. Movi clears its built-in subtitle
+      // container on seek/Off, which would detach a custom renderer's canvas.
+      const mount = adapter.mount;
+      const container = adapter.surface.parentNode || adapter.surface;
+      adapter.mount = () => mount(container);
+      adapter.mount();
+      // Native/HLS wrappers expose the element method but don't implement it.
+      // Their public overlay uses the adapter's clock bridge instead.
+      if (typeof video.player?.setSubtitleRenderer === "function") video.setSubtitleRenderer(adapter);
     }
-    if (generation !== subtitleGeneration) return;
-    const canvas = replaceSubtitleCanvas();
-    if (index < 0 || !captionTracks[index]) return;
-    const track = captionTracks[index];
-    try {
-      const renderer = new JASSUB({
-        canvas,
-        subUrl: track.url,
-        workerUrl: "/vendor/jassub/worker.js",
-        wasmUrl: "/vendor/jassub/jassub-worker.wasm",
-        modernWasmUrl: "/vendor/jassub/jassub-worker-modern.wasm",
-        queryFonts: "local",
-        prescaleHeightLimit: 1080
-      });
-      await renderer.ready;
-      if (generation !== subtitleGeneration) { await renderer.destroy(); return; }
-      subtitleRenderer = renderer;
-      updateSubtitleCanvasLayout();
-      syncStatus.textContent = `Captions: ${track.label}`;
-    } catch (error) {
-      if (generation !== subtitleGeneration) return;
-      captionSelect.value = "-1";
-      report(`Could not render captions: ${error.message || error}`);
+    return adapter;
+  }
+  function updateUi() {
+    if (removeCaptionButton) removeCaptionButton.disabled = !selected;
+    const items = [{ id: "off", label: "Off" }, ...tracks.map((track) => ({ id: track.id, label: track.label || "Captions" }))];
+    if (!tracks.length) { closePanel(); video.removeControl?.(CONTROL_ID); return; }
+    video.addControl?.({ id: CONTROL_ID, label: "Captions", title: "Captions", icon: CAPTIONS_ICON,
+      placement: "both", side: "right", before: "settings",
+      items, value: selected || "off", onPick: (id) => select(id === "off" ? null : id), onSelect: togglePanel });
+    if (video.isOverlayVisible?.(MENU_ID)) renderPanel();
+  }
+  function removeDismissListeners() {
+    document.removeEventListener("click", dismissOutside, true);
+    document.removeEventListener("touchend", dismissOutside, true);
+    document.removeEventListener("keydown", dismissEscape, true);
+  }
+  function closePanel() {
+    video.hideOverlay?.(MENU_ID);
+    removeDismissListeners();
+  }
+  function dismissOutside(event) {
+    const path = event.composedPath();
+    if (path.includes(panel) || path.some(node => node.dataset?.customControl === CONTROL_ID)) return;
+    closePanel();
+    const control = path.some(node => node.matches?.('button, input, select, textarea, a, [role="button"], [role="slider"], [contenteditable="true"]'));
+    if (path.includes(video) && !control) {
+      // Consume picture taps used to dismiss the panel, before Movi can turn
+      // the same gesture into a play/pause action (including touch gestures).
+      event.preventDefault();
+      event.stopPropagation();
     }
   }
-  
-  function selectedId() {
-    const track = captionTracks[Number(captionSelect.value)];
-    return track?.id || track?.url || null;
+  function dismissEscape(event) {
+    if (event.key !== "Escape") return;
+    closePanel();
+    event.preventDefault();
+    event.stopPropagation();
+    video.focus();
   }
-
-  function updateRemoveButton() {
-    if (elements.removeCaptionButton) elements.removeCaptionButton.disabled = !selectedId();
+  function renderPanel() {
+    panel.replaceChildren();
+    for (const track of [null, ...tracks]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = `${(track?.id || null) === selected ? "✓ " : ""}${track?.label || "Off"}`;
+      Object.assign(button.style, { display: "block", width: "100%", textAlign: "left", padding: "9px", background: "transparent",
+        color: "inherit", border: "0", cursor: "pointer", font: "inherit" });
+      button.addEventListener("click", () => { select(track?.id || null); video.focus(); });
+      panel.appendChild(button);
+    }
   }
-
-  function setCaptionTracks(tracks, { reset = false } = {}) {
-    const next = Array.isArray(tracks) ? tracks : [];
-    const previousId = selectedId();
-    const nextSignature = JSON.stringify(next.map((track) => [track.id, track.url, track.label, track.lang, track.format]));
-    if (nextSignature === captionSignature) return;
-    captionSignature = nextSignature;
-    captionTracks = next;
-    captionSelect.replaceChildren();
-    const off = document.createElement("option");
-    off.value = "-1"; off.textContent = "Off"; captionSelect.appendChild(off);
-    next.forEach((track, index) => {
-      const option = document.createElement("option");
-      option.value = String(index);
-      option.textContent = `${track.label || `Track ${index + 1}`} (${String(track.originalFormat || track.format || "ASS").toUpperCase()})`;
-      captionSelect.appendChild(option);
-    });
-    captionControl.hidden = next.length === 0;
-    captionSelect.disabled = next.length === 0;
-    const index = reset ? (next.length ? 0 : -1) : previousId == null ? -1 : next.findIndex((track) => (track.id || track.url) === previousId);
-    captionSelect.value = String(index);
-    updateRemoveButton();
-    if (reset || previousId !== selectedId()) selectCaption(index);
+  function togglePanel() {
+    if (video.isOverlayVisible?.(MENU_ID)) { closePanel(); return; }
+    renderPanel();
+    video.showOverlay?.({ id: MENU_ID, content: panel, placement: "bottom-end", dismissOn: ["escape"], onDismiss: removeDismissListeners });
+    document.addEventListener("click", dismissOutside, true);
+    document.addEventListener("touchend", dismissOutside, { capture: true, passive: false });
+    document.addEventListener("keydown", dismissEscape, true);
   }
-
-  function refreshSubtitlesAfterResize() {
-    subtitleLayoutSignature = "";
-    lastSubtitleFrame = "";
-    cancelAnimationFrame(subtitleResizeFrame);
-    clearTimeout(subtitleResizeTimer);
-    subtitleResizeFrame = requestAnimationFrame(() => {
-      updateSubtitleCanvasLayout();
-      lastSubtitleFrame = "";
-    });
-    subtitleResizeTimer = setTimeout(() => {
-      updateSubtitleCanvasLayout();
-      lastSubtitleFrame = "";
-      subtitleRenderer?.resize(true).catch(() => {});
-    }, 180);
+  function select(id) {
+    closePanel();
+    selected = tracks.some((track) => track.id === id) ? id : null;
+    connect().select(tracks.find((track) => track.id === selected) || null);
+    updateUi();
   }
-  
-  const subtitleLayoutObserver = globalThis.ResizeObserver
-    ? new ResizeObserver(() => refreshSubtitlesAfterResize())
-    : null;
-  subtitleLayoutObserver?.observe(videoShell);
-  if (!subtitleLayoutObserver) window.addEventListener("resize", refreshSubtitlesAfterResize);
-  video.addEventListener("loadedmetadata", refreshSubtitlesAfterResize);
-  window.addEventListener("orientationchange", refreshSubtitlesAfterResize);
-
-  captionSelect.addEventListener("change", () => { updateRemoveButton(); selectCaption(Number(captionSelect.value)); });
-
-  function renderSubtitleFrame(now) {
-    requestAnimationFrame(renderSubtitleFrame);
-    const renderer = subtitleRenderer;
-    if (!renderer || document.hidden || renderer.busy) return;
-  
-    const paused = Boolean(video.paused);
-    const targetFps = window.innerWidth < 900 ? 20 : 30;
-    const frameInterval = 1000 / targetFps;
-    if (!paused && now - lastSubtitleRenderAt < frameInterval) return;
-  
-    const width = video.videoWidth || videoShell.clientWidth || 16;
-    const height = video.videoHeight || videoShell.clientHeight || 9;
-    const mediaTime = Number(video.currentTime) || 0;
-    const timeKey = paused ? mediaTime.toFixed(3) : Math.floor(mediaTime * targetFps);
-    const signature = `${width}x${height}@${timeKey}`;
-    if (signature === lastSubtitleFrame) return;
-  
-    lastSubtitleFrame = signature;
-    lastSubtitleRenderAt = now;
-    renderer.manualRender({
-      expectedDisplayTime: now, width, height, mediaTime
-    }, paused).catch(() => {
-      if (subtitleRenderer === renderer) lastSubtitleFrame = "";
-    });
+  function setTracks(next, { reset = false, key } = {}) {
+    if (reset || key != null && key !== sourceKey) closePanel();
+    if (key != null && key !== sourceKey) {
+      sourceKey = key; contents.clear(); initialized = false; canLoad = false;
+      adapter?.destroy(); adapter = null;
+    }
+    tracks = (Array.isArray(next) ? next : []).map((track) => ({ ...track, id: track.id || track.url }));
+    const previous = selected;
+    if (reset) initialized = false;
+    if (!initialized && tracks.length) { selected = tracks[0].id; initialized = true; }
+    else if (!tracks.some((track) => track.id === selected)) selected = null;
+    if (previous !== selected || reset) {
+      if (!selected) adapter?.select(null);
+      else if (canLoad) connect().select(tracks.find((track) => track.id === selected));
+    }
+    updateUi();
   }
-  requestAnimationFrame(renderSubtitleFrame);
-
-  return { setTracks: setCaptionTracks, selectedId, refreshLayout: refreshSubtitlesAfterResize };
+  function ready() {
+    video.player?.selectSubtitleTrack?.(null)?.catch?.(() => {});
+    if (canLoad) {
+      const old = adapter;
+      connect();
+      if (adapter !== old && selected) adapter.select(tracks.find((track) => track.id === selected));
+    }
+    updateUi();
+  }
+  video.addEventListener("loadedmetadata", ready);
+  video.addEventListener("trackschange", ready);
+  function pictureReady() {
+    canLoad = true;
+    if (selected) connect().select(tracks.find((track) => track.id === selected));
+    ready();
+  }
+  video.addEventListener("loadeddata", pictureReady);
+  video.addEventListener("watchparty-picture-ready", pictureReady);
+  video.addEventListener("subtitledelaychange", () => adapter?.setDelay(video.subtitleDelay || 0));
+  video.addEventListener("seeked", () => adapter?.clear());
+  return { setTracks, selectedId: () => selected, select, refreshLayout: () => adapter?.refresh() };
 }
