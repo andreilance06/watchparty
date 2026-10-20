@@ -68,6 +68,12 @@ Only the current connected host may register or edit files. A new registration i
 
 Open a separate WebSocket at `relayPath` and send `{ type: "source-attach", sourceId, token }`. Private rooms also require their membership cookie. Attachment must begin within 5 seconds of opening this socket and within 30 seconds of registration. Successful attachment receives `source-attached`, then the existing processing/ready `session-state` messages arrive on the control socket.
 
+## Comment reactions
+
+Broadcast `chat` messages include a server-generated UUID `commentId`. Send `{ type: "comment-reaction", commentId, emoji }` with one emoji grapheme to set or replace your reaction, or `emoji: null` to remove it. The server broadcasts `{ type: "comment-reaction", commentId, reactions: [{ clientId, name, emoji }] }` to everyone in the room, including the sender. This array replaces the comment's previous reaction state. Each participant has at most one reaction per comment.
+
+Only the latest 500 room comments remain valid reaction targets; unknown, evicted, or foreign-room IDs and invalid emoji receive an error. Reaction snapshots may be sent on reconnect; ignore IDs not present in the local chat. Comments are not replayed or persisted.
+
 ## Range relay
 
 The server requests `{ type: "source-read", requestId, fileId, offset, length }` on the data connection. Read only `file.slice(offset, offset + length)`. Reply with one binary WebSocket message: a **four-byte unsigned big-endian request ID**, followed by exactly `length` raw bytes. A failed local read replies `{ type: "source-error", requestId }`.

@@ -30,6 +30,10 @@ class ElementDouble extends EventTargetDouble {
     this.hidden = false; this.disabled = false; this.parentNode = null;
     this.clientWidth = 640; this.clientHeight = 360; this.connected = false;
     const classes = new Set();
+    Object.defineProperty(this, "className", {
+      get: () => [...classes].join(" "),
+      set: value => { classes.clear(); String(value).split(/\s+/).filter(Boolean).forEach(name => classes.add(name)); }
+    });
     this.classList = {
       contains: (name) => classes.has(name),
       add: (name) => classes.add(name), remove: (name) => classes.delete(name),
@@ -59,6 +63,10 @@ class ElementDouble extends EventTargetDouble {
     return [];
   }
   querySelector(selector) { return this.specialChildren?.[selector] || null; }
+  getBoundingClientRect() {
+    return { top: 0, left: 0, right: this.clientWidth, bottom: this.clientHeight, width: this.clientWidth, height: this.clientHeight };
+  }
+  setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; }
   focus() { this.focused = true; }
   click() { this.dispatch("click"); }
 }
@@ -86,7 +94,7 @@ function createBrowserDouble({ storageFailure, rendererReady } = {}) {
   video.play = async () => { video.paused = false; video.dispatch("play"); };
   video.pause = () => { if (!video.paused) { video.paused = true; video.dispatch("pause"); } };
   video.applyFullscreenUiState = (active) => { video.fullscreenUiActive = active; };
-  const window = new EventTargetDouble(); window.innerWidth = 1000;
+  const window = new EventTargetDouble(); window.innerWidth = 1000; window.innerHeight = 800;
   const sockets = [], renderers = [], requests = [], timers = new Map(), frames = new Map(), storage = new Map();
   video.customControls = new Map(); video.overlays = new Map();
   video.addControl = (spec) => video.customControls.set(spec.id, spec);

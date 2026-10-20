@@ -95,7 +95,14 @@ test("room creators retain hosting and all features stay inside their room", asy
   assert.equal(host.role.role, "host");
   assert.equal(otherHost.role.name, "Alex", "Names are unique per room, not globally");
   host.send({ type: "chat", message: "Private to room one" });
-  assert.equal((await viewer.next("chat")).message, "Private to room one");
+  const comment = await viewer.next("chat");
+  assert.equal(comment.message, "Private to room one");
+  otherHost.send({ type: "comment-reaction", commentId: comment.commentId, emoji: "❤️" });
+  assert.match((await otherHost.next("error")).message, /comment reaction/);
+  viewer.send({ type: "comment-reaction", commentId: comment.commentId, emoji: "❤️" });
+  assert.deepEqual((await host.next("comment-reaction")).reactions, [
+    { clientId: viewer.role.clientId, name: "Alex", emoji: "❤️" }
+  ]);
   host.send({ type: "reaction", emoji: "👏" });
   await viewer.next("reaction");
   host.send({ type: "suggest-video", title: "Only One" });
@@ -104,7 +111,7 @@ test("room creators retain hosting and all features stay inside their room", asy
   await host.next("party-state", (message) => message.suggestions[0]?.votes === 1);
   otherHost.send({ type: "chat", message: "Room two marker" });
   await otherHost.next("chat");
-  assert.equal(otherHost.messages.some((message) => message.type === "reaction" || message.message === "Private to room one"), false);
+  assert.equal(otherHost.messages.some((message) => message.type === "reaction" || message.type === "comment-reaction" || message.message === "Private to room one"), false);
   assert.equal(app.rooms.get(two.body.room.id).state.videoSuggestions.length, 0);
   assert.equal(app.rooms.get(two.body.room.id).state.videoVotes.size, 0);
   viewer.send({ type: "source-register", video: { id: "video", name: "movie.mkv", size: 100 } });

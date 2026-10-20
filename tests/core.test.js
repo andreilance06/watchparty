@@ -153,3 +153,39 @@ test("temporary cleanup targets only WatchParty HLS directories", () => {
   assert.equal(isWatchPartyTempDirectory(path.join(os.tmpdir(), "other-app")), false);
   assert.equal(isWatchPartyTempDirectory(path.join(os.tmpdir(), "watchparty-hls-test")), true);
 });
+
+test("comment reactions validate emoji, replace selections, and expire with retained comments", () => {
+  const state = createSession();
+  const ws = { clientId: "host" };
+  state.clients.set("host", { ws, role: "host", name: "Host" });
+  const sent = [], broadcasts = [];
+  const handler = createMessageHandler({ state, media: {}, transport: {
+    send: (_, message) => sent.push(message), broadcast: message => broadcasts.push(message)
+  } });
+  handler.handleMessage(ws, { type: "chat", message: "First" });
+  const commentId = broadcasts.at(-1).commentId;
+  const react = (emoji, id = commentId) => handler.handleMessage(ws, { type: "comment-reaction", commentId: id, emoji });
+  for (const emoji of [undefined, {}, "", "hello", "❤️😂", "a❤️", "1"]) {
+    react(emoji);
+    assert.equal(sent.at(-1).type, "error");
+    assert.equal(state.commentReactions.get(commentId).size, 0);
+  }
+  for (const emoji of ["❤️", "👍🏽", "👨‍👩‍👧‍👦", "🇵🇭", "1️⃣"]) {
+    react(emoji);
+    assert.deepEqual(broadcasts.at(-1).reactions, [{ clientId: "host", name: "Host", emoji }]);
+    assert.equal(state.commentReactions.get(commentId).size, 1);
+  }
+  react(null);
+  assert.deepEqual(broadcasts.at(-1).reactions, []);
+  for (const id of [null, "invalid", "00000000-0000-4000-8000-000000000000"]) {
+    react("❤️", id);
+    assert.equal(sent.at(-1).type, "error");
+  }
+  for (let i = 0; i < 500; i++) handler.handleMessage(ws, { type: "chat", message: `Comment ${i}` });
+  assert.equal(state.commentReactions.size, 500);
+  assert.equal(state.commentReactions.has(commentId), false);
+  react("❤️");
+  assert.equal(sent.at(-1).type, "error");
+  react("❤️", broadcasts.at(-1).commentId);
+  assert.equal(broadcasts.at(-1).type, "comment-reaction");
+});

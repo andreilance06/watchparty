@@ -40,6 +40,12 @@ Native/HLS engines use the adapter's clock bridge because Movi's embedded render
 
 Viewers may pause/resume the shared room; seeking, speed, and video selection remain host-only. Volume, aspect ratio, captions, and fullscreen are local. Browsers may require a tap to enable sound or playback.
 
+## Chat and reactions
+
+Use the emoji button in chat to insert at the cursor, or the plus button below a comment to react. Selecting your current reaction removes it; selecting another replaces it. Reaction counts and names are shared within the room. The picker closes on selection, Escape, an outside click, or another click on its button.
+
+Chat retains the latest 500 comments per browser; the server retains reaction targets for the latest 500 room comments. There is no chat history replay or persistence. Floating reactions are capped at 30 and respect reduced-motion preferences. Next-video suggestions and voting remain shared within the room.
+
 ## Performance and verification
 
 The performance targets are a first playable frame within **3 seconds** of selection and an uncached seek within **2 seconds**, with capable hardware, indexed files, and enough network throughput. These are measured targets, not guarantees for arbitrary codecs, slow uploads, long GOPs, unindexed containers, or CPU-only 4K conversion.

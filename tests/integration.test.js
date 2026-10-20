@@ -27,7 +27,7 @@ test("HTTP modules, chat names, host-only file sharing, and host handoff work to
   const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
   assert.equal(new Set(ids).size, ids.length, "HTML IDs must be unique");
   assert.equal((html.match(/class="vote-panel"/g) || []).length, 1);
-  const modules = ["js/app.js", "js/chat.js", "js/party.js", "js/voting.js", "js/theme.js", "js/connection.js", "js/player/controller.js", "js/player/sync.js", "js/player/fullscreen.js", "js/player/subtitles.js"];
+  const modules = ["js/app.js", "js/chat.js", "js/emoji-picker.js", "js/party.js", "js/voting.js", "js/theme.js", "js/connection.js", "js/player/controller.js", "js/player/sync.js", "js/player/fullscreen.js", "js/player/subtitles.js"];
   for (const file of modules) {
     const response = await fetch(`${base}/${file}`);
     assert.equal(response.status, 200, file);
@@ -45,7 +45,37 @@ test("HTTP modules, chat names, host-only file sharing, and host handoff work to
   host.send({ type: "set-name", name: "bOb" });
   assert.equal((await host.next("name-rejected")).name, "Alex");
   viewer.send({ type: "chat", message: "Hi from Bob" });
-  assert.equal((await host.next("chat")).name, "Bob");
+  const comment = await host.next("chat");
+  assert.equal(comment.name, "Bob");
+  assert.match(comment.commentId, /^[\da-f-]{36}$/i);
+  viewer.send({ type: "comment-reaction", commentId: comment.commentId, emoji: "❤️" });
+  assert.deepEqual(await host.next("comment-reaction"), {
+    type: "comment-reaction", commentId: comment.commentId,
+    reactions: [{ clientId: viewer.role.clientId, name: "Bob", emoji: "❤️" }]
+  });
+  assert.deepEqual((await viewer.next("comment-reaction")).reactions, [
+    { clientId: viewer.role.clientId, name: "Bob", emoji: "❤️" }
+  ]);
+  viewer.send({ type: "comment-reaction", commentId: comment.commentId, emoji: "unsupported" });
+  assert.equal((await viewer.next("error")).message, "That comment reaction is not supported.");
+  viewer.send({ type: "comment-reaction", commentId: comment.commentId, emoji: "🫶" });
+  assert.deepEqual((await host.next("comment-reaction")).reactions, [
+    { clientId: viewer.role.clientId, name: "Bob", emoji: "🫶" }
+  ]);
+  assert.deepEqual((await viewer.next("comment-reaction")).reactions, [
+    { clientId: viewer.role.clientId, name: "Bob", emoji: "🫶" }
+  ]);
+  host.send({ type: "comment-reaction", commentId: comment.commentId, emoji: "❤️" });
+  assert.deepEqual((await viewer.next("comment-reaction")).reactions, [
+    { clientId: viewer.role.clientId, name: "Bob", emoji: "🫶" },
+    { clientId: host.role.clientId, name: "Alex", emoji: "❤️" }
+  ]);
+  host.send({ type: "comment-reaction", commentId: comment.commentId, emoji: null });
+  assert.deepEqual((await viewer.next("comment-reaction")).reactions, [
+    { clientId: viewer.role.clientId, name: "Bob", emoji: "🫶" }
+  ]);
+  viewer.send({ type: "reaction", emoji: "🥰" });
+  assert.equal((await host.next("reaction")).emoji, "🥰");
   viewer.send({ type: "reaction", emoji: "😂" });
   assert.equal((await host.next("reaction")).emoji, "😂");
   viewer.send({ type: "reaction", emoji: "unsupported" });

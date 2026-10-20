@@ -3,6 +3,99 @@ const assert = require("node:assert/strict");
 const { createBrowserDouble } = require("./helpers/browser");
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
+test("emoji picker dismisses, restores focus, tracks its anchor, and preserves insertion selection", async () => {
+  const browser = createBrowserDouble();
+  await browser.load("js/app.js");
+  const el = id => browser.elements.get(id);
+  const trigger = el("chatEmojiButton"), picker = el("emojiPicker");
+  trigger.getBoundingClientRect = () => ({ top: 700, bottom: 730, right: 990 });
+  picker.getBoundingClientRect = () => ({ width: 300, height: 300 });
+  trigger.dispatch("click");
+  assert.equal(picker.parentNode, browser.document.body);
+  assert.equal(picker.style.left, "690px");
+  assert.equal(picker.style.top, "392px");
+  browser.window.innerWidth = 360;
+  browser.window.dispatch("resize");
+  assert.equal(picker.style.left, "52px");
+  browser.document.dispatch("pointerdown", { composedPath: () => [picker] });
+  assert.equal(picker.hidden, false);
+  browser.document.dispatch("pointerdown", { composedPath: () => [trigger] });
+  trigger.dispatch("click");
+  assert.equal(picker.hidden, true);
+  trigger.dispatch("click");
+  trigger.focused = false;
+  browser.document.dispatch("keydown", { key: "Escape", stopPropagation() {} });
+  assert.equal(picker.hidden, true);
+  assert.equal(trigger.focused, true);
+  assert.equal(trigger.getAttribute("aria-expanded"), "false");
+  trigger.dispatch("click");
+  browser.document.dispatch("pointerdown", { composedPath: () => [el("chatInput")] });
+  assert.equal(picker.hidden, true);
+  assert.equal(browser.document.listeners.get("pointerdown").length, 0);
+  el("chatInput").value = "Hello world";
+  el("chatInput").setSelectionRange(6, 11);
+  trigger.dispatch("click");
+  el("chatInput").setSelectionRange(0, 0);
+  const choice = el("emojiPickerGrid").children[0];
+  choice.dispatch("click");
+  assert.equal(el("chatInput").value, `Hello ${choice.textContent}`);
+  assert.equal(el("chatInput").selectionStart, 6 + choice.textContent.length);
+  assert.equal(picker.hidden, true);
+});
+
+test("chat retention closes evicted pickers and server snapshots replace optimistic reactions", async () => {
+  const browser = createBrowserDouble();
+  await browser.load("js/app.js");
+  const el = id => browser.elements.get(id), socket = browser.sockets[0];
+  socket.open();
+  socket.receive({ type: "role", role: "host", clientId: "host", name: "Host" });
+  const add = i => socket.receive({ type: "chat", commentId: `comment-${i}`, name: "Host", message: String(i) });
+  add(0);
+  const first = el("chatMessages").children.at(-1), bar = first.children[2];
+  socket.receive({ type: "comment-reaction", commentId: "comment-0", reactions: [
+    { clientId: "host", name: "Host", emoji: "❤️" }, { clientId: "viewer", name: "Viewer", emoji: "❤️" }
+  ] });
+  const heart = bar.children[0];
+  assert.equal(heart.children[1].textContent, "2");
+  assert.match(heart.getAttribute("aria-label"), /your reaction/);
+  heart.dispatch("click");
+  assert.equal(socket.sent.at(-1).emoji, null);
+  socket.receive({ type: "comment-reaction", commentId: "comment-0", reactions: [] });
+  assert.equal(bar.children.length, 2);
+  bar.children[0].dispatch("click");
+  assert.equal(el("emojiPicker").hidden, false);
+  for (let i = 1; i <= 500; i++) add(i);
+  assert.equal(first.parentNode, null);
+  assert.equal(el("emojiPicker").hidden, true);
+  assert.equal(el("chatMessages").children.filter(child => child.classList.contains("chat-message")).length, 500);
+  socket.receive({ type: "comment-reaction", commentId: "comment-0", reactions: [{ clientId: "host", emoji: "❤️" }] });
+  assert.equal(bar.children.length, 2, "Evicted comment snapshots are ignored");
+});
+
+test("reaction bursts stay bounded, clean up, and respect reduced motion", async () => {
+  const browser = createBrowserDouble();
+  let motionChange;
+  const motion = { matches: false, addEventListener: (_, fn) => { motionChange = fn; } };
+  browser.window.matchMedia = () => motion;
+  const { createParty } = await browser.load("js/party.js");
+  const party = createParty({ elements: Object.fromEntries(browser.elements), send() {} });
+  const bursts = browser.elements.get("floatingReactions"), feed = browser.elements.get("reactionFeed");
+  for (let i = 0; i < 50; i++) party.receiveReaction({ emoji: "❤️", name: "Host" });
+  assert.equal(bursts.children.length, 30);
+  assert.equal(feed.children.length, 5);
+  bursts.children[0].dispatch("animationend");
+  assert.equal(bursts.children.length, 29);
+  browser.runTimers(2700);
+  assert.equal(bursts.children.length, 0);
+  party.receiveReaction({ emoji: "❤️", name: "Host" });
+  motion.matches = true;
+  motionChange();
+  assert.equal(bursts.children.length, 0);
+  party.receiveReaction({ emoji: "❤️", name: "Host" });
+  assert.equal(bursts.children.length, 0);
+  assert.equal(feed.children.at(-1).textContent, "❤️ Host");
+});
+
 test("frontend modules initialize and route playback, captions, fullscreen, chat, and picker actions", async () => {
   const browser = createBrowserDouble();
   await browser.load("js/app.js");
@@ -62,6 +155,81 @@ test("frontend modules initialize and route playback, captions, fullscreen, chat
   assert.deepEqual(socket.sent.at(-1), { type: "reaction", emoji: "❤️" });
   socket.receive({ type: "reaction", clientId: "host-id", name: "Host", emoji: "❤️" });
   assert.equal(el("reactionFeed").children[0].textContent, "❤️ Host");
+  assert.equal(el("floatingReactions").children.length, 6);
+  assert.ok(el("floatingReactions").children.every((reaction) => reaction.textContent === "❤️"));
+  socket.receive({
+    type: "chat", commentId: "12345678-1234-4321-8123-123456789abc",
+    clientId: "host-id", name: "Host", message: "A comment", time: "12:00"
+  });
+  const comment = el("chatMessages").children.at(-1);
+  const reactionBar = comment.children[2];
+  assert.equal(reactionBar.children.length, 2);
+  assert.equal(reactionBar.children.some((button) => button.textContent.includes("0")), false);
+  const commentPickerButton = reactionBar.children.find((button) => button.classList.contains("comment-reaction-more"));
+  commentPickerButton.dispatch("click");
+  const heartEmojiChoice = el("emojiPickerGrid").children.find((button) => button.textContent === "❤️");
+  assert.ok(heartEmojiChoice);
+  heartEmojiChoice.dispatch("click");
+  assert.deepEqual(socket.sent.at(-1), {
+    type: "comment-reaction", commentId: "12345678-1234-4321-8123-123456789abc", emoji: "❤️"
+  });
+  let heartReaction = reactionBar.children.find((button) => button.children[0]?.textContent === "❤️");
+  assert.ok(heartReaction);
+  assert.equal(heartReaction.children[1].textContent, "1");
+  assert.equal(heartReaction.getAttribute("aria-pressed"), "true");
+  socket.receive({
+    type: "comment-reaction", commentId: "12345678-1234-4321-8123-123456789abc",
+    reactions: [{ clientId: "host-id", name: "Host", emoji: "❤️" }]
+  });
+  assert.equal(heartReaction.getAttribute("aria-pressed"), "true");
+  assert.equal(heartReaction.children[1].textContent, "1");
+  assert.equal(reactionBar.children.at(-1).classList.contains("pop"), true);
+  heartReaction.dispatch("click");
+  assert.equal(socket.sent.at(-1).emoji, null);
+  assert.equal(reactionBar.children.includes(heartReaction), false);
+  assert.equal(reactionBar.children.length, 2);
+  socket.receive({
+    type: "comment-reaction", commentId: "12345678-1234-4321-8123-123456789abc",
+    reactions: []
+  });
+  assert.equal(heartReaction.getAttribute("aria-pressed"), "false");
+  assert.equal(reactionBar.children.includes(heartReaction), false);
+  assert.equal(reactionBar.children.length, 2);
+  el("chatInput").value = "Hello";
+  el("chatInput").selectionStart = 5;
+  el("chatInput").selectionEnd = 5;
+  el("chatEmojiButton").dispatch("click");
+  assert.equal(el("emojiPicker").hidden, false);
+  const smiley = el("emojiPickerGrid").children.find((button) => button.textContent === "🥰");
+  assert.ok(smiley);
+  smiley.dispatch("click");
+  assert.equal(el("chatInput").value, "Hello🥰");
+  assert.equal(el("emojiPicker").hidden, true);
+  commentPickerButton.dispatch("click");
+  assert.equal(el("emojiPicker").hidden, false);
+  const customEmoji = el("emojiPickerGrid").children.find((button) => button.textContent === "🫶");
+  assert.ok(customEmoji);
+  customEmoji.dispatch("click");
+  assert.deepEqual(socket.sent.at(-1), {
+    type: "comment-reaction", commentId: "12345678-1234-4321-8123-123456789abc", emoji: "🫶"
+  });
+  socket.receive({
+    type: "comment-reaction", commentId: "12345678-1234-4321-8123-123456789abc",
+    reactions: [{ clientId: "host-id", name: "Host", emoji: "🫶" }]
+  });
+  const customReaction = comment.children[2].children.find((button) => button.children[0]?.textContent === "🫶");
+  assert.ok(customReaction);
+  assert.equal(customReaction.children[1].textContent, "1");
+  socket.receive({
+    type: "comment-reaction", commentId: "12345678-1234-4321-8123-123456789abc",
+    reactions: [
+      { clientId: "host-id", name: "Host", emoji: "🫶" },
+      { clientId: "viewer-id", name: "Viewer", emoji: "🫶" }
+    ]
+  });
+  assert.equal(customReaction.children[1].textContent, "2");
+  assert.equal(customReaction.title, "🫶: Host, Viewer");
+  assert.match(customReaction.getAttribute("aria-label"), /Host, Viewer/);
   el("suggestionInput").value = "  The   Next Movie ";
   el("suggestionForm").dispatch("submit");
   assert.deepEqual(socket.sent.at(-1), { type: "suggest-video", title: "The Next Movie" });
