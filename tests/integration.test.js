@@ -39,6 +39,19 @@ test("HTTP modules, chat names, host-only file sharing, and host handoff work to
     assert.match(response.headers.get("content-type"), /text\/css/);
     assert.equal(await response.text(), "");
   }
+  const logo = await fetch(`${base}/assets/images/logo/logo_watchparty.png`);
+  assert.equal(logo.status, 200);
+  assert.equal(logo.headers.get("content-type"), "image/png");
+  assert.deepEqual((await logo.arrayBuffer()).slice(0, 8), Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]).buffer);
+  for (const [file, contentType] of [
+    ["Altone%20Trial-Regular.ttf", "font/ttf"],
+    ["Altone%20Trial-Bold.ttf", "font/ttf"]
+  ]) {
+    const font = await fetch(`${base}/assets/fonts/altone/${file}`);
+    assert.equal(font.status, 200, file);
+    assert.equal(font.headers.get("content-type"), contentType);
+    assert.ok((await font.arrayBuffer()).byteLength > 0, file);
+  }
   viewer.send({ type: "set-name", name: "Bob" });
   assert.equal((await viewer.next("name-updated")).name, "Bob");
   assert.ok((await host.next("presence", (message) => message.participants.some((participant) => participant.name === "Bob"))).count === 2);

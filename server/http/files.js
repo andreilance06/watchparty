@@ -23,7 +23,12 @@ function serveFile(req, res, filePath) {
 }
 
 function serveStatic(req, res, url, publicDirectory) {
-  const requested = url.pathname === "/" ? "index.html" : url.pathname.slice(1);
+  let requested;
+  try {
+    requested = url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname.slice(1));
+  } catch {
+    res.writeHead(400); res.end("Invalid path"); return;
+  }
   const filePath = path.resolve(publicDirectory, requested);
   if (!filePath.startsWith(`${publicDirectory}${path.sep}`) && filePath !== path.join(publicDirectory, "index.html")) {
     res.writeHead(403); res.end("Forbidden"); return;

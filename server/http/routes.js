@@ -119,7 +119,7 @@ function createRequestHandler({ registry, config, movieSearch }) {
       }
       if (match || url.pathname.startsWith("/api/")) throw failure(404, "Endpoint not found.");
       if (!["GET", "HEAD"].includes(req.method)) { res.setHeader("Allow", "GET, HEAD, POST"); throw failure(405, "Method not allowed."); }
-      if (url.pathname !== "/" && !/^\/(?:index\.html|(?:js|css|vendor)\/)/.test(url.pathname)) throw failure(404, "Not found.");
+      if (url.pathname !== "/" && !/^\/(?:index\.html|(?:js|css|vendor|images|assets)\/)/.test(url.pathname)) throw failure(404, "Not found.");
       serveStatic(req, res, url, config.publicDirectory);
     } catch (error) {
       if (!res.headersSent && !res.destroyed) json(res, error.status || 500, { error: error.status ? error.message : "Server error." });

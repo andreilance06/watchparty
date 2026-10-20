@@ -51,7 +51,7 @@
   }
 
   .brand { gap: .55rem; }
-  .brand-mark { width: 2rem; height: 2rem; }
+  .brand-mark { width: 2.35rem; height: 2.35rem; }
   .brand p { font-size: .64rem; }
   .connection { padding-top: .25rem; font-size: .65rem; }
   .header-actions { gap: .55rem; }
