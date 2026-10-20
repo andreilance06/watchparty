@@ -192,6 +192,13 @@
   border: 1px solid var(--border);
   border-radius: .65rem;
   background: var(--surface-2);
+  transition: border-color .18s ease, background .18s ease, transform .18s ease;
+}
+
+@media (hover: hover) {
+  .vote-option:hover {
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  }
 }
 
 .vote-poster {

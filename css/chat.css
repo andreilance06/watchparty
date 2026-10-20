@@ -216,6 +216,7 @@
 
 .chat-message.self {
   align-self: flex-end;
+  width: fit-content;
   border-color: rgba(124, 92, 255, .3);
   background: rgba(124, 92, 255, .12);
 }

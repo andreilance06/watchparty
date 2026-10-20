@@ -20,6 +20,14 @@
   border-radius: 1rem;
   overflow: hidden;
   box-shadow: var(--shadow);
+  transition: border-color .2s ease, box-shadow .2s ease;
+}
+
+@media (hover: hover) {
+  .player-panel:hover,
+  .chat-panel:hover {
+    border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  }
 }
 
 .player-panel {
@@ -32,8 +40,9 @@
   align-items: center;
   justify-content: space-between;
   gap: .75rem;
-  padding: .9rem 1rem;
+  padding: 1rem 1.1rem;
   border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
 }
 
 .eyebrow {
@@ -47,6 +56,7 @@
 .panel-heading h2,
 .chat-heading h2 {
   font-size: 1rem;
+  letter-spacing: -.015em;
 }
 
 .role-badge,
