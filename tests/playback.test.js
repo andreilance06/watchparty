@@ -45,6 +45,39 @@ test('canplay after a host seek does not reapply the previous room timestamp',as
  assert.equal(video.currentTime,40);assert.equal(socket.sent.at(-1).time,40);
 });
 
+test('host encoder status survives playing and paused seeks and subsequent transport updates', async () => {
+ const b=createBrowserDouble();const {createPlaybackSync}=await b.load('js/player/sync.js');
+ const video=b.elements.get('video'),syncStatus=b.elements.get('syncStatus');video.readyState=4;
+ const state={role:'host',mediaVersion:1,activeMediaUrl:'/stream',activeEncoder:'h264_nvenc hardware encode'};
+ const sync=createPlaybackSync({elements:{video,syncStatus},state,send:()=>{}});
+ const updates=[
+  {syncMode:'source',paused:true,time:0},
+  {syncMode:'seek',paused:false,time:40},
+  {syncMode:'pause',paused:true,time:40},
+  {syncMode:'seek',paused:true,time:80},
+  {syncMode:'play',paused:false,time:80},
+  {syncMode:'pause',paused:true,time:80}
+ ];
+ for(const update of updates){
+  sync.apply({mediaVersion:1,...update},update.syncMode==='source');await flush();
+  assert.equal(syncStatus.textContent,'You control playback • h264_nvenc hardware encode',`${update.syncMode}, paused=${update.paused}`);
+ }
+});
+
+test('playback status preserves host labels without an encoder and existing viewer messages', async () => {
+ const b=createBrowserDouble();const {createPlaybackSync}=await b.load('js/player/sync.js');
+ const video=b.elements.get('video'),syncStatus=b.elements.get('syncStatus');video.readyState=4;
+ const state={role:'host',mediaVersion:1,activeMediaUrl:'/stream',activeEncoder:''};
+ const sync=createPlaybackSync({elements:{video,syncStatus},state,send:()=>{}});
+ for(const role of ['host','viewer']){
+  state.role=role;state.activeEncoder=role==='host'?'':'h264_nvenc hardware encode';
+  for(const paused of [true,false]){
+   sync.apply({mediaVersion:1,syncMode:'seek',paused,time:40},false);await flush();
+   assert.equal(syncStatus.textContent,role==='host'?'You control playback':paused?'Paused':'Synchronized with host');
+  }
+ }
+});
+
 test('caption preparation starts before the first picture, media events reuse it, and Off releases the rendering loop',async()=>{
  const b=createBrowserDouble();const {createSubtitles}=await b.load('js/player/subtitles.js');
  const video=b.elements.get('video');

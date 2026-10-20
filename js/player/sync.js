@@ -79,12 +79,12 @@ export function createPlaybackSync({ elements, state: session, send }) {
       appliedRate = targetRate;
       if (Math.abs(video.playbackRate - targetRate) > 0.005) video.playbackRate = targetRate;
       if (Number.isFinite(state.time) && Math.abs(difference) > threshold) video.currentTime = state.time;
+      const hostStatus = `You control playback${session.activeEncoder ? ` • ${session.activeEncoder}` : ""}`;
       if (state.paused) {
         if (!active.paused) video.pause();
-        syncStatus.textContent = session.role === "host"
-          ? `You control playback${session.activeEncoder ? ` • ${session.activeEncoder}` : ""}` : "Paused";
+        syncStatus.textContent = session.role === "host" ? hostStatus : "Paused";
       } else {
-        syncStatus.textContent = session.role === "host" ? "You control playback" : "Synchronized with host";
+        syncStatus.textContent = session.role === "host" ? hostStatus : "Synchronized with host";
         if (active.paused) video.play().catch(() => { syncStatus.textContent = "Tap fullscreen once if your browser blocks playback"; });
       }
       setting = false;
