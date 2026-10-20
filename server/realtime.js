@@ -37,7 +37,8 @@ function createRealtimeServer(server, { registry, config, movieSearch }) {
     const previous = state.clients.get(ws.clientId);
     state.clients.set(ws.clientId, {
       ws, role: state.hostId === ws.clientId || !state.hostId ? "host" : "viewer",
-      name: previous?.name || member?.name || availableGuestName(ws.clientId)
+      name: previous?.name || member?.name || availableGuestName(ws.clientId),
+      hasMemberName: Boolean(member?.name)
     });
     if (previous) {
       if (state.hostId === ws.clientId) {

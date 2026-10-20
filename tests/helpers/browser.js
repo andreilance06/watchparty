@@ -71,7 +71,7 @@ class ElementDouble extends EventTargetDouble {
   click() { this.dispatch("click"); }
 }
 
-function createBrowserDouble({ storageFailure, rendererReady } = {}) {
+function createBrowserDouble({ storageFailure, rendererReady, autoContinuePublic = true } = {}) {
   const elements = new Map();
   const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
   for (const match of html.matchAll(/id="([^"]+)"/g)) {
@@ -126,7 +126,7 @@ function createBrowserDouble({ storageFailure, rendererReady } = {}) {
     console, document, window, URL, URLSearchParams, Blob, Uint8Array, DataView, performance,
     Event: class { constructor(type) { this.type = type; } },
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options?.detail; } },
-    WebSocket: WebSocketDouble, location: { protocol: "http:", host: "localhost:3000", search: "" },
+    WebSocket: WebSocketDouble, location: { protocol: "http:", host: "localhost:3000", search: "", href: undefined },
     crypto: { randomUUID: () => require("node:crypto").randomUUID() },
     localStorage: {
       getItem: (key) => {
@@ -165,7 +165,9 @@ function createBrowserDouble({ storageFailure, rendererReady } = {}) {
   async function load(relative) {
     const module = getModule(path.join(root, relative));
     await module.link((specifier, referring) => getModule(path.resolve(path.dirname(referring.identifier), specifier)));
-    await module.evaluate(); return module.namespace;
+    await module.evaluate();
+    if (relative === "js/app.js" && autoContinuePublic) elements.get("continuePublicRoom").dispatch("click");
+    return module.namespace;
   }
   function runTimers(delay) {
     for (const [id, timer] of [...timers]) if (timer.delay === delay) {

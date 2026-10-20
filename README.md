@@ -15,7 +15,7 @@ Open `http://localhost:3000`. The server installs FFmpeg automatically; hosts an
 
 The host selects one video and optional SRT, VTT, ASS, or SSA files. Keep that browser page open: its File objects answer bounded byte requests, with no initial full-file upload. Refreshing, disconnecting, or mobile suspension interrupts hosting. The next host selects a file from their own device.
 
-The root page is a public default room. Private-room Create/Join screens are still deferred; use the [room API](docs/rooms.md), then navigate to the returned `watchPath`.
+The root page opens a Create Room / Join Room dialog, with an optional initial display name. Creating a room shows its access code and invitation link; leaving the name blank generates a guest name. Visitors can continue to the public default room, reopen room selection there, or leave/switch from a private room using the header control. See the [room API](docs/rooms.md).
 
 Next-video suggestions search Wikipedia through its keyless MediaWiki API. Choose the matching article to include its thumbnail and attribution link in the shared vote; if search is unavailable or there is no match, you can still suggest the title without a poster. Suggesting automatically casts your vote, and only the person who first suggested a title can remove it. Posters are served by Wikimedia, so image availability and licensing depend on each source image. See the [movie search API](docs/rooms.md#movie-suggestions-and-posters).
 

@@ -55,6 +55,8 @@
   .brand p { font-size: .64rem; }
   .connection { padding-top: .25rem; font-size: .65rem; }
   .header-actions { gap: .55rem; }
+  .room-action-button { padding-inline: .5rem; font-size: .62rem; }
+  .room-action-status { max-width: 8rem; font-size: .65rem; }
   .theme-toggle { width: 2.2rem; height: 2.2rem; }
 
   .watch-layout { gap: .6rem; padding: .6rem; }

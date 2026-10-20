@@ -105,7 +105,7 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
       }
       case "join":
         {
-          const requestedName = sanitizeDisplayName(message.name, client.name);
+          const requestedName = client.hasMemberName ? client.name : sanitizeDisplayName(message.name, client.name);
           const nameRejected = isDisplayNameTaken(requestedName, ws.clientId);
           if (!nameRejected) client.name = requestedName;
           if (!state.hostId) { state.hostId = ws.clientId; client.role = "host"; }

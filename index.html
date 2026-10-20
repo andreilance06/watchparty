@@ -26,6 +26,8 @@
           <path d="M20.4 15.2A8.5 8.5 0 0 1 8.8 3.6 8.5 8.5 0 1 0 20.4 15.2Z"/>
         </svg>
       </button>
+      <button id="roomActionButton" class="room-action-button" type="button">Choose or create a room</button>
+      <span id="roomActionStatus" class="room-action-status" role="status" aria-live="polite"></span>
       <div class="connection" aria-live="polite">
         <span id="statusDot" class="status-dot"></span>
         <span id="connectionStatus">Connecting...</span>
@@ -34,6 +36,66 @@
   </header>
 
   <div id="floatingReactions" class="floating-reactions" aria-hidden="true"></div>
+
+  <section id="roomEntry" class="room-entry" role="dialog" aria-modal="true" aria-labelledby="roomEntryTitle">
+    <div class="room-entry-card">
+      <p class="eyebrow">WATCH TOGETHER</p>
+      <h2 id="roomEntryTitle">Welcome to WatchParty</h2>
+      <p class="room-entry-intro">Create a room for your group or join one with an access code.</p>
+      <div id="roomEntryChoices" class="room-entry-choices">
+        <button id="createRoomChoice" type="button">Create a room</button>
+        <button id="joinRoomChoice" type="button">Join a room</button>
+      </div>
+      <label id="initialDisplayNameField" class="room-entry-field">
+        <span>Your name <span class="room-entry-optional">(optional)</span></span>
+        <input id="initialDisplayName" type="text" maxlength="24" autocomplete="name" placeholder="Leave blank for a guest name">
+      </label>
+      <form id="createRoomForm" class="room-entry-form" hidden>
+        <label class="room-entry-field">
+          <span>Room name</span>
+          <input id="createRoomName" type="text" maxlength="80" autocomplete="off" placeholder="Friday movie night" required>
+        </label>
+        <label class="room-entry-field">
+          <span>Access code <span class="room-entry-optional">(optional; generated if blank)</span></span>
+          <input id="createRoomCode" type="text" maxlength="32" autocomplete="off" placeholder="e.g. FRIDAY-NIGHT">
+        </label>
+        <label class="room-entry-field">
+          <span>Password <span class="room-entry-optional">(optional)</span></span>
+          <input id="createRoomPassword" type="password" maxlength="128" autocomplete="new-password">
+        </label>
+        <div class="room-entry-form-actions">
+          <button class="room-entry-primary" type="submit">Create room</button>
+          <button class="room-entry-back" id="createRoomBack" type="button">Back</button>
+        </div>
+      </form>
+      <form id="joinRoomForm" class="room-entry-form" hidden>
+        <label class="room-entry-field">
+          <span>Room access code</span>
+          <input id="joinRoomCode" type="text" maxlength="32" autocomplete="off" placeholder="Enter the room code" required>
+        </label>
+        <label class="room-entry-field">
+          <span>Password <span class="room-entry-optional">(if required)</span></span>
+          <input id="joinRoomPassword" type="password" maxlength="128" autocomplete="current-password">
+        </label>
+        <div class="room-entry-form-actions">
+          <button class="room-entry-primary" type="submit">Join room</button>
+          <button class="room-entry-back" id="joinRoomBack" type="button">Back</button>
+        </div>
+      </form>
+      <section id="roomEntrySuccess" class="room-entry-success" hidden aria-labelledby="roomEntrySuccessTitle">
+        <h3 id="roomEntrySuccessTitle">Your room is ready</h3>
+        <p>Share this access code with the people you want to invite:</p>
+        <div class="room-entry-code-row">
+          <output id="createdRoomCode" class="room-entry-code"></output>
+          <button id="copyRoomCode" class="room-entry-back" type="button">Copy code</button>
+        </div>
+        <a id="roomInviteLink" class="room-entry-invite-link" target="_blank" rel="noopener noreferrer">Invitation link</a>
+        <button id="enterCreatedRoom" class="room-entry-primary room-entry-enter" type="button">Enter room</button>
+      </section>
+      <p id="roomEntryStatus" class="room-entry-status" role="status" aria-live="polite"></p>
+      <button id="continuePublicRoom" class="room-entry-public" type="button">Continue to the public room</button>
+    </div>
+  </section>
 
   <main class="watch-layout">
     <section class="player-panel" aria-labelledby="player-title">

@@ -43,6 +43,125 @@ test("emoji picker dismisses, restores focus, tracks its anchor, and preserves i
   assert.equal(picker.hidden, true);
 });
 
+test("room entry creates a private room with the optional initial name", async () => {
+  const browser = createBrowserDouble({ autoContinuePublic: false });
+  const payloads = [];
+  browser.context.fetch = async (url, options) => {
+    payloads.push({ url, options, body: JSON.parse(options.body) });
+    return { ok: true, json: async () => ({
+      room: { watchPath: "/?roomId=created-room", accessCode: "FRIDAY", invitePath: "/?room=FRIDAY" }
+    }) };
+  };
+  await browser.load("js/app.js");
+  const el = (id) => browser.elements.get(id);
+  assert.equal(el("roomEntry").hidden, false);
+  assert.equal(browser.sockets.length, 0, "the public room is not joined before the visitor chooses it");
+  el("createRoomChoice").dispatch("click");
+  el("initialDisplayName").value = "  Alex  ";
+  el("createRoomName").value = "Friday Films";
+  el("createRoomCode").value = "friday";
+  el("createRoomPassword").value = "secret";
+  el("createRoomForm").dispatch("submit");
+  await flush();
+  assert.equal(payloads[0].url, "/api/rooms");
+  assert.deepEqual(payloads[0].body, {
+    name: "Friday Films", accessCode: "friday", password: "secret", displayName: "Alex"
+  });
+  assert.equal(el("createdRoomCode").textContent, "FRIDAY");
+  assert.equal(el("roomInviteLink").href, "/?room=FRIDAY");
+  assert.equal(el("roomEntrySuccess").hidden, false);
+  el("enterCreatedRoom").dispatch("click");
+  assert.equal(browser.context.location.href, "/?roomId=created-room");
+});
+
+test("room entry joins invitations and omits a blank name for automatic guest naming", async () => {
+  const browser = createBrowserDouble({ autoContinuePublic: false });
+  browser.context.location.search = "?room=PARTY42";
+  const requests = [];
+  browser.context.fetch = async (url, options) => {
+    requests.push({ url, body: JSON.parse(options.body) });
+    return { ok: true, json: async () => ({ room: { watchPath: "/?roomId=joined-room" } }) };
+  };
+  await browser.load("js/app.js");
+  const el = (id) => browser.elements.get(id);
+  assert.equal(el("roomEntry").hidden, false);
+  assert.equal(el("joinRoomForm").hidden, false);
+  assert.equal(el("joinRoomCode").value, "PARTY42");
+  el("joinRoomPassword").value = "secret";
+  el("joinRoomForm").dispatch("submit");
+  await flush();
+  assert.equal(requests[0].url, "/api/rooms/join");
+  assert.equal(requests[0].body.accessCode, "PARTY42");
+  assert.equal(requests[0].body.password, "secret");
+  assert.match(requests[0].body.displayName, /^Guest-/);
+  assert.equal(browser.context.location.href, "/?roomId=joined-room");
+});
+
+test("room entry reports admission errors without navigating", async () => {
+  const browser = createBrowserDouble({ autoContinuePublic: false });
+  browser.context.fetch = async () => ({
+    ok: false, json: async () => ({ error: "Room not found." })
+  });
+  await browser.load("js/app.js");
+  const el = (id) => browser.elements.get(id);
+  el("joinRoomChoice").dispatch("click");
+  el("joinRoomCode").value = "UNKNOWN";
+  el("joinRoomForm").dispatch("submit");
+  await flush();
+  assert.equal(el("roomEntryStatus").textContent, "Room not found.");
+  assert.equal(browser.context.location.href, undefined);
+});
+
+test("public room controls reopen room selection without reconnecting twice", async () => {
+  const browser = createBrowserDouble({ autoContinuePublic: false });
+  await browser.load("js/app.js");
+  const el = (id) => browser.elements.get(id);
+  el("continuePublicRoom").dispatch("click");
+  assert.equal(browser.sockets.length, 1);
+  assert.equal(el("roomEntry").hidden, true);
+  el("roomActionButton").dispatch("click");
+  assert.equal(el("roomEntry").hidden, false);
+  el("continuePublicRoom").dispatch("click");
+  assert.equal(browser.sockets.length, 1);
+});
+
+test("private room control leaves through the API and returns to room selection", async () => {
+  const browser = createBrowserDouble({ autoContinuePublic: false });
+  browser.context.location.search = "?roomId=private-room";
+  const requests = [];
+  browser.context.fetch = async (url, options = {}) => {
+    requests.push({ url, options });
+    if (url.endsWith("/api/session")) {
+      return { ok: true, json: async () => ({ endpoints: { websocket: "/rooms/private-room/ws" } }) };
+    }
+    return { ok: true, json: async () => ({ left: true }) };
+  };
+  await browser.load("js/app.js");
+  const el = (id) => browser.elements.get(id);
+  assert.equal(el("roomEntry").hidden, true);
+  assert.equal(el("roomActionButton").textContent, "Leave room / switch");
+  el("roomActionButton").dispatch("click");
+  await flush();
+  assert.equal(requests.at(-1).url, "/rooms/private-room/api/leave");
+  assert.equal(requests.at(-1).options.method, "POST");
+  assert.equal(browser.context.location.href, "/");
+});
+
+test("private room control reports leave errors and remains usable", async () => {
+  const browser = createBrowserDouble({ autoContinuePublic: false });
+  browser.context.location.search = "?roomId=private-room";
+  browser.context.fetch = async (url) => url.endsWith("/api/session")
+    ? { ok: true, json: async () => ({ endpoints: { websocket: "/rooms/private-room/ws" } }) }
+    : { ok: false, json: async () => ({ error: "Membership expired." }) };
+  await browser.load("js/app.js");
+  const el = (id) => browser.elements.get(id);
+  el("roomActionButton").dispatch("click");
+  await flush();
+  assert.equal(el("roomActionStatus").textContent, "Membership expired.");
+  assert.equal(el("roomActionButton").disabled, false);
+  assert.equal(browser.context.location.href, undefined);
+});
+
 test("chat retention closes evicted pickers and server snapshots replace optimistic reactions", async () => {
   const browser = createBrowserDouble();
   await browser.load("js/app.js");

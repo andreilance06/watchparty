@@ -7,10 +7,16 @@ import { createPlayer } from "./player/controller.js";
 import { createVoting } from "./voting.js";
 import { initializeTheme } from "./theme.js";
 import { createHostFiles } from "./host-files.js";
+import { initializeRoomEntry } from "./room-entry.js";
 
 const elements = getElements();
 initializeTheme(elements.themeToggle, undefined, document.documentElement, elements.video);
 const state = createClientState();
+let stopCurrentConnection = () => {};
+const roomEntryPending = initializeRoomEntry(elements, {
+  guestName: state.guestName,
+  onLeave: () => stopCurrentConnection()
+});
 const roomId = new URLSearchParams(location.search || "").get("roomId");
 let socketPath = "/";
 if (roomId) {
@@ -33,6 +39,7 @@ const connection = createConnection({
     if (!connected) files?.disconnect();
   }
 });
+stopCurrentConnection = connection.dispose;
 const chat = createChat({ elements, state, send: connection.send });
 files = createHostFiles({ send: connection.send, report: chat.addSystemMessage });
 const party = createParty({ elements, send: connection.send });
@@ -75,4 +82,13 @@ function handleMessage(message) {
   }
 }
 
-connection.connect();
+if (roomEntryPending) {
+  let publicConnectionStarted = false;
+  elements.continuePublicRoom.addEventListener("click", () => {
+    if (publicConnectionStarted) return;
+    publicConnectionStarted = true;
+    connection.connect();
+  });
+} else {
+  connection.connect();
+}

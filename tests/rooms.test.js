@@ -29,7 +29,7 @@ function rejectedSocket(url, headers = {}) {
 }
 
 test("room admission validates codes/passwords and preserves scoped membership", async (t) => {
-  const { app, base, api } = await setup(t);
+  const { app, base, api, connect } = await setup(t);
   const created = await api("/api/rooms", { name: "  Friday   Films ", accessCode: " movie-night ", password: "my password", displayName: "Owner" });
   assert.equal(created.status, 201);
   assert.equal(created.body.room.name, "Friday Films");
@@ -55,9 +55,16 @@ test("room admission validates codes/passwords and preserves scoped membership",
   const room = app.rooms.get(created.body.room.id);
   assert.equal(room.members.size, 2);
   assert.ok(Buffer.isBuffer(room.passwordHash));
+  const creatorPeer = await connect(created, "Different browser name");
+  assert.equal(creatorPeer.role.name, "Owner", "the initial room name is authoritative");
+  creatorPeer.ws.close();
   const generated = await api("/api/rooms", { name: "Open room" });
   assert.match(generated.body.room.accessCode, /^[A-Z2-9]{8}$/);
   assert.equal((await api("/api/rooms/join", { accessCode: generated.body.room.accessCode })).status, 200);
+  const guestSession = await api("/api/rooms", { name: "Guest naming", displayName: "Guest-AUTO" });
+  const guestPeer = await connect(guestSession, "Old saved name");
+  assert.equal(guestPeer.role.name, "Guest-AUTO");
+  guestPeer.ws.close();
 });
 
 test("room endpoints reject bad inputs, cross-room credentials, and foreign origins", async (t) => {

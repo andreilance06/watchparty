@@ -1,6 +1,6 @@
 # Room and browser-hosting API
 
-Create/Join screens are deferred. The existing player can enter an admitted room using its returned `room.watchPath`. The root page remains a separate, public default room.
+On the root page, the entry dialog lets visitors create a room, join by access code, or continue to the public default room. Invitation URLs containing `?room=CODE` open the Join form with the code prefilled.
 
 ## Creating and joining
 
@@ -30,6 +30,8 @@ Success returns `201`, a room-scoped HttpOnly/SameSite=Strict membership cookie,
 
 `POST /api/rooms/join` accepts `{ "accessCode": "FRIDAY", "password": "optional secret", "displayName": "Sam" }`. It redirects with **307** into `/rooms/:roomId/api/join`, preserving the POST body. Browser fetch follows this automatically and attaches any existing cookie within that room's scope. The final response is `200` with the same response shape and a membership cookie. An existing membership is reused without resetting its host identity. Non-browser clients must follow the redirect and maintain a cookie jar.
 
+The entry form asks for a room name when creating, and an access code when joining. A display name is optional in either flow; when omitted, the client supplies its generated `Guest-XXXX` name. After creating a room, the interface shows the access code and invitation link before entering the room. Successful admission then navigates to the returned `room.watchPath`.
+
 For example, in the browser console on the WatchParty origin:
 
 ```js
@@ -42,9 +44,11 @@ if (!response.ok) throw new Error(session.error);
 location.href = session.room.watchPath;
 ```
 
-Viewers use `/api/rooms/join` with the code/password, then navigate to the returned watch path. An invitation path carries only the access code and is intended for the future Join screen; it does not establish membership or automatically enter the private room yet.
+Viewers use `/api/rooms/join` with the code/password, then navigate to the returned watch path. The invitation URL carries only the access code; users still confirm Join and provide a password if required.
 
 `GET /rooms/:roomId/api/session` restores metadata and the current role. `POST /rooms/:roomId/api/leave` revokes the caller's membership and connections and expires the cookie. Requests to other rooms cannot reuse that membership. Cookies have room-specific paths and gain `Secure` over HTTPS. Browser mutations/upgrades require a matching Origin when one is supplied.
+
+The private-room header's **Leave room / switch** button calls the leave endpoint and returns to the root room chooser. From the public room, **Choose or create a room** reopens the chooser without creating another public-room connection.
 
 Errors return `{ "error": "message" }`: `400` invalid input, `401` missing membership/incorrect password, `403` forbidden origin, `404` missing room/endpoint, `405` wrong method, `409` code collision, `413` body over 16 KiB, and `429` admission limits. The defaults permit 100 private rooms, 1,000 memberships per room, and 30 admission attempts per address per minute. No public room listing exists.
 

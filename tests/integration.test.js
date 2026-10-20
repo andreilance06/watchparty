@@ -27,13 +27,13 @@ test("HTTP modules, chat names, host-only file sharing, and host handoff work to
   const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
   assert.equal(new Set(ids).size, ids.length, "HTML IDs must be unique");
   assert.equal((html.match(/class="vote-panel"/g) || []).length, 1);
-  const modules = ["js/app.js", "js/chat.js", "js/emoji-picker.js", "js/party.js", "js/voting.js", "js/theme.js", "js/connection.js", "js/player/controller.js", "js/player/sync.js", "js/player/fullscreen.js", "js/player/subtitles.js"];
+  const modules = ["js/app.js", "js/chat.js", "js/emoji-picker.js", "js/party.js", "js/voting.js", "js/room-entry.js", "js/theme.js", "js/connection.js", "js/player/controller.js", "js/player/sync.js", "js/player/fullscreen.js", "js/player/subtitles.js"];
   for (const file of modules) {
     const response = await fetch(`${base}/${file}`);
     assert.equal(response.status, 200, file);
     assert.match(response.headers.get("content-type"), /javascript/);
   }
-  for (const file of ["base", "layout", "player", "chat", "voting", "responsive"]) {
+  for (const file of ["base", "layout", "player", "chat", "voting", "room-entry", "responsive"]) {
     const response = await fetch(`${base}/css/${file}.css`, { method: "HEAD" });
     assert.equal(response.status, 200, file);
     assert.match(response.headers.get("content-type"), /text\/css/);

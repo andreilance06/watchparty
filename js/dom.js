@@ -7,7 +7,12 @@ export function getElements(root = document) {
     "reactClap", "reactSad", "suggestionForm", "suggestionInput", "voteLeader",
     "chatMessages", "chatForm", "chatInput", "chatEmojiButton", "emojiPicker", "emojiSearch",
     "emojiPickerGrid", "emojiPickerEmpty", "voteOptions", "voteStatus", "themeToggle",
-    "addCaptionsButton", "removeCaptionButton", "suggestionResults", "suggestionStatus"
+    "addCaptionsButton", "removeCaptionButton", "suggestionResults", "suggestionStatus",
+    "roomEntry", "roomEntryChoices", "createRoomChoice", "joinRoomChoice", "initialDisplayName", "initialDisplayNameField",
+    "createRoomForm", "createRoomName", "createRoomCode", "createRoomPassword", "createRoomBack",
+    "joinRoomForm", "joinRoomCode", "joinRoomPassword", "joinRoomBack", "continuePublicRoom",
+    "roomEntryStatus", "roomEntrySuccess", "createdRoomCode", "copyRoomCode", "roomInviteLink",
+    "enterCreatedRoom", "roomActionButton", "roomActionStatus"
   ];
   const elements = Object.fromEntries(ids.map((id) => [id, root.querySelector(`#${id}`)]));
   elements.placeholderTitle = elements.videoPlaceholder.querySelector("strong");
