@@ -3,12 +3,17 @@ import { createClientId } from "./utils/client-id.js";
 // File objects stay in this browser. The server can request only declared ranges.
 export function createHostFiles({ send, report }) {
   const files = new Map(), requests = new Map();
+  const captionRelays = new Set();
   let relay, sourceId = null, role = "viewer", generation = 0;
+  let activeSourceId = null;
   const captionPattern = /\.(srt|vtt|ass|ssa)$/i;
 
   function clear(closeRelay = true) {
     generation++;
     sourceId = null;
+    activeSourceId = null;
+    for (const socket of captionRelays) socket.close();
+    captionRelays.clear();
     if (closeRelay) relay?.close();
     relay = null;
     files.clear();
@@ -62,17 +67,25 @@ export function createHostFiles({ send, report }) {
     try { reply = await request({ type: "source-register", video, captions: captions.map(declare) }); }
     catch (error) { previous?.close(); if (current === generation) clear(); throw error; }
     previous?.close();
-    if (current !== generation || role !== "host") return;
-    sourceId = reply.sourceId;
+    if (current !== generation) return;
+    sourceId = activeSourceId = reply.sourceId;
+    relay = openRelay(reply, current).socket;
+  }
+
+  function openRelay(reply, current, captionOnly = false) {
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     const socket = new WebSocket(`${protocol}//${location.host}${reply.relayPath}`);
-    relay = socket;
-    socket.addEventListener("open", () => socket.send(JSON.stringify({ type: "source-attach", sourceId, token: reply.token })));
+    let resolveReady, rejectReady;
+    const ready = new Promise((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
+    ready.catch(() => {});
+    if (captionOnly) captionRelays.add(socket);
+    socket.addEventListener("open", () => socket.send(JSON.stringify({ type: "source-attach", sourceId: reply.sourceId, token: reply.token,
+      ...(reply.providerId ? { providerId: reply.providerId } : {}) })));
     socket.addEventListener("message", async (event) => {
       let message;
       try {
         message = JSON.parse(event.data);
-        if (message.type === "source-attached") return;
+        if (message.type === "source-attached") { resolveReady(); return; }
         const file = files.get(message.fileId);
         if (message.type !== "source-read" || !file || !Number.isInteger(message.requestId) || message.requestId < 1 || message.requestId > 0xffffffff ||
             !Number.isSafeInteger(message.offset) || !Number.isInteger(message.length) || message.offset < 0 || message.length < 1 || message.length > 256 * 1024 || message.offset + message.length > file.size) {
@@ -90,22 +103,41 @@ export function createHostFiles({ send, report }) {
       }
     });
     socket.addEventListener("close", () => {
-      if (current === generation) { clear(); report("The file connection closed. Choose the video again."); }
+      rejectReady(new Error("The file connection closed."));
+      if (captionOnly) captionRelays.delete(socket);
+      else if (current === generation && relay === socket) { clear(); report("The file connection closed. The host can choose another video."); }
     });
     socket.addEventListener("error", () => {});
+    return { socket, ready };
   }
 
   async function addFiles(chosen) {
-    if (!sourceId) throw new Error("Choose a video first.");
+    if (!activeSourceId) throw new Error("Choose a video first.");
     if (chosen.length > 8 || chosen.some((file) => !captionPattern.test(file.name) || !file.size)) throw new Error("Choose one to eight nonempty subtitle files.");
     const declared = chosen.map(declare);
-    try { await request({ type: "captions-add", sourceId, files: declared }); }
+    let captionRelay;
+    try {
+      if (sourceId === activeSourceId) await request({ type: "captions-add", sourceId, files: declared });
+      else {
+        const current = generation, target = activeSourceId;
+        const registered = await request({ type: "caption-provider-register", sourceId: target, files: declared });
+        if (current !== generation || activeSourceId !== target || role !== "host") throw new Error("The source or host changed.");
+        const opened = openRelay(registered, current, true); captionRelay = opened.socket;
+        await opened.ready;
+        await request({ type: "captions-add", sourceId: target, providerId: registered.providerId, files: declared });
+      }
+    }
     catch (error) { declared.forEach((file) => files.delete(file.id)); throw error; }
+    finally { captionRelay?.close(); }
   }
 
   function handleMessage(message) {
+    if (message.type === "source-ended") {
+      if (message.sourceId === sourceId || message.sourceId === activeSourceId) clear();
+      return true;
+    }
     if (message.type === "source-release-file") {
-      if (message.sourceId === sourceId) files.delete(message.fileId);
+      if (message.sourceId === sourceId || message.sourceId === activeSourceId) files.delete(message.fileId);
       return true;
     }
     const pending = requests.get(message.requestId);
@@ -117,12 +149,17 @@ export function createHostFiles({ send, report }) {
 
   return {
     handleMessage, disconnect: clear,
-    setRole(next) { if (role !== next) clear(); role = next; },
+    setRole(next) { role = next; },
+    setSession(state) {
+      if (state.sourceId === undefined) return;
+      if (sourceId && sourceId !== state.sourceId) clear();
+      activeSourceId = state.sourceId;
+    },
     chooseVideo: () => pick("video/*,.mkv,.avi,.ts,.mts,.m2ts,.mpg,.mpeg,.flv,.wmv,.srt,.vtt,.ass,.ssa", selectFiles),
     chooseCaptions: () => pick(".srt,.vtt,.ass,.ssa", addFiles),
     async removeCaption(trackId) {
-      if (!trackId || !sourceId) return;
-      try { await request({ type: "caption-remove", sourceId, trackId }); } catch (error) { report(error.message); }
+      if (!trackId || !activeSourceId || role !== "host") return;
+      try { await request({ type: "caption-remove", sourceId: activeSourceId, trackId }); } catch (error) { report(error.message); }
     }
   };
 }

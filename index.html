@@ -222,6 +222,11 @@
         <h3 id="participants-title">Participants</h3>
         <ul id="participantList" class="participant-list" aria-live="polite"></ul>
       </section>
+      <div id="participantDropdown" class="participant-dropdown" hidden role="dialog" aria-labelledby="participantDropdownTitle">
+        <div id="participantDetails"></div>
+        <p id="participantStatus" role="status" aria-live="polite"></p>
+      </div>
+      <p id="fileSharingStatus" class="control-help" hidden>You are sharing the current video. Keep this page open while others watch.</p>
 
       <section class="reaction-section" aria-label="Send an emoji reaction">
         <div id="reactionFeed" class="reaction-feed" role="log" aria-live="polite" aria-label="Recent reactions"></div>

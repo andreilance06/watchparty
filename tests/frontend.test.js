@@ -47,6 +47,7 @@ test("room entry creates a private room with the optional initial name", async (
   const browser = createBrowserDouble({ autoContinuePublic: false });
   const payloads = [];
   browser.context.fetch = async (url, options) => {
+    if (url === "/api/viewer-identity" || url === "/api/session") return { ok: true };
     payloads.push({ url, options, body: JSON.parse(options.body) });
     return { ok: true, json: async () => ({
       room: { watchPath: "/?roomId=created-room", accessCode: "FRIDAY", invitePath: "/?room=FRIDAY" }
@@ -79,6 +80,7 @@ test("room entry joins invitations and omits a blank name for automatic guest na
   browser.context.location.search = "?room=PARTY42";
   const requests = [];
   browser.context.fetch = async (url, options) => {
+    if (url === "/api/viewer-identity" || url === "/api/session") return { ok: true };
     requests.push({ url, body: JSON.parse(options.body) });
     return { ok: true, json: async () => ({ room: { watchPath: "/?roomId=joined-room" } }) };
   };
@@ -99,7 +101,7 @@ test("room entry joins invitations and omits a blank name for automatic guest na
 
 test("room entry reports admission errors without navigating", async () => {
   const browser = createBrowserDouble({ autoContinuePublic: false });
-  browser.context.fetch = async () => ({
+  browser.context.fetch = async (url) => ["/api/viewer-identity", "/api/session"].includes(url) ? { ok: true } : ({
     ok: false, json: async () => ({ error: "Room not found." })
   });
   await browser.load("js/app.js");
@@ -173,7 +175,7 @@ test("private room control leaves through the API and returns to room selection"
 test("private room control reports leave errors and remains usable", async () => {
   const browser = createBrowserDouble({ autoContinuePublic: false });
   browser.context.location.search = "?roomId=private-room";
-  browser.context.fetch = async (url) => url.endsWith("/api/session")
+  browser.context.fetch = async (url) => url === "/api/viewer-identity" ? { ok: true } : url.endsWith("/api/session")
     ? { ok: true, json: async () => ({
       room: { name: "Friday Films", accessCode: "FRIDAY" },
       endpoints: { websocket: "/rooms/private-room/ws" }
@@ -292,7 +294,7 @@ test("frontend modules initialize and route playback, captions, fullscreen, chat
   assert.ok(chooser);
   assert.equal(chooser.multiple, true);
   chooser.dispatch("cancel");
-  assert.equal(browser.requests.filter((request) => request.options?.method === "POST").length, 0, "Opening/cancelling the picker never calls the server native picker");
+  assert.equal(browser.requests.filter((request) => request.options?.method === "POST" && request.url !== "/api/viewer-identity").length, 0, "Opening/cancelling the picker never calls the server native picker");
   el("chatInput").value = "  Hi  ";
   el("chatForm").dispatch("submit");
   assert.equal(socket.sent.at(-1).message, "Hi");
@@ -521,7 +523,7 @@ test("movie search selects a matching Wikimedia result and keeps a title-only fa
   el("suggestionInput").value = "Inception";
   el("suggestionForm").dispatch("submit");
   await flush();
-  assert.match(browser.requests[0].url, /\/api\/movies\/search\?q=Inception/);
+  assert.match(browser.requests.find(request => request.url.startsWith("/api/movies/search")).url, /\/api\/movies\/search\?q=Inception/);
   assert.equal(el("suggestionResults").children.length, 2);
   const result = el("suggestionResults").children[0];
   assert.equal(result.children[0].src, movie.posterUrl);
@@ -544,7 +546,7 @@ test("participant updates and bounded reactions render through the combined app"
   const socket = browser.sockets[0];
   socket.receive({ type: "presence", count: 1, participants: [{ name: "New Host", role: "host" }] });
   assert.equal(browser.elements.get("viewerCount").textContent, "1 online");
-  const participant = browser.elements.get("participantList").children[0];
+  const participant = browser.elements.get("participantList").children[0].children[0];
   assert.equal(participant.children[1].textContent, "New Host");
   assert.equal(participant.children[2].textContent, "Host");
   for (let i = 0; i < 7; i++) socket.receive({ type: "reaction", emoji: "👏", name: `Guest ${i}` });
@@ -664,6 +666,8 @@ test("browser host serves exact file ranges and caption controls use the active 
   await flush();
   assert.equal(Buffer.from(nextSocket.sent.at(-1).subarray(4)).toString(), "abc", "A stale release cannot discard a new source's file");
   files.setRole("viewer");
+  assert.equal(nextSocket.readyState, 1, "Host transfer preserves the file relay");
+  files.disconnect();
   assert.equal(nextSocket.readyState, 3);
   assert.deepEqual(errors, []);
 });

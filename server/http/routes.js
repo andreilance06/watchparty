@@ -43,6 +43,11 @@ function createRequestHandler({ registry, config, movieSearch }) {
     try {
       const url = new URL(req.url, "http://localhost");
       if (req.method === "POST" && !validOrigin(req, config)) throw failure(403, "Request origin is not allowed.");
+      if (url.pathname === "/api/viewer-identity") {
+        if (req.method !== "POST") { res.setHeader("Allow", "POST"); throw failure(405, "Use POST for this endpoint."); }
+        registry.browserIdentity(req, res);
+        json(res, 200, { ready: true }); return;
+      }
       if (url.pathname === "/api/movies/search") {
         if (req.method !== "GET") { res.setHeader("Allow", "GET"); throw failure(405, "Use GET for this endpoint."); }
         admit(req);
@@ -69,7 +74,7 @@ function createRequestHandler({ registry, config, movieSearch }) {
           res.writeHead(307, { Location: `/rooms/${target.id}/api/join`, "Cache-Control": "no-store" }); res.end(); return;
         }
         admit(req);
-        const { room, member } = await registry.create(body);
+        const { room, member } = await registry.create(body, registry.browserIdentity(req));
         registry.setCookie(req, res, room, member);
         json(res, creating ? 201 : 200, registry.describe(room, member));
         return;
@@ -78,6 +83,8 @@ function createRequestHandler({ registry, config, movieSearch }) {
       const match = /^\/rooms\/([^/]+)(\/.*)?$/.exec(url.pathname);
       const room = match ? registry.get(match[1]) : registry.defaultRoom;
       if (match && (!room || room.id === "default")) throw failure(404, "Room not found.");
+      const pathname = match ? match[2] || "/" : url.pathname;
+      if (match || pathname === "/api/session" || pathname.startsWith("/media/") || pathname.startsWith("/hls/")) registry.assertAdmission(req, room);
       if (match && match[2] === "/api/join") {
         if (req.method !== "POST") throw failure(405, "Use POST for this endpoint.");
         admit(req);
@@ -87,11 +94,11 @@ function createRequestHandler({ registry, config, movieSearch }) {
       }
       const member = match ? registry.authenticate(req, room) : null;
       if (match && !member) throw failure(401, "Join this room first.");
-      const pathname = match ? match[2] || "/" : url.pathname;
+      if (match || pathname.startsWith("/media/") || pathname.startsWith("/hls/")) registry.trackResponse(req, res, room, member);
       if (pathname === "/media/original" && ["GET", "HEAD"].includes(req.method)) {
         await room.source.serveOriginal(req, res, url); return;
       }
-      if (match && pathname === "/api/session") {
+      if (pathname === "/api/session") {
         if (req.method !== "GET") throw failure(405, "Use GET for this endpoint.");
         json(res, 200, registry.describe(room, member)); return;
       }
@@ -100,12 +107,7 @@ function createRequestHandler({ registry, config, movieSearch }) {
         room.members.delete(member.token);
         room.state.clients.get(member.id)?.ws.close(1000, "Left room");
         if (!room.state.clients.has(member.id) && room.state.hostId === member.id) {
-          const next = room.state.clients.entries().next().value;
-          room.state.hostId = next ? next[0] : null;
-          if (next) {
-            next[1].role = "host";
-            room.transport.send(next[1].ws, { type: "role", role: "host", clientId: next[0], hostId: next[0], viewerCount: room.state.clients.size });
-          }
+          room.moderation.releaseHost(member.id);
         }
         registry.setCookie(req, res, room, null);
         registry.scheduleExpiry(room);
@@ -122,7 +124,7 @@ function createRequestHandler({ registry, config, movieSearch }) {
       if (url.pathname !== "/" && !/^\/(?:index\.html|(?:js|css|vendor|images|assets)\/)/.test(url.pathname)) throw failure(404, "Not found.");
       serveStatic(req, res, url, config.publicDirectory);
     } catch (error) {
-      if (!res.headersSent && !res.destroyed) json(res, error.status || 500, { error: error.status ? error.message : "Server error." });
+      if (!res.headersSent && !res.destroyed) json(res, error.status || 500, { error: error.status ? error.message : "Server error.", ...(error.code === "ROOM_BLOCKED" ? { code: error.code } : {}) });
       else if (!res.destroyed) res.destroy();
     }
   };

@@ -17,7 +17,7 @@ export function createMediaEventBridge(video) {
       originalSeek = player.seek;
       const activePlayer = player, seek = originalSeek;
       wrappedSeek = function(time, options) {
-        if (!options?.internal) video.dispatchEvent(new CustomEvent("watchparty-seek-intent", { detail: { time } }));
+        if (!options?.internal && !video.dispatchEvent(new CustomEvent("watchparty-seek-intent", { detail: { time }, cancelable: true }))) return;
         return seek.call(activePlayer, time, options);
       };
       player.seek = wrappedSeek;

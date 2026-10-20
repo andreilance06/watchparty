@@ -48,6 +48,7 @@ function createHostSource({ room, bridge, config }) {
   let active = null;
   const send = (ws, payload) => room.transport.send(ws, payload);
   const isHost = (ws) => room.state.hostId === ws.clientId && room.state.clients.get(ws.clientId)?.ws === ws;
+  const connectedOwner = provider => room.state.clients.get(provider.owner.clientId)?.ws === provider.owner;
 
   function reset() {
     const source = active;
@@ -57,10 +58,14 @@ function createHostSource({ room, bridge, config }) {
     source.cache.clear();
     for (const entry of source.reads.values()) entry.controller.abort();
     source.reads.clear();
-    clearTimeout(source.attachTimer);
+    for (const provider of source.providers.values()) {
+      clearTimeout(provider.attachTimer);
+      provider.rejectReady?.(new Error("Source replaced."));
+      send(provider.owner, { type: "source-ended", sourceId: source.id });
+      provider.ws?.close(1000, "Source replaced");
+    }
     source.bridge?.close();
     for (const job of [...source.pending.values(), ...source.queue]) job.fail(new Error("Source is no longer available."));
-    source.ws?.close(1000, "Source replaced");
   }
 
   function unavailable(source) {
@@ -68,26 +73,46 @@ function createHostSource({ room, bridge, config }) {
     reset();
     room.media.reset();
     room.transport.broadcast(sessionState(room.state, "source"));
-    room.transport.broadcast({ type: "media-error", message: "The host file connection was lost. Choose the video again." });
+    room.transport.broadcast({ type: "media-error", message: "The video provider disconnected. The host can choose another video." });
+  }
+
+  function retireProvider(source, provider, error = new Error("Caption file connection closed.")) {
+    if (!source.providers.delete(provider.id)) return;
+    clearTimeout(provider.attachTimer); provider.rejectReady?.(error);
+    for (const job of [...source.pending.values(), ...source.queue]) if (job.provider === provider) job.fail(error);
+    for (const fileId of provider.fileIds) {
+      source.files.delete(fileId);
+      send(provider.owner, { type: "source-release-file", sourceId: source.id, fileId });
+    }
+    provider.ws?.close(1000, "Caption files released");
+  }
+
+  function disconnectControl(ws) {
+    const source = active;
+    if (!source) return;
+    if (source.owner === ws) { unavailable(source); return; }
+    for (const provider of [...source.providers.values()]) if (provider.owner === ws) retireProvider(source, provider);
   }
 
   function pump(source) {
-    if (source.closed || source.ws?.readyState !== 1) return;
+    if (source.closed) return;
     while (source.pending.size < config.sourceMaxReads && source.queue.length) {
       const job = source.queue.shift();
       if (job.done) continue;
+      if (job.provider.ws?.readyState !== 1) { job.fail(new Error("File provider unavailable.")); continue; }
       source.pending.set(job.id, job);
-      send(source.ws, { type: "source-read", requestId: job.id, fileId: job.fileId, offset: job.offset, length: job.length });
+      send(job.provider.ws, { type: "source-read", requestId: job.id, fileId: job.fileId, offset: job.offset, length: job.length });
     }
   }
 
   function read(source, fileId, offset, length, signal) {
     return new Promise((resolve, reject) => {
-      if (source.closed || source.ws?.readyState !== 1 || signal.aborted) { reject(new Error("Source unavailable.")); return; }
+      const provider = source.providers.get(source.files.get(fileId)?.providerId || source.id);
+      if (source.closed || provider?.ws?.readyState !== 1 || signal.aborted) { reject(new Error("Source unavailable.")); return; }
       if (source.queue.length >= 64) { reject(new Error("Source is busy.")); return; }
       const id = source.nextRequest++;
       if (id > 0xffffffff) { reject(new Error("Source request limit reached. Reselect the video.")); return; }
-      const job = { id, fileId, offset, length, done: false };
+      const job = { id, fileId, offset, length, provider, done: false };
       const finish = (error, bytes) => {
         if (job.done) return;
         job.done = true;
@@ -115,6 +140,7 @@ function createHostSource({ room, bridge, config }) {
 
   function cachedRead(source, fileId, offset, length, signal) {
     const file = source.files.get(fileId);
+    if (!file) return Promise.reject(new Error("File is no longer available."));
     const page = Math.floor(offset / config.sourceChunkBytes) * config.sourceChunkBytes;
     const key = `${fileId}:${page}`;
     const cached = source.cache.get(key);
@@ -165,7 +191,7 @@ function createHostSource({ room, bridge, config }) {
   }
 
   function attach(ws, member) {
-    let source;
+    let source, provider;
     const timer = setTimeout(() => ws.close(1008, "Source attachment timed out"), 5000);
     ws.on("message", (data, binary) => {
       try {
@@ -173,20 +199,24 @@ function createHostSource({ room, bridge, config }) {
           if (binary) throw new Error("Attach first.");
           const message = JSON.parse(data.toString());
           const candidate = active;
-          if (!candidate || candidate.ws || message.type !== "source-attach" || message.sourceId !== candidate.id ||
-              message.token !== candidate.token || (member && member.id !== candidate.owner.clientId) || !isHost(candidate.owner)) {
+          const selected = candidate?.providers.get(message.providerId || candidate.id);
+          if (!candidate || !selected || selected.ws || message.type !== "source-attach" || message.sourceId !== candidate.id ||
+              message.token !== selected.token || (member && member.id !== selected.owner.clientId) || !connectedOwner(selected)) {
             throw new Error("Invalid source attachment.");
           }
           source = candidate;
-          source.ws = ws;
-          source.token = null;
+          provider = selected;
+          provider.ws = ws;
+          provider.token = null;
           clearTimeout(timer);
-          clearTimeout(source.attachTimer);
+          clearTimeout(provider.attachTimer);
+          send(ws, { type: "source-attached", sourceId: source.id, providerId: provider.id });
+          if (provider !== source) { provider.resolveReady(); return; }
           source.bridge = bridge.register({ files: source.files, read: (...args) => cachedRead(source, ...args) });
           const video = source.files.get(source.videoId);
-          room.media.select(source.bridge.url(video.id), video.name);
           room.state.sourceId = source.id;
-          send(ws, { type: "source-attached", sourceId: source.id });
+          room.state.sourceOwnerId = source.owner.clientId;
+          room.media.select(source.bridge.url(video.id), video.name);
           Promise.resolve(room.media.prepare(source.bridge.url(video.id), source.captionIds.map((id) => descriptor(source, source.files.get(id)))))
             .then(() => {
               if (active !== source) return;
@@ -199,27 +229,34 @@ function createHostSource({ room, bridge, config }) {
             }).catch(() => unavailable(source));
           return;
         }
-        if (source !== active || !isHost(source.owner)) throw new Error("Source expired.");
+        if (source !== active || !connectedOwner(provider) || !source.providers.has(provider.id)) throw new Error("Source expired.");
         if (binary) {
           if (data.length < 4 || data.length > config.sourceChunkBytes + 4) throw new Error("Invalid binary read response.");
           const job = source.pending.get(data.readUInt32BE(0));
           // Replies to cancelled or timed-out reads are harmless and cannot satisfy a new request.
           if (!job) return;
+          if (job.provider !== provider) throw new Error("Read belongs to another file provider.");
           if (data.length - 4 !== job.length) throw new Error("Incorrect read length.");
           job.succeed(data.subarray(4));
         } else {
           const message = JSON.parse(data.toString());
           if (message.type !== "source-error") throw new Error("Unexpected source message.");
-          source.pending.get(message.requestId)?.fail(new Error("The host could not read the selected file."));
+          const job = source.pending.get(message.requestId);
+          if (job && job.provider !== provider) throw new Error("Read belongs to another file provider.");
+          job?.fail(new Error("The provider could not read the selected file."));
         }
       } catch { ws.close(1008, "Invalid source message"); }
     });
-    ws.on("close", () => { clearTimeout(timer); if (source) unavailable(source); });
+    ws.on("close", () => {
+      clearTimeout(timer);
+      if (source && provider === source) unavailable(source);
+      else if (source && provider) retireProvider(source, provider);
+    });
     ws.on("error", () => {});
   }
 
   async function handleControl(ws, message) {
-    if (!["source-register", "captions-add", "caption-remove"].includes(message.type)) return false;
+    if (!["source-register", "caption-provider-register", "captions-add", "caption-remove"].includes(message.type)) return false;
     const reply = (payload) => send(ws, { requestId: message.requestId, ...payload });
     try {
       if (!isHost(ws)) throw new Error("Only the room host can manage files and captions.");
@@ -235,19 +272,41 @@ function createHostSource({ room, bridge, config }) {
           files, videoId: video.id, captionIds: captions.map((file) => file.id), pending: new Map(), queue: [],
           cache: new Map(), reads: new Map(), nextRequest: 1, closed: false };
         const source = active;
+        source.providers = new Map([[source.id, source]]);
         source.attachTimer = setTimeout(() => unavailable(source), config.sourceReadTimeoutMs);
         reply({ type: "source-registered", sourceId: source.id, token: source.token, relayPath: `${room.state.basePath}/source` });
       } else {
         const source = active;
         if (!source || message.sourceId !== source.id || !room.state.mediaReady) throw new Error("The video source is not ready.");
-        if (message.type === "captions-add") {
+        if (message.type === "caption-provider-register") {
+          if (!Array.isArray(message.files) || !message.files.length || message.files.length > 8) throw new Error("Select one to eight caption files.");
+          const files = message.files.map(file => validateFile(file, true));
+          if (new Set(files.map(file => file.id)).size !== files.length || files.some(file => source.files.has(file.id)) || source.files.size + files.length > 25) throw new Error("Caption file IDs must be unique and within the room limit.");
+          const provider = { id: crypto.randomUUID(), token: crypto.randomBytes(32).toString("base64url"), owner: ws, fileIds: files.map(file => file.id) };
+          provider.ready = new Promise((resolve, reject) => { provider.resolveReady = resolve; provider.rejectReady = reject; });
+          provider.ready.catch(() => {});
+          source.providers.set(provider.id, provider);
+          for (const file of files) source.files.set(file.id, { ...file, providerId: provider.id });
+          provider.attachTimer = setTimeout(() => retireProvider(source, provider), config.sourceReadTimeoutMs);
+          reply({ type: "caption-provider-registered", sourceId: source.id, providerId: provider.id, token: provider.token, relayPath: `${room.state.basePath}/source` });
+        } else if (message.type === "captions-add") {
           if (!Array.isArray(message.files) || !message.files.length || message.files.length > 8) throw new Error("Select one to eight caption files.");
           const files = message.files.map((file) => validateFile(file, true));
-          if (new Set(files.map((file) => file.id)).size !== files.length || files.some((file) => source.files.has(file.id))) throw new Error("File IDs must be unique.");
-          if (source.files.size + files.length > 25) throw new Error("Too many pending caption files.");
-          files.forEach((file) => source.files.set(file.id, file));
+          if (new Set(files.map(file => file.id)).size !== files.length) throw new Error("File IDs must be unique.");
+          const provider = message.providerId ? source.providers.get(message.providerId) : source;
+          if (!provider || provider.owner !== ws) throw new Error("Caption files belong to another provider.");
+          if (provider !== source) {
+            if (files.length !== provider.fileIds.length || files.some(file => !provider.fileIds.includes(file.id) || file.size !== source.files.get(file.id)?.size || file.name !== source.files.get(file.id)?.name)) throw new Error("Caption registration changed.");
+            await provider.ready;
+            if (active !== source || !isHost(ws)) throw new Error("The source or host changed.");
+          } else {
+            if (new Set(files.map((file) => file.id)).size !== files.length || files.some((file) => source.files.has(file.id))) throw new Error("File IDs must be unique.");
+            if (source.files.size + files.length > 25) throw new Error("Too many pending caption files.");
+            files.forEach((file) => source.files.set(file.id, file));
+          }
           try { await room.media.addCaptions(files.map((file) => descriptor(source, file))); }
           finally {
+            if (provider !== source) retireProvider(source, provider);
             for (const file of files) {
               if (!room.state.captionTracks.some((track) => track.fileId === file.id)) {
                 source.files.delete(file.id);
@@ -257,15 +316,20 @@ function createHostSource({ room, bridge, config }) {
           }
         } else {
           const track = await room.media.removeCaption(message.trackId);
-          if (track.fileId) { source.files.delete(track.fileId); send(ws, { type: "source-release-file", sourceId: source.id, fileId: track.fileId }); }
+          if (track.fileId) {
+            const file = source.files.get(track.fileId);
+            const provider = file && source.providers.get(file.providerId || source.id);
+            source.files.delete(track.fileId);
+            if (provider) send(provider.owner, { type: "source-release-file", sourceId: source.id, fileId: track.fileId });
+          }
         }
-        reply({ type: "captions-managed" });
+        if (message.type !== "caption-provider-register") reply({ type: "captions-managed" });
       }
     } catch (error) { reply({ type: "error", message: error.message }); }
     return true;
   }
 
-  return { attach, handleControl, reset, serveOriginal };
+  return { attach, handleControl, reset, serveOriginal, disconnectControl, isOwner: ws => active?.owner === ws };
 }
 
 module.exports = { createSourceBridge, createHostSource, validateFile };

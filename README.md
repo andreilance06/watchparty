@@ -13,7 +13,7 @@ npm start
 
 Open `http://localhost:3000`. The server installs FFmpeg automatically; hosts and viewers only need a browser. `FFMPEG_PATH` may point to an existing executable. Use [trusted HTTPS](docs/https.md) for LAN and public access to enable WebCodecs on viewers' devices. HTTP still supports native files and compatibility streaming.
 
-The host selects one video and optional SRT, VTT, ASS, or SSA files. Keep that browser page open: its File objects answer bounded byte requests, with no initial full-file upload. Refreshing, disconnecting, or mobile suspension interrupts hosting. The next host selects a file from their own device.
+The host selects one video and optional SRT, VTT, ASS, or SSA files. Keep that browser page open: its File objects answer bounded byte requests, with no initial full-file upload. Transferring host keeps that browser as the video provider while the new host controls the room. Refreshing, disconnecting, or blocking the provider ends the current video; the host can choose a replacement from their device.
 
 The root page opens a Create Room / Join Room dialog, with an optional initial display name. Creating a room shows its access code and invitation link; leaving the name blank generates a guest name. In a room, the room name appears above the player panel; use **Invite** to view or copy the private-room access code. Visitors can continue to the public default room, reopen room selection there, or leave/switch from a private room using the header control. See the [room API](docs/rooms.md).
 
@@ -40,7 +40,11 @@ JASSUB is retained as a libass renderer behind Movi's public renderer/overlay AP
 
 Native/HLS engines use the adapter's clock bridge because Movi's embedded renderer hook only runs on its WASM pipeline. The caption canvas lives inside the player, including fullscreen. Native video Picture-in-Picture cannot include this separate subtitle surface; Document PiP support depends on the browser/player.
 
-Viewers may pause/resume the shared room; seeking, speed, and video selection remain host-only. Volume, aspect ratio, captions, and fullscreen are local. Browsers may require a tap to enable sound or playback.
+Click a name in the chatroom's **Participants** list to open its dropdown. Everyone can inspect playback permissions; the host can grant or revoke **Play/pause**, **Seek**, and **Playback speed** for viewers. The same dropdown offers **Transfer host**, **Kick and block**, and **Unblock**. Viewers start with play/pause enabled and seeking/speed disabled; choosing the shared video and managing room captions remain host-only. Volume, aspect ratio, caption selection, and fullscreen are local. Browsers may require a tap to enable sound or playback.
+
+Blocked viewers stay in the participant list with a dimmed, crossed-out name until a host unblocks them. They cannot reconnect to that room, including through another tab in the same browser profile. Blocks survive host changes and disappear with the room or server restart. Unblocked viewers manually rejoin. Transferring host takes effect immediately and preserves the current video, playhead, speed, pause state, and captions; the former host starts with default viewer permissions and continues supplying the video until it is replaced or their browser disconnects. The new host can add/remove captions or choose a new video.
+
+Permissions are checked on the server and remembered for the same browser profile in each room, including after disconnecting or explicitly leaving and rejoining. Other hosts taking over do not reset grants. A viewer becoming host clears that viewer's stored grants; room expiry and server restart clear all grants. Clearing cookies or changing browsers creates a new identity. Private-room passwords and membership are still required after leaving.
 
 ## Chat and reactions
 

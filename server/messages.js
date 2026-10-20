@@ -1,6 +1,8 @@
 const { randomUUID } = require("crypto");
 const { sanitizeDisplayName, createNameRegistry } = require("./names");
 const { currentTime, sessionState } = require("./state");
+const { permissionKey, permissionsFor, promoteHost } = require("./permissions");
+const { participants: roomParticipants } = require("./participants");
 
 const MAX_VIDEO_SUGGESTIONS = 30;
 const MAX_COMMENTS = 500;
@@ -51,9 +53,7 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
   const { isDisplayNameTaken } = createNameRegistry(state.clients);
 
   function participants() {
-    return [...state.clients].map(([clientId, client]) => ({
-      clientId, name: client.name, role: client.role
-    }));
+    return roomParticipants(state);
   }
 
   function updatePartyState() {
@@ -108,10 +108,11 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
           const requestedName = client.hasMemberName ? client.name : sanitizeDisplayName(message.name, client.name);
           const nameRejected = isDisplayNameTaken(requestedName, ws.clientId);
           if (!nameRejected) client.name = requestedName;
-          if (!state.hostId) { state.hostId = ws.clientId; client.role = "host"; }
+          if (!state.hostId) promoteHost(state, ws.clientId);
           send(ws, {
             type: "role", role: client.role, hostId: state.hostId, clientId: ws.clientId,
             viewerCount: state.clients.size, name: client.name,
+            permissions: permissionsFor(state, client, ws.clientId),
             ...(nameRejected ? { nameRejected: requestedName } : {})
           });
           send(ws, sessionState(state, "join"));
@@ -121,6 +122,27 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
           updatePresence();
         }
         break;
+      case "set-viewer-permissions": {
+        const target = state.clients.get(message.clientId);
+        const value = message.permissions;
+        if (client.role !== "host" || state.hostId !== ws.clientId || !target || target.role !== "viewer" ||
+            !value || typeof value !== "object" || Array.isArray(value) ||
+            Object.keys(value).length !== 3 ||
+            !["playPause", "seek", "playbackRate"].every(key => typeof value[key] === "boolean")) {
+          send(ws, { type: "error", action: message.type, clientId: message.clientId, requestId: message.requestId,
+            message: "Only the room host can set valid permissions for a connected viewer." });
+          break;
+        }
+        const key = permissionKey(target, message.clientId);
+        state.viewerPermissions.set(key, { playPause: value.playPause, seek: value.seek, playbackRate: value.playbackRate });
+        for (const [clientId, affected] of state.clients) {
+          if (permissionKey(affected, clientId) === key) {
+            broadcast({ type: "permissions-updated", clientId, ...(message.requestId ? { requestId: message.requestId } : {}), permissions: permissionsFor(state, affected, clientId) });
+          }
+        }
+        updatePartyState();
+        break;
+      }
       case "set-name": {
         const requestedName = sanitizeDisplayName(message.name, client.name);
         if (isDisplayNameTaken(requestedName, ws.clientId)) {
@@ -238,22 +260,28 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
         const syncMode = String(message.syncMode || "tick");
         if (!state.mediaPath || !state.mediaReady) return;
         if (message.mediaVersion !== undefined && message.mediaVersion !== state.mediaVersion) return;
+        const viewerCommand = client.role !== "host";
+        const permission = ({ play: "playPause", pause: "playPause", seek: "seek", rate: "playbackRate" })[syncMode];
+        if (viewerCommand && (!permission || !permissionsFor(state, client, ws.clientId)[permission])) {
+          send(ws, { type: "playback-rejected", commandSequence: message.commandSequence,
+            message: "The host has not enabled that playback control for you.", state: sessionState(state, "correction") });
+          return;
+        }
         if (message.commandSequence !== undefined) {
           if (!Number.isSafeInteger(message.commandSequence) || message.commandSequence <= (client.lastPlaybackCommand || 0)) return;
           client.lastPlaybackCommand = message.commandSequence;
         }
         // A seek establishes a new clock epoch. Old timer ticks must not undo it.
         if (syncMode !== "seek" && message.playbackRevision !== undefined && message.playbackRevision !== state.playbackRevision) return;
-        const viewerPlayPause = client.role === "viewer" && (syncMode === "play" || syncMode === "pause");
-        if (client.role !== "host" && !viewerPlayPause) return;
-        if (viewerPlayPause) {
+        const viewerPlayPause = viewerCommand && (syncMode === "play" || syncMode === "pause");
+        if (viewerCommand) {
           const sharedTime = currentTime(state);
           const reportedTime = Math.min(state.mediaDuration, Math.max(0, Number(message.time) || 0));
           const acceptedTime = Math.abs(reportedTime - sharedTime) <= 2 ? reportedTime : sharedTime;
           state.playback = {
-            paused: syncMode === "pause",
-            time: acceptedTime,
-            rate: state.playback.rate,
+            paused: viewerPlayPause ? syncMode === "pause" : state.playback.paused,
+            time: syncMode === "seek" ? reportedTime : viewerPlayPause ? acceptedTime : sharedTime,
+            rate: syncMode === "rate" ? Math.min(4, Math.max(0.25, Number(message.playbackRate) || 1)) : state.playback.rate,
             updatedAt: Date.now()
           };
         } else {
@@ -270,8 +298,8 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
         }
         // Echo viewer play/pause back to its sender so its local shared-state
         // flag is updated too. Host-originated state already matches locally.
-        broadcast({ ...sessionState(state, syncMode), ...(syncMode === "seek" ? { seekSequence: message.commandSequence } : {}) },
-          viewerPlayPause || syncMode === "seek" ? null : ws.clientId);
+        broadcast({ ...sessionState(state, syncMode), ...(syncMode === "seek" ? { seekSequence: message.commandSequence, commandClientId: ws.clientId } : {}) },
+          viewerCommand || syncMode === "seek" ? null : ws.clientId);
         break;
       }
     }

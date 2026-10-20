@@ -13,13 +13,14 @@ class EventTargetDouble {
   removeEventListener(type, fn) {
     this.listeners.set(type, (this.listeners.get(type) || []).filter((item) => item.fn !== fn));
   }
-  dispatchEvent(event) { this.dispatch(event.type, event); return true; }
+  dispatchEvent(event) { return !this.dispatch(event.type, event).defaultPrevented; }
   dispatch(type, properties = {}) {
-    const event = { type, preventDefault() {}, ...properties };
+    const event = { type, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, ...properties };
     for (const item of [...(this.listeners.get(type) || [])]) {
       if (item.once) this.removeEventListener(type, item.fn);
       item.fn(event);
     }
+    return event;
   }
 }
 

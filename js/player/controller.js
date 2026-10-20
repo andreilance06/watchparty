@@ -5,6 +5,7 @@ import { createCompatibilityBuffer } from "./compatibility-buffer.js";
 import { createSubtitles } from "./subtitles.js";
 import { createFullscreen } from "./fullscreen.js";
 import { createPlaybackSync } from "./sync.js";
+import { canControl, DEFAULT_PERMISSIONS } from "../permissions.js";
 
 export function createPlayer({ elements, state: session, send, report, files }) {
   const { video, videoPlaceholder, placeholderTitle, placeholderText, viewerControls,
@@ -14,7 +15,7 @@ export function createPlayer({ elements, state: session, send, report, files }) 
   const mediaEvents = createMediaEventBridge(video);
   const compatibilityBuffer = createCompatibilityBuffer(video);
   createFullscreen({ elements, getHostPaused: () => session.latestHostPaused, afterResize: subtitles.refreshLayout });
-  let latest, sourceKey = "", generation = 0, mode = "", pendingCompatibility = false;
+  let latest, latestAt = 0, sourceKey = "", generation = 0, mode = "", pendingCompatibility = false;
   let switchStarted = 0, lastProgress = 0, lastTime = -1, metrics = {}, selectionStarted = 0;
   const readyState = () => (video.player?.getHLSVideoElement?.() || video.player?.getVideoElement?.() || video).readyState;
 
@@ -74,6 +75,9 @@ export function createPlayer({ elements, state: session, send, report, files }) 
 
   function applySessionState(state) {
     if (!sync.accept(state)) return;
+    files.setSession?.(state);
+    session.sourceOwnerId = state.sourceOwnerId;
+    updateSharingStatus();
     const compatibilityChanged = latest && mode === "compatibility" &&
       state.compatibilityUrl && state.compatibilityUrl !== latest.compatibilityUrl;
     const key = `${state.mediaVersion ?? ""}:${state.originalUrl || state.mediaUrl || ""}`;
@@ -97,7 +101,7 @@ export function createPlayer({ elements, state: session, send, report, files }) 
       placeholderText.textContent = "The host will choose a video file and start the watch party.";
       showNoVideo(session.role === "host" ? "Choose a video to begin" : "Waiting for the host"); return;
     }
-    latest = state;
+    latest = state; latestAt = performance.now();
     fileName.textContent = state.fileName || "Selected video";
     videoPlaceholder.hidden = true; viewerControls.hidden = true;
     if (key !== sourceKey) {
@@ -122,20 +126,76 @@ export function createPlayer({ elements, state: session, send, report, files }) 
 
   function applyRole(role) {
     files.setRole(role); session.role = role;
+    updateSharingStatus();
     roleBadge.textContent = role === "host" ? "Host" : "Viewer";
     roleBadge.classList.toggle("host", role === "host");
     hostControls.hidden = role !== "host"; viewerControls.hidden = true; video.controls = true;
     video.removeAttribute("thumb");
-    video.toggleAttribute("nohotkeys", role !== "host");
-    video.setAttribute("controlslist", role === "host" ? "nocc" : "nocc noseekbuttons noprogress nospeed noloop nopip");
+    updateControls();
     if (role === "host") {
       video.muted = false;
       if (!Number.isFinite(video.volume) || video.volume < 0.05) video.volume = 1;
       video.setAttribute("fastseek", "buttons keys gestures");
       video.setAttribute("persist", "stablevolume aspect"); video.setAttribute("persistkey", "watchparty-host");
-    } else { video.removeAttribute("fastseek"); video.removeAttribute("persist"); }
-    syncStatus.textContent = role === "host" ? "Choose a video to begin" : "Waiting for the host";
+    } else { video.removeAttribute("persist"); }
+    syncStatus.textContent = latest?.hasVideo ? (role === "host" ? "You control playback" : "Synchronized with host") : role === "host" ? "Choose a video to begin" : "Waiting for the host";
   }
+
+  function updateSharingStatus() {
+    elements.fileSharingStatus.hidden = session.role === "host" || !session.sourceOwnerId || session.sourceOwnerId !== session.clientId;
+  }
+
+  function updateControls() {
+    const host = session.role === "host";
+    const flags = ["nocc"];
+    if (!host) flags.push("noloop", "nopip", "noplaylist");
+    if (!canControl(session, "play")) flags.push("noplay", "nocenterplay");
+    if (!canControl(session, "seek")) flags.push("noseekbuttons", "noprogress", "notimeline", "nochapters");
+    if (!canControl(session, "rate")) flags.push("nospeed");
+    video.setAttribute("controlslist", flags.join(" "));
+    video.toggleAttribute("nohotkeys", !host);
+    if (canControl(session, "seek")) video.setAttribute("fastseek", host ? "buttons keys gestures" : "buttons gestures");
+    else video.setAttribute("fastseek", "false");
+  }
+
+  function applyPermissions(value) {
+    session.permissions = { ...(value || DEFAULT_PERMISSIONS) };
+    updateControls();
+  }
+
+  function rejectPlayback(message) {
+    if (sync.reject(message)) applySessionState(message.state);
+  }
+
+  function localIntent(mode, target) {
+    if (session.suppressVideoEvents || session.sourceSwitching) return;
+    if (mode === "rate" && sync.isAppliedRate()) return;
+    if (!canControl(session, mode)) {
+      if (latest && session.activeMediaUrl) {
+        const elapsed = latest.paused ? 0 : (performance.now() - latestAt) / 1000 * (latest.playbackRate || 1);
+        sync.apply({ ...latest, time: Math.min(latest.duration || Infinity, latest.time + elapsed), syncMode: "correction" }, false);
+      }
+      return;
+    }
+    sync.broadcast(mode, target);
+  }
+
+  // Movi's built-in keyboard handler does not gate all transport shortcuts.
+  // Viewers use this small permission-aware handler while hosts keep Movi's.
+  video.addEventListener("keydown", event => {
+    if (session.role === "host" || event.ctrlKey || event.metaKey || event.altKey || !session.activeMediaUrl) return;
+    if ((event.composedPath?.() || []).some(node => /^(INPUT|TEXTAREA|SELECT|BUTTON)$/i.test(node.tagName) || node.isContentEditable)) return;
+    const key = event.key.toLowerCase();
+    if ([" ", "k"].includes(key) && canControl(session, "play")) {
+      event.preventDefault();
+      if (video.paused) video.play().catch(() => {}); else video.pause();
+    } else if (["arrowleft", "arrowright"].includes(key) && canControl(session, "seek")) {
+      event.preventDefault();
+      video.currentTime = Math.max(0, Math.min(latest?.duration || Infinity, video.currentTime + (key === "arrowleft" ? -10 : 10)));
+    } else if (["<", ">"].includes(key) && canControl(session, "rate")) {
+      event.preventDefault(); video.playbackRate = Math.min(4, Math.max(.25, video.playbackRate + (key === "<" ? -.25 : .25)));
+    }
+  });
   function updateEncoder(encoder) {
     if (mode !== "compatibility") return;
     session.activeEncoder = encoder;
@@ -199,14 +259,17 @@ export function createPlayer({ elements, state: session, send, report, files }) 
   chooseVideoButton.addEventListener("click", files.chooseVideo);
   addCaptionsButton.addEventListener("click", files.chooseCaptions);
   removeCaptionButton.addEventListener("click", () => files.removeCaption(subtitles.selectedId()));
-  video.addEventListener("play", () => sync.broadcast("play"));
-  video.addEventListener("pause", () => sync.broadcast("pause"));
-  video.addEventListener("watchparty-seek-intent", event => sync.broadcast("seek", event.detail.time));
+  video.addEventListener("play", () => localIntent("play"));
+  video.addEventListener("pause", () => localIntent("pause"));
+  video.addEventListener("watchparty-seek-intent", event => {
+    if (!session.suppressVideoEvents && !session.sourceSwitching && !canControl(session, "seek")) event.preventDefault();
+    localIntent("seek", event.detail.time);
+  });
   video.addEventListener("seeking", () => {
     metrics.seekStarted = performance.now(); lastProgress = performance.now();
-    if (!video.player?.getHLSVideoElement?.()) sync.broadcast("seek");
+    if (!video.player?.getHLSVideoElement?.()) localIntent("seek");
   });
-  video.addEventListener("ratechange", () => sync.broadcast("rate"));
+  video.addEventListener("ratechange", () => localIntent("rate"));
   setInterval(() => { if (session.role === "host" && !video.paused) sync.broadcast("tick"); }, 2000);
   setInterval(() => {
     if (!latest || !session.activeMediaUrl || pendingCompatibility || mode === "compatibility" || document.hidden) return;
@@ -235,5 +298,5 @@ export function createPlayer({ elements, state: session, send, report, files }) 
   video.addEventListener("nativeaudiounsupported", () => {
     if (latest?.mediaInfo?.hasAudio) requestCompatibility("native audio decoder unavailable");
   });
-  return { applyRole, applySessionState, applyCompatibility, updateCaptions, updateEncoder, showMediaError, showNoVideo };
+  return { applyRole, applyPermissions, rejectPlayback, applySessionState, applyCompatibility, updateCaptions, updateEncoder, showMediaError, showNoVideo };
 }

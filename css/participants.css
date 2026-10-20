@@ -1,0 +1,26 @@
+.participant-item { min-width: 0; }
+button.participant { color: var(--text); cursor: pointer; font-family: var(--font-readable); font-size: .68rem; }
+.participant:hover, .participant[aria-expanded="true"] { border-color: var(--accent); }
+.participant:focus-visible, .participant-dropdown button:focus-visible, .permission-switch input:focus-visible { outline: 2px solid var(--accent-hover); outline-offset: 2px; }
+.participant-blocked { opacity: .55; }
+.participant-blocked .participant-name { text-decoration: line-through; }
+.participant-status.offline { background: var(--muted); }
+.participant-dropdown { position: fixed; z-index: 1000; width: min(288px, calc(100vw - 16px)); overflow-y: auto; padding: 1rem; border: 1px solid var(--border); border-radius: .85rem; background: var(--surface); color: var(--text); box-shadow: var(--shadow-raised); font-family: var(--font-readable); }
+.participant-dropdown[hidden] { display: none; }
+.participant-dropdown h3 { margin: 0; overflow-wrap: anywhere; font-size: .95rem; }
+.participant-detail-role, .participant-provider, #participantStatus, .participant-action-warning { color: var(--muted); font-size: .75rem; line-height: 1.5; }
+.participant-detail-role { margin: .25rem 0 .65rem; }
+#participantStatus { margin: .65rem 0 0; min-height: 1.5em; }
+.permission-switch { display: flex; justify-content: space-between; align-items: center; gap: .6rem; min-height: 2.35rem; font-size: .8rem; cursor: pointer; }
+.permission-switch:has(input:disabled) { cursor: default; }
+.permission-switch input { appearance: none; flex: 0 0 auto; width: 2rem; height: 1.15rem; margin: 0; border: 1px solid var(--muted); border-radius: 1rem; background: var(--surface-3); position: relative; cursor: inherit; }
+.permission-switch input::after { content: ""; position: absolute; top: 2px; left: 2px; width: .75rem; height: .75rem; border-radius: 50%; background: var(--muted); }
+.permission-switch input:checked { background: var(--accent); border-color: var(--accent); }
+.permission-switch input:checked::after { left: calc(100% - .75rem - 2px); background: white; }
+.permission-switch input:disabled { opacity: .65; }
+.participant-actions { display: grid; gap: .45rem; border-top: 1px solid var(--border); margin-top: .65rem; padding-top: .75rem; }
+.participant-actions button { text-align: left; padding: .65rem .75rem; border: 1px solid var(--border); border-radius: .5rem; background: var(--surface-2); color: var(--text); font: inherit; font-size: .8rem; cursor: pointer; }
+.participant-actions button:hover { border-color: var(--accent); }
+.participant-actions button:disabled { opacity: .5; cursor: default; }
+.participant-actions .participant-danger { color: var(--danger); }
+.participant-action-warning { margin: .25rem 0 0; }

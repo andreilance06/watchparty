@@ -5,6 +5,7 @@ const { createTransport } = require("./transport");
 const { createMediaService } = require("./media");
 const { createHostSource } = require("./source-relay");
 const { sanitizeDisplayName } = require("./names");
+const { createModeration } = require("./moderation");
 const scrypt = promisify(crypto.scrypt);
 
 function failure(status, message) { return Object.assign(new Error(message), { status }); }
@@ -24,7 +25,24 @@ function validOrigin(req, config = {}) {
 
 function createRoomRegistry({ config, encoderPromise, bridge }) {
   const rooms = new Map(), codes = new Map();
+  const identitySecret = crypto.randomBytes(32);
   let closing = false;
+
+  function browserIdentity(req, res) {
+    const cookie = (req.headers.cookie || "").split(";").map(part => part.trim())
+      .find(part => part.startsWith("watchparty-browser="))?.slice("watchparty-browser=".length);
+    const sign = id => crypto.createHmac("sha256", identitySecret).update(id).digest("base64url");
+    let id;
+    if (cookie && /^[\da-f-]{36}\.[\w-]{43}$/.test(cookie)) {
+      const [candidate, signature] = cookie.split(".");
+      if (crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(sign(candidate)))) id = candidate;
+    }
+    if (res) {
+      id ||= crypto.randomUUID();
+      res.setHeader("Set-Cookie", `watchparty-browser=${id}.${sign(id)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=34560000${requestProtocol(req, config) === "https:" ? "; Secure" : ""}`);
+    }
+    return id ? `browser:${id}` : null;
+  }
 
   function scheduleExpiry(room) {
     clearTimeout(room.expiryTimer);
@@ -39,8 +57,9 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
     state.basePath = id === "default" ? "" : `/rooms/${id}`;
     const transport = createTransport(state.clients);
     const media = createMediaService({ state, config, encoderPromise, broadcast: transport.broadcast });
-    const room = { id, name, accessCode, passwordHash, salt, state, transport, media, members: new Map() };
+    const room = { id, name, accessCode, passwordHash, salt, state, transport, media, members: new Map(), activeResponses: new Map() };
     room.source = createHostSource({ room, bridge, config });
+    room.moderation = createModeration(room, scheduleExpiry);
     rooms.set(id, room);
     if (accessCode) codes.set(accessCode, room);
     scheduleExpiry(room);
@@ -57,20 +76,47 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
     room.media.reset();
     for (const client of room.state.clients.values()) client.ws.terminate();
     room.members.clear();
+    room.state.viewerPermissions.clear();
+    room.state.blockedParticipants.clear();
+    for (const responses of room.activeResponses.values()) for (const response of responses) response.destroy();
+    room.activeResponses.clear();
   }
 
-  function membership(room, displayName) {
+  function membership(room, displayName, identity = null) {
     if (room.members.size >= 1000) throw failure(429, "This room has too many memberships.");
     if (displayName != null && typeof displayName !== "string") throw failure(400, "Display name must be text.");
-    const member = { id: crypto.randomUUID(), token: crypto.randomBytes(32).toString("base64url"), name: displayName ? sanitizeDisplayName(displayName) : null };
+    const member = { id: crypto.randomUUID(), token: crypto.randomBytes(32).toString("base64url"), permissionIdentity: identity,
+      name: displayName ? sanitizeDisplayName(displayName) : null };
     room.members.set(member.token, member);
     return member;
   }
 
-  function authenticate(req, room) {
+  function cookieMember(req, room) {
     if (!room || room.id === "default") return null;
     const cookie = (req.headers.cookie || "").split(";").map((part) => part.trim()).find((part) => part.startsWith("watchparty-member="));
     return cookie ? room.members.get(cookie.slice("watchparty-member=".length)) || null : null;
+  }
+
+  function assertAdmission(req, room) {
+    const member = cookieMember(req, room);
+    if (room.state.blockedParticipants.has(browserIdentity(req)) ||
+        member && room.state.blockedParticipants.has(member.permissionIdentity || `member:${member.id}`)) {
+      throw Object.assign(failure(403, "You are blocked from this room until a host unblocks you."), { code: "ROOM_BLOCKED" });
+    }
+  }
+
+  function authenticate(req, room) {
+    const member = cookieMember(req, room);
+    return member?.revoked ? null : member;
+  }
+
+  function trackResponse(req, res, room, member) {
+    const key = member?.permissionIdentity || browserIdentity(req) || (member ? `member:${member.id}` : null);
+    if (!key) return;
+    let responses = room.activeResponses.get(key);
+    if (!responses) room.activeResponses.set(key, responses = new Set());
+    responses.add(res);
+    res.once("close", () => { responses.delete(res); if (!responses.size && room.activeResponses.get(key) === responses) room.activeResponses.delete(key); });
   }
 
   function setCookie(req, res, room, member) {
@@ -82,12 +128,12 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
     return {
       room: { id: room.id, name: room.name, accessCode: room.accessCode, passwordRequired: Boolean(room.passwordHash),
         invitePath: `/?room=${encodeURIComponent(room.accessCode)}`, watchPath: `/?roomId=${room.id}` },
-      member: { clientId: member.id, role: room.state.hostId === member.id ? "host" : "viewer" },
+      member: member ? { clientId: member.id, role: room.state.hostId === member.id ? "host" : "viewer" } : null,
       endpoints: { session: `${prefix}/api/session`, leave: `${prefix}/api/leave`, websocket: `${prefix}/ws`, source: `${prefix}/source` }
     };
   }
 
-  async function create(body) {
+  async function create(body, identity = null) {
     if (body.displayName != null && typeof body.displayName !== "string") throw failure(400, "Display name must be text.");
     const name = typeof body.name === "string" ? body.name.replace(/\s+/g, " ").trim() : "";
     if (!name || name.length > 80) throw failure(400, "Enter a room name of at most 80 characters.");
@@ -108,7 +154,7 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
     if (codes.has(accessCode)) throw failure(409, "That access code is already in use.");
     if (rooms.size >= 101) throw failure(429, "The server has reached its room limit.");
     const room = build({ name, accessCode, salt, passwordHash });
-    const member = membership(room, body.displayName);
+    const member = membership(room, body.displayName, identity);
     room.state.hostId = member.id;
     return { room, member };
   }
@@ -117,6 +163,7 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
     if (typeof body.accessCode !== "string") throw failure(400, "An access code is required.");
     const room = codes.get(body.accessCode.trim().toUpperCase());
     if (!room || (expectedRoom && room !== expectedRoom)) throw failure(404, "Room not found.");
+    assertAdmission(req, room);
     const existing = authenticate(req, room);
     if (existing) return { room, member: existing };
     if (room.passwordHash) {
@@ -125,11 +172,12 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
       if (!crypto.timingSafeEqual(candidate, room.passwordHash)) throw failure(401, "Incorrect room password.");
     }
     if (rooms.get(room.id) !== room) throw failure(404, "Room not found.");
-    return { room, member: membership(room, body.displayName) };
+    assertAdmission(req, room);
+    return { room, member: membership(room, body.displayName, browserIdentity(req)) };
   }
 
   const defaultRoom = build({ id: "default", name: "Default room" });
-  return { rooms, defaultRoom, create, join, authenticate, setCookie, describe, scheduleExpiry,
+  return { rooms, defaultRoom, create, join, authenticate, setCookie, describe, scheduleExpiry, browserIdentity, assertAdmission, trackResponse,
     findByCode: (code) => typeof code === "string" ? codes.get(code.trim().toUpperCase()) : null,
     get: (id) => rooms.get(id), close: () => { closing = true; for (const room of [...rooms.values()]) destroy(room); } };
 }

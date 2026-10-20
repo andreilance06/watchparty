@@ -78,6 +78,8 @@ The server records the authenticated client as the suggestion owner and includes
 
 ## Control connection and file declaration
 
+Before opening a control socket, call `POST /api/viewer-identity` (no body required). It returns `{ "ready": true }` and sets or refreshes a persistent `watchparty-browser` cookie (`Path=/`, `HttpOnly`, `SameSite=Strict`, and `Secure` under HTTPS). The cookie is signed with a per-process secret and has a rolling 400-day browser lifetime. It identifies a browser for room permissions only; it does not grant room admission. Invalid signatures or a server restart cause a fresh identity on the next bootstrap. Clients without this cookie use their server-known membership or connection identity and cannot retain public-room grants after reconnecting.
+
 Open `endpoints.websocket`, then send the existing `{ "type": "join", "name": "Alex" }` message. Membership/role comes from the server cookie, not a client-provided ID or role. Existing playback, chat, participant, reaction, and voting messages apply only inside this room. The creator's host slot is reserved even when a viewer connects first.
 
 The host opens a standard browser file chooser and retains the `File` objects. Declare one video and up to eight sidecar files:
@@ -126,26 +128,54 @@ The client applies this shared clock snapshot while replacing its local playback
 
 Compatibility output uses frame-aligned segments near two seconds, produced by a continuous encoder. AAC is retained across segment boundaries and pause/resume. A private loopback HTTP sink withholds upload permission beyond the shared playhead (plus two segments while playing). Paused playback permits the target, preceding preroll, and a bounded fragment-zero bootstrap; seeks near a segment end may also decode one following fragment. Playlists advertise the shared start position for late joins. Seeks create a new stream generation, cancel old output, and reclaim retired files; clients must use the new compatibility URL. Output is H.264 High/Level 4.1, YUV420/AAC, at most 30 fps and 1920×1080 without upscaling, with HDR-to-SDR tone mapping. Direct playback retains the original source resolution.
 
-`session-state` also includes `playbackRevision` and `streamGeneration`. Playback commands include `mediaVersion`, `playbackRevision`, and an increasing per-connection `commandSequence`. A host seek advances the revision and broadcasts an acknowledgement to all clients, including the host, with `seekSequence` matching the command. Ignore superseded seek acknowledgements; hold host ticks until the latest acknowledgement. Ticks from an older revision are rejected. Legacy commands without these fields remain accepted. Native HLS recovery seeks are local events and must not be sent as host commands. Encoder recovery also advances the compatibility generation, preserving the room clock.
+`session-state` also includes `playbackRevision` and `streamGeneration`. Playback commands include `mediaVersion`, `playbackRevision`, and an increasing per-connection `commandSequence`. An authorized seek advances the revision and broadcasts an acknowledgement to all clients, including its sender, with `seekSequence` matching the command and `commandClientId` identifying its sender. Match both fields when acknowledging pending local seeks; a newer revision from another participant supersedes older pending intent. Hold host ticks until the latest acknowledgement. Ticks from an older revision are rejected. Legacy commands without these fields remain accepted subject to permissions. Native HLS recovery seeks are local events and must not be sent as shared commands. Encoder recovery also advances the compatibility generation, preserving the room clock.
+
+## Viewer permissions
+
+Click a name in the chatroom's Participants list to open its dropdown. Everyone can inspect Play/pause, Seek, and Playback speed permissions; only the host can edit a connected viewer. The dropdown closes on another name, an outside click, or Escape. There is no separate permissions panel below the player. Role messages and participants in presence/party snapshots include effective `permissions: { playPause, seek, playbackRate }`.
+
+Only the current host can send:
+
+```json
+{ "type": "set-viewer-permissions", "clientId": "viewer-client-id",
+  "permissions": { "playPause": true, "seek": true, "playbackRate": false } }
+```
+
+All three values must be booleans, with no additional permission keys. The target must be a connected viewer in that room. Include a `requestId` to correlate UI updates. Success broadcasts `{ type: "permissions-updated", clientId, requestId, permissions }` for each affected connection. Connections from the same browser profile share room grants. Invalid requests return `{ type: "error", action: "set-viewer-permissions", clientId, requestId, message }` to the requester.
+
+Defaults are play/pause enabled, seeking and playback speed disabled. Hosts always have full control. The server checks every viewer command: `play`/`pause` require `playPause`, `seek` requires `seek`, and `rate` requires `playbackRate`; viewer ticks and other modes are rejected. A viewer's command cannot modify other playback properties. Accepted commands are echoed to all room clients. Denied commands receive `{ type: "playback-rejected", commandSequence, message, state }`, where `state` is an authoritative session snapshot with `syncMode: "correction"`; clear matching pending intent and restore shared playback.
+
+Grants survive disconnects, renaming, explicit leave/rejoin, media changes, and another host taking over. They are cleared for a browser when it becomes host, and for the whole room on expiry or server restart. A host who transfers control receives default viewer permissions. The persistent browser cookie survives explicit leave; room membership does not. Clearing cookies, another browser profile, or browser-enforced cookie expiry produces a new identity.
+
+## Participant moderation and host transfer
+
+Hosts can send `{ type, requestId, clientId }`, with `type` equal to `block-participant`, `unblock-participant`, or `transfer-host`. `requestId` must be nonempty text of at most 100 characters. Success returns `{ type: "participant-action-complete", action, requestId, clientId }`; errors return `{ type: "error", action, requestId, clientId, message }`. Only the current connected host may act. Blocking/transferring requires a connected viewer in this room; self/host blocking is rejected, including blocking another tab from the host's own browser identity.
+
+Presence and party snapshots include `connected`, `blocked`, and `suppliesVideo` for participants. A blocked entry retains its last name, permissions, and client ID, stays dimmed/crossed out, and has an Unblock action for the host. It is excluded from the online count and cannot receive permissions or host ownership. Unblocking removes its offline entry and preserves grants; the viewer must manually rejoin. Blocks follow the existing browser identity, affect all matching tabs, survive host changes, and expire with the room or server. Names are never used as credentials.
+
+Blocking closes the viewer's control/source sockets and active media responses. A `room-blocked` notice precedes close code **4003**; stop automatic reconnection and return to room selection. HTTP room admission/media requests return **403** with `{ code: "ROOM_BLOCKED", error }`, and socket upgrades return 403. Private memberships are revoked and must be reacquired after unblock. `GET /api/session` provides default-room admission preflight; private rooms use their existing session endpoint. Room creation and access to other rooms remain available.
+
+Transfer demotes the old host, promotes the target, advances `playbackRevision`, sends role messages to both, and broadcasts `session-state` with `syncMode: "host-transfer"`. Clear pending commands from the previous revision. The source, media version, compatibility generation, pause state, rate, time, and caption selections are preserved. Session snapshots include `sourceId` and `sourceOwnerId`; these are metadata, never attachment credentials. The original provider keeps answering declared byte reads after becoming a viewer. A host change does not clear File objects or relay connections. If the provider leaves, refreshes, loses its connection, or is blocked, the current video becomes unavailable and the host can select a replacement.
 
 ## Caption changes during playback
 
 `session-state` includes `mediaVersion`. Each caption has a stable `id`, URL, label, language, format, optional source `fileId`, and a `fonts` array of room-scoped attachment URLs. Captions and fonts are fetched only when needed. A caption failure does not invalidate video readiness.
 
 - Add: `{ type: "captions-add", requestId, sourceId, files: [fileMetadata] }`. Retain the newly declared browser files on the same data connection. One batch accepts up to eight files, with at most 16 active tracks including embedded captions.
+- If the current host is not the video provider, first send `{ type: "caption-provider-register", requestId, sourceId, files }`. The host alone receives `caption-provider-registered` with `providerId`, `sourceId`, single-use `token`, and `relayPath`. Attach a separate data socket using `{ type: "source-attach", sourceId, providerId, token }`, then send `captions-add` with that `providerId` and the same file metadata. Requests/replies use the existing bounded byte protocol and cannot satisfy another provider's reads. After normalization the server releases these files and closes the temporary relay; its loss never clears the video. Initial/video-provider captions retain the original flow.
 - Remove: `{ type: "caption-remove", requestId, sourceId, trackId }`. Both embedded and added tracks may be removed.
 - Success acknowledges `captions-managed` with the caller's `requestId`. Failure sends an `error` with that ID. Failed additions do not alter the active list.
 - Successful edits broadcast `{ type: "captions-updated", mediaVersion, captions }` to that room. Ignore stale generations. Do not change the video source, playback time, pause state, or encoded segments.
 - Preserve each viewer's selection by track ID, including Off. Removing the selected track switches that viewer to Off; additions never override their choice.
-- `source-release-file { sourceId, fileId }` instructs the host to release an unused sidecar `File` object only for that source generation. Source replacement/connection loss releases the whole set.
+- `source-release-file { sourceId, fileId }` instructs the file's provider to release an unused sidecar `File` object only for that source generation. `source-ended { sourceId }` releases that provider's files and sockets for an invalidated source. A role change alone releases neither.
 
 The player provides Choose Video, Add captions, and Remove selected caption. The last action removes the host's currently selected track for the room; caption selection and Off live in Movi's Captions control and remain local to each viewer. JASSUB renders normalized ASS inside Movi's public overlay/renderer interfaces.
 
 ## Lifecycle and configuration
 
-One membership has one active control socket. A reconnect replaces it; replacing a host socket clears its browser source without handing the room to someone else. A true host departure clears the video and promotes a connected viewer. The new host must select a file from their own device. A data-only connection failure clears the video but retains host ownership. Heartbeats clean up dead sockets.
+One membership has one active control socket. A reconnect replaces it; replacing the video provider's socket clears its browser source. Host departure promotes a connected viewer and preserves media if its provider remains connected. Provider departure clears media, independently of host ownership. A failed temporary caption relay only cancels its own reads. Heartbeats clean up dead sockets.
 
-The host must keep the page open and connected. Refreshing loses File objects; browser/mobile suspension can interrupt file reads. There is no installed helper, full-file staging, or background hosting service.
+The video provider must keep the page open and connected, including after transferring host. Refreshing loses File objects; browser/mobile suspension can interrupt file reads. There is no installed helper, full-file staging, or background hosting service.
 
 Rooms are in memory, expire after 30 minutes without control connections (including rooms whose creator never connects), and disappear on restart. Source sockets, pending reads, encoding/subtitle jobs, memberships, and temporary files are cleared on departure/expiry/shutdown. The default room does not expire.
 

@@ -7,6 +7,10 @@ function createPlayback() {
 function createSession() {
   return {
     clients: new Map(),
+    viewerPermissions: new Map(),
+    blockedParticipants: new Map(),
+    sourceId: null,
+    sourceOwnerId: null,
     hostId: null,
     basePath: "",
     fileName: null,
@@ -43,6 +47,7 @@ function sessionState(state, syncMode = "tick") {
     ? `${state.basePath || ""}/hls/master.m3u8?v=${state.mediaVersion}&g=${state.streamGeneration || 0}` : null;
   return {
     type: "session-state", hasVideo: Boolean(state.mediaPath && state.mediaReady),
+    sourceId: state.sourceId, sourceOwnerId: state.sourceOwnerId,
     processing: state.mediaProcessing, mediaVersion: state.mediaVersion,
     mediaUrl: compatibilityUrl,
     playbackRevision: state.playbackRevision,

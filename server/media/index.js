@@ -86,6 +86,7 @@ function createMediaService({ state, config, encoderPromise, broadcast }) {
     state.playbackRevision += 1;
     state.mediaPath = null;
     state.sourceId = null;
+    state.sourceOwnerId = null;
     state.fileName = null;
     state.mediaReady = false;
     state.mediaProcessing = false;

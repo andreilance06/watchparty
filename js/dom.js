@@ -1,5 +1,7 @@
 export function getElements(root = document) {
   const ids = [
+    "participantDropdown", "participantDetails", "participantStatus",
+    "fileSharingStatus",
     "video", "videoShell", "videoPlaceholder", "hostControls", "chooseVideoButton",
     "viewerControls", "fullscreenButton", "roleBadge", "connectionStatus", "statusDot",
     "fileName", "syncStatus", "viewerCount", "nameForm",

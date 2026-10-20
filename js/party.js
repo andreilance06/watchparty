@@ -4,7 +4,7 @@ const REACTIONS = [
 ];
 
 export function createParty({ elements, send }) {
-  const { participantList, reactionFeed, floatingReactions } = elements;
+  const { reactionFeed, floatingReactions } = elements;
   const animations = new Map();
   const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
 
@@ -33,25 +33,6 @@ export function createParty({ elements, send }) {
     if (reducedMotion.matches) for (const reaction of animations.keys()) removeFloatingReaction(reaction);
   });
 
-  function updateParticipants(participants = []) {
-    participantList.replaceChildren();
-    for (const participant of participants) {
-      const item = document.createElement("li");
-      item.className = "participant";
-      const indicator = document.createElement("span");
-      indicator.className = "participant-status online";
-      indicator.setAttribute("aria-label", "Connected");
-      const name = document.createElement("span");
-      name.className = "participant-name";
-      name.textContent = participant.name;
-      const role = document.createElement("span");
-      role.className = "participant-role";
-      role.textContent = participant.role === "host" ? "Host" : "Viewer";
-      item.append(indicator, name, role);
-      participantList.appendChild(item);
-    }
-  }
-
   function receiveReaction(message) {
     const reaction = document.createElement("p");
     reaction.className = "reaction-item";
@@ -65,5 +46,5 @@ export function createParty({ elements, send }) {
     elements[id].addEventListener("click", () => send({ type: "reaction", emoji }));
   }
 
-  return { updateParticipants, receiveReaction };
+  return { receiveReaction };
 }

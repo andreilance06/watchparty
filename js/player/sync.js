@@ -1,6 +1,9 @@
+import { canControl } from "../permissions.js";
+
 export function createPlaybackSync({ elements, state: session, send }) {
   const { video, syncStatus } = elements;
   let sequence = 0, commandSequence = 0, pendingSeek, queuedTransport, queuedRate;
+  let appliedRate;
   let cleanup = () => {}, applying = false, settle = () => {};
   const surface = () => video.player?.getHLSVideoElement?.() || video.player?.getVideoElement?.() || video;
 
@@ -16,8 +19,15 @@ export function createPlaybackSync({ elements, state: session, send }) {
     if (state.mediaVersion !== session.mediaVersion) pendingSeek = queuedTransport = queuedRate = null;
     if (state.mediaVersion === session.mediaVersion &&
         (state.playbackRevision ?? 0) < (session.playbackRevision ?? 0)) return false;
+    if (state.syncMode === "host-transfer") pendingSeek = queuedTransport = queuedRate = null;
     if (pendingSeek && state.mediaVersion === session.mediaVersion) {
-      if (state.syncMode !== "seek" || state.seekSequence < pendingSeek) return false;
+      if (state.syncMode !== "seek") return false;
+      const own = !state.commandClientId || state.commandClientId === session.clientId;
+      if (own && state.seekSequence < pendingSeek) return false;
+      if (!own) {
+        if ((state.playbackRevision ?? 0) <= (session.playbackRevision ?? 0)) return false;
+        queuedTransport = queuedRate = null;
+      }
       pendingSeek = null;
     }
     session.playbackRevision = state.playbackRevision ?? 0;
@@ -25,11 +35,11 @@ export function createPlaybackSync({ elements, state: session, send }) {
   }
 
   function apply(state, sourceChanged) {
-    if (session.role === "host" && queuedTransport) state = { ...state, paused: queuedTransport === "pause" };
-    if (session.role === "host" && Number.isFinite(queuedRate)) state = { ...state, playbackRate: queuedRate };
+    if (queuedTransport && canControl(session, queuedTransport)) state = { ...state, paused: queuedTransport === "pause" };
+    if (Number.isFinite(queuedRate) && canControl(session, "rate")) state = { ...state, playbackRate: queuedRate };
     const mode = state.syncMode || "tick";
     // The host owns its clock. Viewer play/pause remains shared.
-    if (session.role === "host" && !sourceChanged && !["source", "join", "seek", "play", "pause"].includes(mode)) return;
+    if (session.role === "host" && !sourceChanged && !["source", "join", "seek", "play", "pause", "rate", "correction", "host-transfer"].includes(mode)) return;
     if (applying && !sourceChanged && mode === "tick") return;
     cancel();
     const token = sequence;
@@ -51,7 +61,7 @@ export function createPlaybackSync({ elements, state: session, send }) {
       settle = () => {};
       session.sourceSwitching = false;
       session.suppressVideoEvents = false;
-      if (Number.isFinite(queuedRate)) { queuedRate = null; broadcastVideoState("rate"); }
+      if (Number.isFinite(queuedRate)) { queuedRate = null; appliedRate = undefined; broadcastVideoState("rate"); }
       if (queuedTransport) { const intent = queuedTransport; queuedTransport = null; broadcastVideoState(intent); }
     };
     const applyPlayback = () => {
@@ -59,13 +69,14 @@ export function createPlaybackSync({ elements, state: session, send }) {
       initiated = true; setting = true;
       const active = surface();
       const difference = Number.isFinite(state.time) ? state.time - active.currentTime : 0;
-      const hardSync = sourceChanged || ["source", "join", "seek"].includes(mode);
+      const hardSync = sourceChanged || ["source", "join", "seek", "correction"].includes(mode);
       const threshold = hardSync ? 0.25 : mode === "tick" ? 1 : mode === "pause" ? 0.75 : 1.5;
       const hostRate = Number.isFinite(state.playbackRate) ? state.playbackRate : 1;
       let targetRate = hostRate;
       if (session.role === "viewer" && mode === "tick" && !state.paused && Math.abs(difference) >= 0.12 && Math.abs(difference) <= 1) {
         targetRate += Math.max(-0.05, Math.min(0.05, difference * 0.1));
       }
+      appliedRate = targetRate;
       if (Math.abs(video.playbackRate - targetRate) > 0.005) video.playbackRate = targetRate;
       if (Number.isFinite(state.time) && Math.abs(difference) > threshold) video.currentTime = state.time;
       if (state.paused) {
@@ -94,26 +105,37 @@ export function createPlaybackSync({ elements, state: session, send }) {
   }
 
   function broadcastVideoState(syncMode = "tick", target) {
+    if (syncMode === "rate" && isAppliedRate()) return;
+    if (!canControl(session, syncMode) || session.sourceSwitching || session.suppressVideoEvents || !session.activeMediaUrl) return;
     // A play/pause immediately following a seek belongs to the new revision;
     // retain that intent until its acknowledgement has settled locally.
-    if (session.role === "host" && pendingSeek) {
+    if (pendingSeek) {
       if (["play", "pause"].includes(syncMode)) { queuedTransport = syncMode; return; }
       if (syncMode === "rate") { queuedRate = video.playbackRate; return; }
     }
-    const viewerPlayPause = session.role === "viewer" && ["play", "pause"].includes(syncMode);
-    if ((session.role !== "host" && !viewerPlayPause) || session.sourceSwitching ||
-        session.suppressVideoEvents || !session.activeMediaUrl || pendingSeek && syncMode !== "seek") return;
+    if (pendingSeek && syncMode !== "seek") return;
     const native = surface();
     const number = ++commandSequence;
     if (syncMode === "seek") pendingSeek = number;
     // Movi can emit transport intent before it changes the native element.
     const paused = syncMode === "play" ? false : syncMode === "pause" ? true : native.paused;
     session.latestHostPaused = paused;
-    send({ type: "video-state", mediaVersion: session.mediaVersion,
+    const sent = send({ type: "video-state", mediaVersion: session.mediaVersion,
       playbackRevision: session.playbackRevision ?? 0, commandSequence: number,
       paused, time: Number.isFinite(target) ? target : native.currentTime,
       playbackRate: video.playbackRate, syncMode });
+    if (sent === false) pendingSeek = queuedTransport = queuedRate = null;
   }
 
-  return { apply, accept, cancel, update: () => settle(), isApplying: () => applying, broadcast: broadcastVideoState };
+  function reject(message) {
+    if (pendingSeek && message.commandSequence !== pendingSeek) return false;
+    pendingSeek = queuedTransport = queuedRate = null;
+    return true;
+  }
+
+  // Native ratechange can arrive after seek/canplay has released suppression.
+  // Drift correction must never become a viewer's shared speed command.
+  function isAppliedRate() { return Number.isFinite(appliedRate) && Math.abs(video.playbackRate - appliedRate) <= 0.005; }
+
+  return { apply, accept, cancel, reject, isAppliedRate, update: () => settle(), isApplying: () => applying, broadcast: broadcastVideoState };
 }
