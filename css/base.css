@@ -30,6 +30,7 @@
   --content-strong: #e6e9f0;
   --shadow: 0 20px 60px rgba(0, 0, 0, .28);
   --shadow-raised: 0 16px 40px rgba(0, 0, 0, .22);
+  --font-readable: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color-scheme: dark;
   font-family: "Altone", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
@@ -211,6 +212,154 @@ button,
   color: var(--danger);
   font-size: .75rem;
   text-align: center;
+}
+
+.room-info {
+  position: relative;
+  z-index: 9;
+  grid-area: room;
+  width: 100%;
+}
+
+.room-info[hidden] {
+  display: none;
+}
+
+.room-info-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 4.25rem;
+  padding: .7rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: .9rem;
+  color: var(--text);
+  background: var(--surface);
+}
+
+.room-info-current {
+  min-width: 0;
+}
+
+.room-info-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .06em;
+  line-height: 1.3;
+}
+
+.room-info-name {
+  overflow: hidden;
+  margin: .15rem 0 0;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-info-invite {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .55rem;
+  flex: 0 0 auto;
+  min-height: 2.4rem;
+  padding: .45rem .8rem;
+  border: 1px solid var(--border);
+  border-radius: .65rem;
+  color: var(--accent-soft-text);
+  background: var(--surface-2);
+  font: inherit;
+  font-size: .82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color .18s ease, background .18s ease;
+}
+
+.room-info-invite:hover,
+.room-info-invite[aria-expanded="true"] {
+  border-color: var(--accent);
+  background: var(--surface-3);
+}
+
+.room-info-invite:focus-visible,
+.room-info-copy:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.room-info-chevron {
+  width: 1rem;
+  height: 1rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform .18s ease;
+}
+
+.room-info-invite[aria-expanded="true"] .room-info-chevron {
+  transform: rotate(180deg);
+}
+
+.room-info-details {
+  position: absolute;
+  top: calc(100% + .4rem);
+  right: 0;
+  width: min(100%, 19rem);
+  padding: .85rem;
+  border: 1px solid var(--border);
+  border-radius: .75rem;
+  background: var(--surface);
+  box-shadow: var(--shadow-raised);
+}
+
+.room-info-details[hidden] {
+  display: none;
+}
+
+.room-info-code-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .7rem;
+  margin-top: .45rem;
+}
+
+.room-info-code {
+  overflow-wrap: anywhere;
+  color: var(--accent-soft-text);
+  font-size: .95rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+}
+
+.room-info-copy {
+  flex: 0 0 auto;
+  padding: .35rem .6rem;
+  border: 1px solid var(--border);
+  border-radius: .5rem;
+  color: var(--text);
+  background: var(--surface-2);
+  font: inherit;
+  font-size: .72rem;
+  cursor: pointer;
+}
+
+.room-info-copy:hover {
+  border-color: var(--accent);
+}
+
+.room-info-status {
+  min-height: .9rem;
+  margin: .45rem 0 0;
+  color: var(--muted);
+  font-size: .75rem;
 }
 
 .connection {

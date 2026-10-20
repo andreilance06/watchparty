@@ -98,6 +98,28 @@
   </section>
 
   <main class="watch-layout">
+    <section id="roomInfo" class="room-info" hidden aria-label="Current room">
+      <div class="room-info-bar">
+        <div class="room-info-current">
+          <p class="room-info-label">CURRENT ROOM</p>
+          <p id="roomInfoName" class="room-info-name"></p>
+        </div>
+        <button id="roomInfoToggle" class="room-info-invite" type="button" aria-expanded="false" aria-controls="roomInfoDetails">
+          Invite
+          <svg class="room-info-chevron" viewBox="0 0 20 20" aria-hidden="true">
+            <path d="m5 7.5 5 5 5-5" />
+          </svg>
+        </button>
+      </div>
+      <div id="roomInfoDetails" class="room-info-details" hidden>
+        <p class="room-info-label">ACCESS CODE</p>
+        <div class="room-info-code-row">
+          <output id="roomInfoCode" class="room-info-code"></output>
+          <button id="copyCurrentRoomCode" class="room-info-copy" type="button">Copy</button>
+        </div>
+        <p id="roomInfoStatus" class="room-info-status" role="status" aria-live="polite"></p>
+      </div>
+    </section>
     <section class="player-panel" aria-labelledby="player-title">
       <div class="panel-heading">
         <div>

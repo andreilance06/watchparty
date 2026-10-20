@@ -119,6 +119,10 @@ test("public room controls reopen room selection without reconnecting twice", as
   el("continuePublicRoom").dispatch("click");
   assert.equal(browser.sockets.length, 1);
   assert.equal(el("roomEntry").hidden, true);
+  assert.equal(el("roomInfo").hidden, false);
+  assert.equal(el("roomInfoName").textContent, "Default room");
+  assert.equal(el("roomInfoCode").textContent, "No access code (public room)");
+  assert.equal(el("copyCurrentRoomCode").hidden, true);
   el("roomActionButton").dispatch("click");
   assert.equal(el("roomEntry").hidden, false);
   el("continuePublicRoom").dispatch("click");
@@ -132,13 +136,32 @@ test("private room control leaves through the API and returns to room selection"
   browser.context.fetch = async (url, options = {}) => {
     requests.push({ url, options });
     if (url.endsWith("/api/session")) {
-      return { ok: true, json: async () => ({ endpoints: { websocket: "/rooms/private-room/ws" } }) };
+      return { ok: true, json: async () => ({
+        room: { name: "Friday Films", accessCode: "FRIDAY" },
+        endpoints: { websocket: "/rooms/private-room/ws" }
+      }) };
     }
     return { ok: true, json: async () => ({ left: true }) };
   };
   await browser.load("js/app.js");
   const el = (id) => browser.elements.get(id);
   assert.equal(el("roomEntry").hidden, true);
+  assert.equal(el("roomInfo").hidden, false);
+  assert.equal(el("roomInfoName").textContent, "Friday Films");
+  assert.equal(el("roomInfoCode").textContent, "FRIDAY");
+  assert.equal(el("copyCurrentRoomCode").hidden, false);
+  const copied = [];
+  browser.context.navigator = { clipboard: { writeText: async (code) => copied.push(code) } };
+  el("roomInfoToggle").dispatch("click");
+  assert.equal(el("roomInfoDetails").hidden, false);
+  assert.equal(el("roomInfoToggle").getAttribute("aria-expanded"), "true");
+  el("copyCurrentRoomCode").dispatch("click");
+  await flush();
+  assert.deepEqual(copied, ["FRIDAY"]);
+  assert.equal(el("roomInfoStatus").textContent, "Access code copied.");
+  browser.document.dispatch("keydown", { key: "Escape" });
+  assert.equal(el("roomInfoDetails").hidden, true);
+  assert.equal(el("roomInfoToggle").getAttribute("aria-expanded"), "false");
   assert.equal(el("roomActionButton").textContent, "Leave room / switch");
   el("roomActionButton").dispatch("click");
   await flush();
@@ -151,7 +174,10 @@ test("private room control reports leave errors and remains usable", async () =>
   const browser = createBrowserDouble({ autoContinuePublic: false });
   browser.context.location.search = "?roomId=private-room";
   browser.context.fetch = async (url) => url.endsWith("/api/session")
-    ? { ok: true, json: async () => ({ endpoints: { websocket: "/rooms/private-room/ws" } }) }
+    ? { ok: true, json: async () => ({
+      room: { name: "Friday Films", accessCode: "FRIDAY" },
+      endpoints: { websocket: "/rooms/private-room/ws" }
+    }) }
     : { ok: false, json: async () => ({ error: "Membership expired." }) };
   await browser.load("js/app.js");
   const el = (id) => browser.elements.get(id);

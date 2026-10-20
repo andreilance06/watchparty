@@ -23,7 +23,12 @@ if (roomId) {
   try {
     const response = await fetch(`/rooms/${encodeURIComponent(roomId)}/api/session`);
     if (!response.ok) throw new Error("Join this room before opening its watch page.");
-    socketPath = (await response.json()).endpoints.websocket;
+    const session = await response.json();
+    socketPath = session.endpoints.websocket;
+    elements.roomInfoName.textContent = session.room.name;
+    elements.roomInfoCode.textContent = session.room.accessCode || "No access code (public room)";
+    elements.copyCurrentRoomCode.hidden = !session.room.accessCode;
+    elements.roomInfo.hidden = false;
   } catch (error) {
     setConnectionStatus(elements, false, error.message);
     throw error;

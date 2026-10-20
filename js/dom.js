@@ -12,7 +12,9 @@ export function getElements(root = document) {
     "createRoomForm", "createRoomName", "createRoomCode", "createRoomPassword", "createRoomBack",
     "joinRoomForm", "joinRoomCode", "joinRoomPassword", "joinRoomBack", "continuePublicRoom",
     "roomEntryStatus", "roomEntrySuccess", "createdRoomCode", "copyRoomCode", "roomInviteLink",
-    "enterCreatedRoom", "roomActionButton", "roomActionStatus"
+    "enterCreatedRoom", "roomActionButton", "roomActionStatus",
+    "roomInfo", "roomInfoToggle", "roomInfoName", "roomInfoDetails", "roomInfoCode",
+    "copyCurrentRoomCode", "roomInfoStatus"
   ];
   const elements = Object.fromEntries(ids.map((id) => [id, root.querySelector(`#${id}`)]));
   elements.placeholderTitle = elements.videoPlaceholder.querySelector("strong");

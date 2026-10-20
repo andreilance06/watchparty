@@ -24,6 +24,7 @@
   border-radius: .55rem;
   color: var(--text);
   background: var(--surface-2);
+  font-family: var(--font-readable);
   font-size: .75rem;
 }
 
@@ -34,7 +35,7 @@
   color: white;
   background: var(--accent);
   font-size: .75rem;
-  font-weight: 750;
+  font-weight: 700;
   cursor: pointer;
 }
 
@@ -292,7 +293,7 @@
   color: var(--accent-soft-text);
   background: rgba(124, 92, 255, .18);
   font-size: .68rem;
-  font-weight: 750;
+  font-weight: 700;
   cursor: pointer;
   transition: background .18s ease, border-color .18s ease;
 }

@@ -48,7 +48,7 @@ Viewers use `/api/rooms/join` with the code/password, then navigate to the retur
 
 `GET /rooms/:roomId/api/session` restores metadata and the current role. `POST /rooms/:roomId/api/leave` revokes the caller's membership and connections and expires the cookie. Requests to other rooms cannot reuse that membership. Cookies have room-specific paths and gain `Secure` over HTTPS. Browser mutations/upgrades require a matching Origin when one is supplied.
 
-The private-room header's **Leave room / switch** button calls the leave endpoint and returns to the root room chooser. From the public room, **Choose or create a room** reopens the chooser without creating another public-room connection.
+The room name appears above the player panel while connected. Use **Invite** to view and copy the private-room access code; the public default room is labeled as having no access code. The private-room header's **Leave room / switch** button calls the leave endpoint and returns to the root room chooser. From the public room, **Choose or create a room** reopens the chooser without creating another public-room connection.
 
 Errors return `{ "error": "message" }`: `400` invalid input, `401` missing membership/incorrect password, `403` forbidden origin, `404` missing room/endpoint, `405` wrong method, `409` code collision, `413` body over 16 KiB, and `429` admission limits. The defaults permit 100 private rooms, 1,000 memberships per room, and 30 admission attempts per address per minute. No public room listing exists.
 

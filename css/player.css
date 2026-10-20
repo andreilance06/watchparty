@@ -150,7 +150,7 @@
   border-radius: .65rem;
   color: white;
   background: var(--accent);
-  font-weight: 750;
+  font-weight: 700;
   font-size: .82rem;
   cursor: pointer;
   transition: background .2s ease, transform .2s ease;

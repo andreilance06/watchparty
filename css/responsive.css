@@ -28,7 +28,9 @@
 @media (min-width: 1100px) {
   .watch-layout {
     grid-template-columns: minmax(0, 1fr) 340px;
-    grid-template-areas: "player chat";
+    grid-template-areas:
+      "room ."
+      "player chat";
     align-items: stretch;
     padding: 1.5rem;
   }
@@ -60,6 +62,8 @@
   .theme-toggle { width: 2.2rem; height: 2.2rem; }
 
   .watch-layout { gap: .6rem; padding: .6rem; }
+  .room-info-bar { min-height: 3.75rem; padding: .55rem .75rem; }
+  .room-info-name { font-size: .95rem; }
 
   .chat-panel {
     height: clamp(30rem, 100vh, 50rem);

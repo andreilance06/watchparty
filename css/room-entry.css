@@ -96,7 +96,8 @@
   color: var(--text);
   background: var(--surface-2);
   font: inherit;
-  font-weight: 450;
+  font-family: var(--font-readable);
+  font-weight: 400;
   transition: border-color .18s ease, box-shadow .18s ease, background .18s ease;
 }
 
@@ -114,7 +115,7 @@
 
 .room-entry-optional {
   color: var(--muted);
-  font-weight: 450;
+  font-weight: 400;
 }
 
 .room-entry-form-actions {
@@ -198,7 +199,7 @@
   color: var(--accent-soft-text);
   background: var(--surface-2);
   font-size: 1.2rem;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: .12em;
   text-align: center;
   user-select: all;

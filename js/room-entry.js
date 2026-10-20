@@ -4,12 +4,40 @@ export function initializeRoomEntry(elements, { guestName, onLeave = () => {} })
     createRoomForm, createRoomName, createRoomCode, createRoomPassword, createRoomBack,
     joinRoomForm, joinRoomCode, joinRoomPassword, joinRoomBack, continuePublicRoom,
     roomEntryStatus, roomEntrySuccess, createdRoomCode, copyRoomCode, roomInviteLink,
-    enterCreatedRoom, roomActionButton, roomActionStatus
+    enterCreatedRoom, roomActionButton, roomActionStatus,
+    roomInfo, roomInfoToggle, roomInfoName, roomInfoDetails, roomInfoCode, copyCurrentRoomCode, roomInfoStatus
   } = elements;
   const params = new URLSearchParams(location.search || "");
   const roomId = params.get("roomId");
   let createdRoomPath = "";
   roomEntry.hidden = Boolean(roomId);
+  function showRoomInfo(name, accessCode = "") {
+    roomInfoName.textContent = name;
+    roomInfoCode.textContent = accessCode || "No access code (public room)";
+    copyCurrentRoomCode.hidden = !accessCode;
+    roomInfoStatus.textContent = "";
+    roomInfo.hidden = false;
+  }
+
+  roomInfoToggle.addEventListener("click", () => {
+    const expanded = roomInfoToggle.getAttribute("aria-expanded") === "true";
+    roomInfoToggle.setAttribute("aria-expanded", String(!expanded));
+    roomInfoDetails.hidden = expanded;
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || roomInfoDetails.hidden) return;
+    roomInfoDetails.hidden = true;
+    roomInfoToggle.setAttribute("aria-expanded", "false");
+    roomInfoToggle.focus();
+  });
+  copyCurrentRoomCode.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(roomInfoCode.textContent);
+      roomInfoStatus.textContent = "Access code copied.";
+    } catch {
+      roomInfoStatus.textContent = "Copy unavailable. Select the access code to copy it.";
+    }
+  });
 
   function showMode(mode) {
     const creating = mode === "create";
@@ -81,7 +109,10 @@ export function initializeRoomEntry(elements, { guestName, onLeave = () => {} })
   joinRoomChoice.addEventListener("click", () => showMode("join"));
   createRoomBack.addEventListener("click", returnToChoices);
   joinRoomBack.addEventListener("click", returnToChoices);
-  continuePublicRoom.addEventListener("click", () => { roomEntry.hidden = true; });
+  continuePublicRoom.addEventListener("click", () => {
+    roomEntry.hidden = true;
+    showRoomInfo("Default room");
+  });
   if (roomId) {
     roomActionButton.textContent = "Leave room / switch";
     roomActionButton.addEventListener("click", async () => {
