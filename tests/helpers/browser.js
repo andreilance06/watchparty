@@ -15,7 +15,8 @@ class EventTargetDouble {
   }
   dispatchEvent(event) { return !this.dispatch(event.type, event).defaultPrevented; }
   dispatch(type, properties = {}) {
-    const event = { type, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }, ...properties };
+    const event = { type, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; },
+      stopPropagation() { this.propagationStopped = true; }, ...properties };
     for (const item of [...(this.listeners.get(type) || [])]) {
       if (item.once) this.removeEventListener(type, item.fn);
       item.fn(event);
@@ -27,7 +28,8 @@ class EventTargetDouble {
 class ElementDouble extends EventTargetDouble {
   constructor(tag = "div") {
     super(); this.tagName = tag; this.children = []; this.attributes = new Map();
-    this.style = {}; this.dataset = {}; this.value = ""; this.textContent = "";
+    this.style = { setProperty(name, value) { this[name] = value; }, removeProperty(name) { delete this[name]; } };
+    this.dataset = {}; this.value = ""; this.textContent = "";
     this.hidden = false; this.disabled = false; this.parentNode = null;
     this.clientWidth = 640; this.clientHeight = 360; this.connected = false;
     const classes = new Set();
@@ -61,14 +63,24 @@ class ElementDouble extends EventTargetDouble {
   getAttribute(name) { return this.attributes.get(name) ?? null; }
   querySelectorAll(selector) {
     if (selector === "source[data-watchparty-source]") return this.children.filter((child) => child.tagName === "source" && "watchpartySource" in child.dataset);
-    return [];
+    return this.children.flatMap(child => [...(child.matches(selector) ? [child] : []), ...child.querySelectorAll(selector)]);
   }
-  querySelector(selector) { return this.specialChildren?.[selector] || null; }
+  querySelector(selector) { return this.specialChildren?.[selector] || this.querySelectorAll(selector)[0] || null; }
+  matches(selector) {
+    const attribute = /^\[([^=\]]+)(?:="([^"]*)")?\]$/.exec(selector);
+    if (attribute) {
+      const key = attribute[1].replace(/^data-/, '').replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+      const value = attribute[1].startsWith('data-') ? this.dataset[key] : this.getAttribute(attribute[1]);
+      return value != null && (attribute[2] === undefined || value === attribute[2]);
+    }
+    if (selector.startsWith('.')) return selector.slice(1).split('.').every(name => this.classList.contains(name));
+    return this.tagName.toLowerCase() === selector.toLowerCase();
+  }
   getBoundingClientRect() {
     return { top: 0, left: 0, right: this.clientWidth, bottom: this.clientHeight, width: this.clientWidth, height: this.clientHeight };
   }
   setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; }
-  focus() { this.focused = true; }
+  focus() { this.focused = true; let root = this; while (root.parentNode) root = root.parentNode; root.activeElement = this; }
   click() { this.dispatch("click"); }
 }
 
@@ -108,6 +120,38 @@ function createBrowserDouble({ storageFailure, rendererReady, autoContinuePublic
   };
   video.isOverlayVisible = (id) => video.overlays.has(id);
   video.setSubtitleRenderer = (renderer) => { video.subtitleRenderer = renderer; };
+  // Native Movi surfaces for application bridge tests. Real menu gestures,
+  // layout, animations, and decoding still require the bundled player/browser.
+  const shadow = video.shadowRoot = new ElementDouble('shadow-root');
+  shadow.connected = true;
+  const native = (className, parent = shadow) => { const node = new ElementDouble(); node.className = className; parent.appendChild(node); return node; };
+  const captionContainer = native('movi-subtitle-track-container');
+  const captionButton = native('movi-subtitle-track-btn', captionContainer);
+  native('movi-icon-subtitle', captionButton); native('movi-icon-subtitle-filled', captionButton);
+  const captionMenu = native('movi-subtitle-track-menu', captionContainer); captionMenu.style.display = 'none';
+  native('movi-subtitle-customize-btn', captionMenu); native('movi-subtitle-browse-btn', captionMenu);
+  native('movi-subtitle-track-list', captionMenu); native('movi-subtitle-track-footer', captionMenu);
+  const contextMenu = native('movi-context-menu'); contextMenu.style.display = 'none';
+  native('movi-context-menu-item-subtitle', contextMenu); native('movi-context-menu-divider-subtitle', contextMenu);
+  native('movi-context-menu-submenu-subtitle');
+  video.contextMenuRoot = () => shadow;
+  video.isControlDisabled = id => (video.getAttribute('controlslist') || '').split(' ').includes(`no${id}`);
+  video.updateSubtitleTrackMenu = () => {};
+  video.updateContextMenuContent = () => {};
+  video.updateControlsState = () => {};
+  video.settingsRowValue = page => page;
+  video.settingsRowAvailable = () => false;
+  video.openSubtitleFilePicker = () => {};
+  video.refreshOpenSettingsSurfaces = () => {};
+  video.showControls = () => shadow.classList.remove('hidden-controls');
+  video.hideControls = () => shadow.classList.add('hidden-controls');
+  video.setBottomMenuOpen = (menu, open) => { menu.classList.toggle('is-open', open); menu.style.display = open ? '' : 'none'; };
+  video.isBottomMenuOpen = menu => menu.classList.contains('is-open');
+  video.closeAllBottomMenus = () => video.setBottomMenuOpen(captionMenu, false);
+  video._hideContextMenu = () => { contextMenu.style.display = 'none'; };
+  captionButton.addEventListener('click', () => { if (!captionButton.disabled) {
+    video.setBottomMenuOpen(captionMenu, !video.isBottomMenuOpen(captionMenu)); video.updateSubtitleTrackMenu();
+  } });
   let nextId = 1;
   class WebSocketDouble extends EventTargetDouble {
     static OPEN = 1;
@@ -181,4 +225,7 @@ function createBrowserDouble({ storageFailure, rendererReady, autoContinuePublic
   return { load, elements, sockets, renderers, requests, storage, document, window, runTimers, runFrame, context };
 }
 
-module.exports = { createBrowserDouble };
+const captionItems = video => [...video.shadowRoot.querySelector('.movi-subtitle-track-list').children].filter(row => row.dataset.roomCaptionKey);
+const selectedCaption = video => captionItems(video).find(row => row.getAttribute('aria-checked') === 'true')?.dataset.roomCaptionId || 'off';
+const pickCaption = (video, id) => captionItems(video).find(row => id === 'off' ? row.dataset.roomCaptionKey === 'off' : row.dataset.roomCaptionId === id).click();
+module.exports = { createBrowserDouble, captionItems, selectedCaption, pickCaption };

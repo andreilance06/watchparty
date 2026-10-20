@@ -3,9 +3,11 @@ import JASSUB from "../../vendor/jassub/jassub.js";
 // Movi's public SubtitleRenderer contract, backed by complete normalized ASS
 // tracks. Embedded packet decoding stays disabled so seeks never lose signs or
 // dialogue which started before the requested timestamp.
-export function createJassubAdapter({ video, report, loadContent }) {
+export function createJassubAdapter({ video, report, loadContent, onState = () => {}, isPictureReady = () => true }) {
   let container, canvas, renderer, pendingRenderer, generation = 0, delay = 0, frame = 0;
   let selected = null, destroyed = false, signature = "", lastHook = -Infinity;
+  let status = "off";
+  const fonts = new Map();
   const surface = document.createElement("div");
   Object.assign(surface.style, { position: "relative", width: "100%", height: "100%", pointerEvents: "none" });
   const observer = globalThis.ResizeObserver ? new ResizeObserver(() => refresh()) : null;
@@ -28,7 +30,7 @@ export function createJassubAdapter({ video, report, loadContent }) {
       left: `${(width - pictureWidth) / 2}px`, top: `${(height - pictureHeight) / 2}px` });
   }
   async function render(mediaTime, width, height) {
-    if (!renderer || renderer.busy || destroyed || document.hidden) return;
+    if (!renderer || renderer.busy || destroyed || document.hidden || !isPictureReady()) return;
     const picture = video.player?.getHLSVideoElement?.() || video.player?.getVideoElement?.() || video;
     width ||= picture.videoWidth; height ||= picture.videoHeight;
     const fps = window.innerWidth < 900 ? 20 : 30;
@@ -49,9 +51,20 @@ export function createJassubAdapter({ video, report, loadContent }) {
     frame = requestAnimationFrame(bridge);
   }
   function refresh() { signature = ""; layout(); renderer?.resize(true).catch(() => {}); }
+  function loadFont(url) {
+    if (!fonts.has(url)) fonts.set(url, fetch(url).then(async (response) => {
+      if (!response.ok) throw new Error("Font is unavailable.");
+      return new Uint8Array(await response.arrayBuffer());
+    }).catch((error) => { fonts.delete(url); throw error; }));
+    return fonts.get(url);
+  }
   async function select(track) {
+    if (destroyed) return;
+    if (track && selected?.id === track.id && selected?.url === track.url && status !== "error") return;
     selected = track;
     const token = ++generation;
+    status = track ? "preparing" : "off";
+    onState(status, track ? "loading-assets" : null);
     const previous = renderer || pendingRenderer;
     renderer = null; pendingRenderer = null;
     cancelAnimationFrame(frame); frame = 0;
@@ -61,13 +74,10 @@ export function createJassubAdapter({ video, report, loadContent }) {
     try {
       const [content, fontResults] = await Promise.all([
         loadContent(track.url),
-        Promise.allSettled(["/vendor/jassub/default.woff2", ...(track.fonts || [])].map(async (url) => {
-          const response = await fetch(url);
-          if (!response.ok) throw new Error("Font is unavailable.");
-          return new Uint8Array(await response.arrayBuffer());
-        }))
+        Promise.allSettled(["/vendor/jassub/default.woff2", ...(track.fonts || [])].map(loadFont))
       ]);
       if (destroyed || token !== generation) return;
+      onState(status, "starting-renderer");
       canvas = document.createElement("canvas");
       Object.assign(canvas.style, { position: "absolute", pointerEvents: "none", background: "transparent" });
       surface.appendChild(canvas); layout();
@@ -80,9 +90,19 @@ export function createJassubAdapter({ video, report, loadContent }) {
       if (destroyed || token !== generation) { await next.destroy(); return; }
       pendingRenderer = null; renderer = next;
       signature = ""; refresh();
+      status = "ready"; onState(status);
       frame = requestAnimationFrame(bridge);
     } catch (error) {
-      if (token === generation && !destroyed) report(`Could not load captions: ${error.message || error}`);
+      if (token === generation && !destroyed) {
+        const failed = pendingRenderer;
+        pendingRenderer = null;
+        canvas?.remove(); canvas = null;
+        if (failed) await failed.destroy().catch(() => {});
+        if (token !== generation || destroyed) return;
+        status = "error";
+        onState(status);
+        report(`Could not load captions: ${error.message || error}`);
+      }
     }
   }
   const adapter = {
@@ -97,6 +117,7 @@ export function createJassubAdapter({ video, report, loadContent }) {
     async destroy() {
       if (destroyed) return;
       destroyed = true; generation++; selected = null;
+      fonts.clear();
       cancelAnimationFrame(frame); observer?.disconnect();
       const previous = renderer || pendingRenderer; renderer = null; pendingRenderer = null;
       if (previous) await previous.destroy().catch(() => {});

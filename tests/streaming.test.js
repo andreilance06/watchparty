@@ -132,12 +132,17 @@ test('embedded font attachments are published lazily with styled captions', asyn
   const styled=path.join(source.directory,'styled.mkv');
   execFileSync(source.ffmpeg,['-y','-hide_banner','-loglevel','error','-i',path.join(source.directory,'source.mkv'),
     '-i',path.join(__dirname,'fixtures/movie.style.ass'),'-map','0:v','-map','0:a','-map','1:s','-c','copy',
+    '-metadata:s:s:0','title=Signs & Songs','-metadata:s:s:0','language=eng','-disposition:s:0','default+forced',
     '-attach',path.join(__dirname,'../vendor/jassub/default.woff2'),'-metadata:s:t','mimetype=application/x-truetype-font',
     '-metadata:s:t','filename=caption-font.ttf',styled],{stdio:'pipe',timeout:20000});
   const {app,base,host}=await application(t);
   await serveHostFiles(host,base,{name:'styled.mkv',bytes:fs.readFileSync(styled)});
   const ready=await host.next('session-state',m=>m.hasVideo);
   assert.equal(ready.captions.length,1);assert.equal(ready.captions[0].fonts.length,1);
+  assert.equal(ready.captions[0].title,'Signs & Songs');
+  assert.equal(ready.captions[0].label,'Signs & Songs');
+  assert.equal(ready.captions[0].lang,'eng');
+  assert.equal(ready.captions[0].default,true);assert.equal(ready.captions[0].forced,true);
   assert.equal(fs.readdirSync(app.state.hlsDirectory).some(f=>f.startsWith('font_')),false);
   const caption=await fetch(base+ready.captions[0].url);assert.equal(caption.status,200);assert.match(await caption.text(),/Styled caption/);
   const font=await fetch(base+ready.captions[0].fonts[0]);assert.equal(font.status,200);

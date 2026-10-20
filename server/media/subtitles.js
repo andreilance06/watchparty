@@ -40,7 +40,9 @@ function createSubtitleService({ state, config }) {
     if (!captions.has(subtitle.fileName)) captions.set(subtitle.fileName, { subtitle, version, directory: state.hlsDirectory, promise: null });
     return { id: subtitle.id, fileId: subtitle.fileId,
       url: `${state.basePath || ""}/hls/${subtitle.fileName}?v=${version}`,
-      label: subtitle.label, lang: subtitle.lang || "und", format: "ass", originalFormat: subtitle.codec || "unknown",
+      label: subtitle.label, title: subtitle.title, lang: subtitle.lang || "und",
+      default: Boolean(subtitle.default), forced: Boolean(subtitle.forced),
+      format: "ass", originalFormat: subtitle.codec || "unknown",
       fonts: fontFiles().map((file) => `${state.basePath || ""}/hls/${file}?v=${version}`) };
   }
 

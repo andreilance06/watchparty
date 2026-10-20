@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const {createBrowserDouble} = require('./helpers/browser');
+const { createBrowserDouble, captionItems, selectedCaption, pickCaption } = require('./helpers/browser');
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 
 test('a local fallback preserves playback/captions, rejects stale replies, and ignores synthetic control events',async()=>{
@@ -16,15 +16,15 @@ test('a local fallback preserves playback/captions, rejects stale replies, and i
  assert.equal(video.children.some(c=>c.tagName==='source'),false);
  socket.receive({type:'compatibility-ready',requestId:request.requestId,mediaVersion:5,url:snapshot.compatibilityUrl,time:17,paused:true,playbackRate:1.25});
  assert.equal(video.currentTime,17);assert.equal(video.paused,true);assert.equal(video.playbackRate,1.25);
- assert.equal(video.customControls.get('watchparty-captions').value,'caption');
+ assert.equal(selectedCaption(video),'caption');
  video.dispatch('seeking');video.dispatch('pause');video.dispatch('ratechange');
  assert.equal(socket.sent.filter(m=>m.type==='video-state').length,0);
  const source=video.children.find(c=>c.tagName==='source');
  socket.receive({...snapshot,time:18,syncMode:'tick'});
  assert.equal(video.children.find(c=>c.tagName==='source'),source,'heartbeats keep the local compatibility path');
- video.customControls.get('watchparty-captions').onPick('off');
+ pickCaption(video, "off");
  socket.receive({type:'captions-updated',mediaVersion:5,captions:[...snapshot.captions,{id:'new',url:'/new',label:'New'}]});
- assert.equal(video.customControls.get('watchparty-captions').value,'off');
+ assert.equal(selectedCaption(video),'off');
 });
 
 test('native and HLS seek bridges follow the active public video surface and detach obsolete listeners',async()=>{
@@ -45,13 +45,17 @@ test('canplay after a host seek does not reapply the previous room timestamp',as
  assert.equal(video.currentTime,40);assert.equal(socket.sent.at(-1).time,40);
 });
 
-test('caption loading waits for the first picture and Off releases the rendering loop',async()=>{
+test('caption preparation starts before the first picture, media events reuse it, and Off releases the rendering loop',async()=>{
  const b=createBrowserDouble();const {createSubtitles}=await b.load('js/player/subtitles.js');
  const video=b.elements.get('video');
- const captions=createSubtitles({elements:{video,removeCaptionButton:b.elements.get('removeCaptionButton')},report:()=>{}});
+ const captions=createSubtitles({elements:{video},report:()=>{}});
  captions.setTracks([{id:'one',url:'/one.ass',label:'One'}],{reset:true,key:'1'});
- assert.equal(b.requests.length,0);assert.equal(b.renderers.length,0);
- video.dispatch('loadeddata');await flush();assert.equal(b.renderers.length,1);
+ assert.equal(b.requests.some(r=>r.url==='/one.ass'),true);
+ await flush();assert.equal(b.renderers.length,1);
+ b.runFrame();await flush();assert.equal(b.renderers[0].lastFrame,undefined,'preparation does not draw over the previous source');
+ video.dispatch('loadedmetadata');video.dispatch('loadeddata');video.dispatch('watchparty-picture-ready');
+ video.dispatch('trackschange');await flush();assert.equal(b.renderers.length,1);
+ assert.equal(b.requests.filter(r=>r.url==='/one.ass').length,1);
  b.runFrame();await flush();assert.ok(b.renderers[0].lastFrame);
  captions.select(null);await flush();assert.equal(b.renderers[0].destroyed,true);
  const last=b.renderers[0].lastFrame;b.runFrame();assert.equal(b.renderers[0].lastFrame,last);
@@ -93,7 +97,7 @@ test('Movi clearing its own subtitle container cannot detach the custom caption 
  const video=b.elements.get('video'),internal=b.document.createElement('div');
  video.player={setSubtitleRenderer(){},selectSubtitleTrack:()=>{internal.replaceChildren();return Promise.resolve();}};
  video.setSubtitleRenderer=renderer=>{video.subtitleRenderer=renderer;renderer.mount(internal);};
- const subtitles=createSubtitles({elements:{video,removeCaptionButton:b.elements.get('removeCaptionButton')},report:()=>{}});
+ const subtitles=createSubtitles({elements:{video},report:()=>{}});
  subtitles.setTracks([{id:'one',url:'/one.ass',label:'One'}],{reset:true,key:'1'});video.dispatch('loadeddata');await flush();
  assert.equal(video.subtitleRenderer.surface.parentNode,video);
  video.dispatch('trackschange');await flush();

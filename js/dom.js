@@ -9,7 +9,7 @@ export function getElements(root = document) {
     "reactClap", "reactSad", "suggestionForm", "suggestionInput", "voteLeader",
     "chatMessages", "chatForm", "chatInput", "chatEmojiButton", "emojiPicker", "emojiSearch",
     "emojiPickerGrid", "emojiPickerEmpty", "voteOptions", "voteStatus", "themeToggle",
-    "addCaptionsButton", "removeCaptionButton", "suggestionResults", "suggestionStatus",
+    "suggestionResults", "suggestionStatus",
     "roomEntry", "roomEntryChoices", "createRoomChoice", "joinRoomChoice", "initialDisplayName", "initialDisplayNameField",
     "createRoomForm", "createRoomName", "createRoomCode", "createRoomPassword", "createRoomBack",
     "joinRoomForm", "joinRoomCode", "joinRoomPassword", "joinRoomBack", "continuePublicRoom",

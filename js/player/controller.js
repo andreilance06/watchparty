@@ -9,8 +9,8 @@ import { canControl, DEFAULT_PERMISSIONS } from "../permissions.js";
 
 export function createPlayer({ elements, state: session, send, report, files }) {
   const { video, videoPlaceholder, placeholderTitle, placeholderText, viewerControls,
-    chooseVideoButton, hostControls, roleBadge, fileName, syncStatus, addCaptionsButton, removeCaptionButton } = elements;
-  const subtitles = createSubtitles({ elements, report });
+    chooseVideoButton, hostControls, roleBadge, fileName, syncStatus } = elements;
+  const subtitles = createSubtitles({ elements, report, onAddCaptions: files.chooseCaptions });
   const sync = createPlaybackSync({ elements, state: session, send });
   const mediaEvents = createMediaEventBridge(video);
   const compatibilityBuffer = createCompatibilityBuffer(video);
@@ -20,6 +20,7 @@ export function createPlayer({ elements, state: session, send, report, files }) 
   const readyState = () => (video.player?.getHLSVideoElement?.() || video.player?.getVideoElement?.() || video).readyState;
 
   function setVideoSource(url, type, engine) {
+    subtitles.sourceChanging();
     sync.cancel();
     session.sourceSwitching = true;
     session.suppressVideoEvents = true;
@@ -48,6 +49,7 @@ export function createPlayer({ elements, state: session, send, report, files }) 
     setVideoSource(null);
     session.sourceSwitching = false;
     subtitles.setTracks([], { reset: true, key: "" });
+    subtitles.setAvailability({ hasVideo: false, canAdd: false });
     videoPlaceholder.hidden = false; viewerControls.hidden = true;
     fileName.textContent = "No video selected"; syncStatus.textContent = status;
   }
@@ -83,7 +85,7 @@ export function createPlayer({ elements, state: session, send, report, files }) 
     const key = `${state.mediaVersion ?? ""}:${state.originalUrl || state.mediaUrl || ""}`;
     session.mediaVersion = state.mediaVersion;
     session.latestHostPaused = Boolean(state.paused);
-    addCaptionsButton.disabled = !state.hasVideo;
+    subtitles.setAvailability({ hasVideo: Boolean(state.hasVideo && !state.processing), canAdd: session.role === "host" });
     if (state.processing) {
       generation++; latest = null; sourceKey = "";
       selectionStarted = performance.now();
@@ -126,6 +128,7 @@ export function createPlayer({ elements, state: session, send, report, files }) 
 
   function applyRole(role) {
     files.setRole(role); session.role = role;
+    subtitles.setAvailability({ canAdd: role === "host" });
     updateSharingStatus();
     roleBadge.textContent = role === "host" ? "Host" : "Viewer";
     roleBadge.classList.toggle("host", role === "host");
@@ -147,7 +150,7 @@ export function createPlayer({ elements, state: session, send, report, files }) 
 
   function updateControls() {
     const host = session.role === "host";
-    const flags = ["nocc"];
+    const flags = [];
     if (!host) flags.push("noloop", "nopip", "noplaylist");
     if (!canControl(session, "play")) flags.push("noplay", "nocenterplay");
     if (!canControl(session, "seek")) flags.push("noseekbuttons", "noprogress", "notimeline", "nochapters");
@@ -257,8 +260,6 @@ export function createPlayer({ elements, state: session, send, report, files }) 
     if (!session.latestHostPaused && video.paused) video.play().catch(() => {});
   });
   chooseVideoButton.addEventListener("click", files.chooseVideo);
-  addCaptionsButton.addEventListener("click", files.chooseCaptions);
-  removeCaptionButton.addEventListener("click", () => files.removeCaption(subtitles.selectedId()));
   video.addEventListener("play", () => localIntent("play"));
   video.addEventListener("pause", () => localIntent("pause"));
   video.addEventListener("watchparty-seek-intent", event => {

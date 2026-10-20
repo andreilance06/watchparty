@@ -65,12 +65,7 @@ function createMediaService({ state, config, encoderPromise, broadcast }) {
       writePlaylists(state, config.segmentSeconds);
       const extracted = subtitles.map((subtitle) => subtitlesService.register(subtitle, version));
       if (version !== state.mediaVersion || !state.mediaPath || !state.hlsDirectory) return;
-      const languageCounts = new Map();
-      state.captionTracks = extracted.map((track) => {
-        const count = (languageCounts.get(track.lang) || 0) + 1;
-        languageCounts.set(track.lang, count);
-        return { ...track, lang: count === 1 ? track.lang : `${track.lang}-${count}` };
-      });
+      state.captionTracks = extracted;
       state.mediaReady = true;
       state.mediaProcessing = false;
       broadcast(sessionState(state, "source"));

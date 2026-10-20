@@ -27,26 +27,40 @@ function parseDuration(stderr) {
   return match ? Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]) : 0;
 }
 
+function parseSubtitleStreams(output, sourcePath) {
+  const subtitles = [];
+  // Stream metadata follows its header, up to the next stream. Do not let a
+  // video/audio title (or the container title) become a subtitle's name.
+  for (const block of output.split(/(?=^[ \t]*Stream #)/m)) {
+    const line = block.split(/\r?\n/, 1)[0];
+    const match = /Stream #0:(\d+)(?:\[[^\]]+\])?(?:\(([^)]+)\))?: Subtitle:/.exec(line);
+    if (!match || subtitles.length >= 8) continue;
+    const codec = (/Subtitle:\s*([a-zA-Z0-9_]+)/.exec(line)?.[1] || "").toLowerCase();
+    if (!["ass", "ssa", "subrip", "srt", "webvtt", "mov_text", "text"].includes(codec)) continue;
+    const title = /^\s+title\s*:\s*(.+)$/im.exec(block)?.[1].trim() ||
+      /^\s+handler_name\s*:\s*(.+)$/im.exec(block)?.[1].trim();
+    subtitles.push({ input: sourcePath, map: `0:${match[1]}`, codec, lang: match[2] || "und",
+      title, label: title || `Captions ${subtitles.length + 1}`,
+      default: /\(default\)/i.test(line), forced: /\(forced\)/i.test(line) });
+  }
+  return subtitles;
+}
+
 function probeMedia(sourcePath, ffmpegPath, signal, fileName) {
   return new Promise((resolve, reject) => {
     execFile(ffmpegPath, ["-hide_banner", ...(sourcePath.startsWith("http:") ? ["-rw_timeout", "30000000"] : []), "-i", sourcePath], { windowsHide: true, maxBuffer: 4 * 1024 * 1024, signal }, (error, _stdout, stderr) => {
       const output = String(stderr || "");
       const duration = parseDuration(output);
       if (!duration) { reject(new Error(error?.message || "Could not determine the video duration.")); return; }
-      const subtitles = [];
+      const subtitles = parseSubtitleStreams(output, sourcePath);
       const fonts = [];
       for (const line of output.split(/\r?\n/)) {
         const attachment = /Stream #0:(\d+).*Attachment:\s*(ttf|otf)/.exec(line);
         if (attachment && fonts.length < 16) fonts.push({ map: attachment[1], extension: attachment[2] });
-        const match = /Stream #0:(\d+)(?:\[[^\]]+\])?(?:\(([^)]+)\))?: Subtitle:/.exec(line);
-        if (!match || subtitles.length >= 8) continue;
-        const codec = (/Subtitle:\s*([a-zA-Z0-9_]+)/.exec(line)?.[1] || "").toLowerCase();
-        if (!["ass", "ssa", "subrip", "srt", "webvtt", "mov_text", "text"].includes(codec)) continue;
-        subtitles.push({ input: sourcePath, map: `0:${match[1]}`, codec, lang: match[2] || "und", label: `Embedded ${subtitles.length + 1}${match[2] ? ` (${match[2]})` : ""}` });
       }
       resolve({ duration, subtitles, fonts, info: parseMediaInfo(output, fileName) });
     });
   });
 }
 
-module.exports = { parseDuration, parseMediaInfo, probeMedia };
+module.exports = { parseDuration, parseMediaInfo, parseSubtitleStreams, probeMedia };

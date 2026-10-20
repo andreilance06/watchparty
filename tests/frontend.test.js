@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { createBrowserDouble } = require("./helpers/browser");
+const { createBrowserDouble, captionItems, selectedCaption, pickCaption } = require("./helpers/browser");
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
 test("emoji picker dismisses, restores focus, tracks its anchor, and preserves insertion selection", async () => {
@@ -273,7 +273,9 @@ test("frontend modules initialize and route playback, captions, fullscreen, chat
   await flush();
   assert.equal(el("videoPlaceholder").hidden, true);
   assert.equal(el("video").currentTime, 8);
-  assert.equal(el("video").customControls.get("watchparty-captions").items.length, 2);
+  assert.equal(captionItems(el("video")).length, 3);
+  assert.equal(browser.elements.has("addCaptionsButton"), false);
+  assert.equal(browser.elements.has("removeCaptionButton"), false);
   assert.ok(browser.renderers[0].options.subContent.includes("[Events]"));
   assert.equal(el("video").children.find((item) => item.tagName === "source").src, "/hls/master.m3u8?v=1");
   browser.runFrame();
@@ -283,7 +285,7 @@ test("frontend modules initialize and route playback, captions, fullscreen, chat
   await flush();
   assert.equal(browser.document.fullscreenElement, el("videoShell"));
   assert.equal(el("video").fullscreenUiActive, true);
-  el("video").customControls.get("watchparty-captions").onPick("off");
+  pickCaption(el("video"), "off");
   await flush();
   assert.equal(browser.renderers[0].destroyed, true);
 
@@ -412,7 +414,7 @@ test("frontend modules initialize and route playback, captions, fullscreen, chat
   assert.equal(socket.sent.length, sentCount);
   socket.receive({ type: "host-left" });
   assert.equal(el("videoPlaceholder").hidden, false);
-  assert.equal(el("video").customControls.has("watchparty-captions"), false);
+  assert.equal(el("video").shadowRoot.querySelector(".movi-subtitle-track-container").style.display, "none");
 });
 
 test("voting uses party-state for counts, ties, selections, posters, and replaceable votes", async () => {
@@ -691,21 +693,20 @@ test("live caption edits preserve viewer choice and playback without recreating 
   const paused = el("video").paused;
   socket.receive({ type: "captions-updated", mediaVersion: 1, captions: [second, first] });
   await flush();
-  assert.equal(el("video").customControls.get("watchparty-captions").value, "first");
+  assert.equal(selectedCaption(el("video")), "first");
   assert.equal(browser.renderers.length, 1);
   assert.equal(renderer.destroyed, undefined);
   assert.equal(el("video").children.find((item) => item.tagName === "source"), source);
   assert.equal(el("video").currentTime, time);
   assert.equal(el("video").paused, paused);
   socket.receive({ type: "captions-updated", mediaVersion: 0, captions: [] });
-  assert.equal(el("video").customControls.get("watchparty-captions").value, "first", "Stale updates cannot remove current captions");
+  assert.equal(selectedCaption(el("video")), "first", "Stale updates cannot remove current captions");
   socket.receive({ type: "captions-updated", mediaVersion: 1, captions: [second] });
   await flush();
-  assert.equal(el("video").customControls.get("watchparty-captions").value, "off");
+  assert.equal(selectedCaption(el("video")), "off");
   assert.equal(renderer.destroyed, true);
-  assert.equal(el("removeCaptionButton").disabled, true);
   socket.receive({ type: "captions-updated", mediaVersion: 1, captions: [second, first] });
-  assert.equal(el("video").customControls.get("watchparty-captions").value, "off", "Adding captions preserves Off");
+  assert.equal(selectedCaption(el("video")), "off", "Adding captions preserves Off");
   assert.equal(el("video").children.find((item) => item.tagName === "source"), source);
 });
 

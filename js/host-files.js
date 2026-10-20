@@ -6,9 +6,11 @@ export function createHostFiles({ send, report }) {
   const captionRelays = new Set();
   let relay, sourceId = null, role = "viewer", generation = 0;
   let activeSourceId = null;
+  let picker = null;
   const captionPattern = /\.(srt|vtt|ass|ssa)$/i;
 
   function clear(closeRelay = true) {
+    picker?.cancel();
     generation++;
     sourceId = null;
     activeSourceId = null;
@@ -39,18 +41,40 @@ export function createHostFiles({ send, report }) {
   }
 
   function pick(accept, onFiles) {
-    if (role !== "host") return;
+    if (role !== "host") return Promise.resolve();
+    if (picker) return picker.promise;
+    const current = generation, target = activeSourceId;
+    let resolve, focusTimer;
+    const promise = new Promise(done => { resolve = done; });
     const input = document.createElement("input");
     input.type = "file"; input.multiple = true; input.accept = accept;
     input.hidden = true;
     document.body.appendChild(input);
-    input.addEventListener("change", () => {
-      const chosen = [...(input.files || [])];
+    const stillCurrent = () => current === generation && target === activeSourceId && role === "host";
+    function finish(chosen = []) {
+      clearTimeout(focusTimer);
+      window.removeEventListener("focus", refocused);
+      input.removeEventListener("change", change);
+      input.removeEventListener("cancel", cancel);
       input.remove();
-      if (chosen.length) onFiles(chosen).catch((error) => report(error.message));
-    }, { once: true });
-    input.addEventListener("cancel", () => input.remove(), { once: true });
-    input.click();
+      if (picker?.promise === promise) picker = null;
+      if (!stillCurrent() || !chosen.length) { resolve(); return; }
+      Promise.resolve().then(() => { if (stillCurrent()) return onFiles(chosen); })
+        .catch(error => { if (role === "host" && (onFiles === selectFiles || stillCurrent())) report(error.message); }).finally(resolve);
+    }
+    const change = () => finish([...(input.files || [])]);
+    const cancel = () => finish();
+    const refocused = () => {
+      // Some browser/OS combinations return focus without firing cancel. Give
+      // change a chance to run before treating an empty picker as cancelled.
+      focusTimer = setTimeout(() => { if (picker?.promise === promise && !input.files?.length) cancel(); }, 300);
+    };
+    picker = { promise, cancel };
+    input.addEventListener("change", change, { once: true });
+    input.addEventListener("cancel", cancel, { once: true });
+    window.addEventListener("focus", refocused, { once: true });
+    try { input.click(); } catch (error) { cancel(); report(error.message); }
+    return promise;
   }
 
   async function selectFiles(chosen) {
@@ -149,9 +173,10 @@ export function createHostFiles({ send, report }) {
 
   return {
     handleMessage, disconnect: clear,
-    setRole(next) { role = next; },
+    setRole(next) { if (next !== role) picker?.cancel(); role = next; },
     setSession(state) {
       if (state.sourceId === undefined) return;
+      if (activeSourceId !== state.sourceId) picker?.cancel();
       if (sourceId && sourceId !== state.sourceId) clear();
       activeSourceId = state.sourceId;
     },
