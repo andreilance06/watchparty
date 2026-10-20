@@ -107,9 +107,11 @@
         <p id="voteLeader" class="vote-leader" aria-live="polite">No suggestions yet.</p>
         <form id="suggestionForm" class="suggestion-form" autocomplete="off">
           <label class="sr-only" for="suggestionInput">Suggest a video title</label>
-          <input id="suggestionInput" name="title" type="text" maxlength="100" placeholder="Suggest a title..." required>
-          <button type="submit">Suggest</button>
+          <input id="suggestionInput" name="title" type="text" maxlength="80" placeholder="Search for a movie..." required>
+          <button type="submit">Find movie</button>
         </form>
+        <p id="suggestionStatus" class="suggestion-status" role="status" aria-live="polite"></p>
+        <div id="suggestionResults" class="suggestion-results" aria-label="Movie search results"></div>
         <div id="voteOptions" class="vote-options" aria-live="polite" aria-label="Next-video options">
           <p class="vote-empty">Suggest a title to start voting.</p>
         </div>

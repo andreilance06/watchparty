@@ -16,7 +16,37 @@ function isSingleEmoji(value) {
   return hasEmoji && /^[\p{Extended_Pictographic}\p{Emoji_Presentation}\p{Emoji_Modifier}\uFE0F\u200D\u{1F1E6}-\u{1F1FF}\u20E3#*0-9]+$/u.test(value);
 }
 
-function createMessageHandler({ state, transport, media }) {
+function normalizeMovieSelection(movie) {
+  if (!movie || typeof movie !== "object" || Array.isArray(movie) ||
+      typeof movie.title !== "string" || typeof movie.pageUrl !== "string") return null;
+  let pageUrl;
+  try { pageUrl = new URL(movie.pageUrl); } catch { return null; }
+  if (pageUrl.protocol !== "https:" || pageUrl.hostname !== "en.wikipedia.org" ||
+      !pageUrl.pathname.startsWith("/wiki/") || pageUrl.username || pageUrl.password) return null;
+
+  let posterUrl = null;
+  if (movie.posterUrl != null) {
+    if (typeof movie.posterUrl !== "string") return null;
+    try {
+      const imageUrl = new URL(movie.posterUrl);
+      if (imageUrl.protocol !== "https:" ||
+          !["upload.wikimedia.org", "thumb.wikimedia.org"].includes(imageUrl.hostname) ||
+          !imageUrl.pathname.startsWith("/wikipedia/") ||
+          imageUrl.username || imageUrl.password) return null;
+      posterUrl = imageUrl.href;
+    } catch { return null; }
+  }
+  const description = typeof movie.description === "string"
+    ? movie.description.replace(/\s+/g, " ").trim().slice(0, 200)
+    : "";
+  return {
+    pageUrl: pageUrl.href,
+    posterUrl,
+    description
+  };
+}
+
+function createMessageHandler({ state, transport, media, movieSearch }) {
   const { send, broadcast } = transport;
   const { isDisplayNameTaken } = createNameRegistry(state.clients);
 
@@ -29,6 +59,7 @@ function createMessageHandler({ state, transport, media }) {
   function updatePartyState() {
     const suggestions = state.videoSuggestions.map((suggestion) => ({
       ...suggestion,
+      ownerName: state.clients.get(suggestion.ownerId)?.name || suggestion.ownerName || "Former participant",
       votes: [...state.videoVotes.values()].filter((id) => id === suggestion.id).length
     }));
     for (const [clientId, client] of state.clients) {
@@ -141,15 +172,54 @@ function createMessageHandler({ state, transport, media }) {
           send(ws, { type: "error", message: "Enter a video title to suggest." });
           break;
         }
+        const movie = message.movie === undefined ? null : normalizeMovieSelection(message.movie);
+        const knownMovie = movie && Number.isSafeInteger(message.movie.pageId)
+          ? movieSearch?.getSelection(message.movie.pageId)
+          : null;
+        if (message.movie !== undefined && (!movie || !knownMovie || message.movie.title !== title ||
+            knownMovie.title !== title || knownMovie.pageUrl !== movie.pageUrl ||
+            knownMovie.posterUrl !== movie.posterUrl || knownMovie.description !== movie.description)) {
+          send(ws, { type: "error", message: "That movie selection is not supported." });
+          break;
+        }
         const existing = state.videoSuggestions.find(
           (suggestion) => suggestion.title.toLocaleLowerCase() === title.toLocaleLowerCase()
         );
-        if (!existing) {
+        let suggestion = existing;
+        if (existing) {
+          if (!existing.movie && movie) existing.movie = movie;
+        } else {
           if (state.videoSuggestions.length >= MAX_VIDEO_SUGGESTIONS) {
             send(ws, { type: "error", message: "The next-video suggestion list is full." });
             break;
           }
-          state.videoSuggestions.push({ id: state.nextSuggestionId++, title });
+          suggestion = {
+            id: state.nextSuggestionId++,
+            title,
+            ownerId: ws.clientId,
+            ownerName: client.name || "Guest",
+            ...(movie ? { movie } : {})
+          };
+          state.videoSuggestions.push(suggestion);
+        }
+        state.videoVotes.set(ws.clientId, suggestion.id);
+        updatePartyState();
+        break;
+      }
+      case "remove-video-suggestion": {
+        const suggestionId = Number(message.suggestionId);
+        const index = state.videoSuggestions.findIndex((suggestion) => suggestion.id === suggestionId);
+        if (!Number.isInteger(suggestionId) || index < 0) {
+          send(ws, { type: "error", message: "That video suggestion is no longer available." });
+          break;
+        }
+        if (state.videoSuggestions[index].ownerId !== ws.clientId) {
+          send(ws, { type: "error", message: "You can only remove your own video suggestions." });
+          break;
+        }
+        state.videoSuggestions.splice(index, 1);
+        for (const [clientId, voteId] of state.videoVotes) {
+          if (voteId === suggestionId) state.videoVotes.delete(clientId);
         }
         updatePartyState();
         break;

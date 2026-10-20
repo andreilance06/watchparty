@@ -37,7 +37,7 @@ const chat = createChat({ elements, state, send: connection.send });
 files = createHostFiles({ send: connection.send, report: chat.addSystemMessage });
 const party = createParty({ elements, send: connection.send });
 const player = createPlayer({ elements, state, send: connection.send, report: chat.addSystemMessage, files });
-const voting = createVoting({ elements, send: connection.send });
+const voting = createVoting({ elements, state, send: connection.send });
 
 function handleMessage(message) {
   if (files.handleMessage(message)) return;

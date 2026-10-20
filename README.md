@@ -17,6 +17,8 @@ The host selects one video and optional SRT, VTT, ASS, or SSA files. Keep that b
 
 The root page is a public default room. Private-room Create/Join screens are still deferred; use the [room API](docs/rooms.md), then navigate to the returned `watchPath`.
 
+Next-video suggestions search Wikipedia through its keyless MediaWiki API. Choose the matching article to include its thumbnail and attribution link in the shared vote; if search is unavailable or there is no match, you can still suggest the title without a poster. Suggesting automatically casts your vote, and only the person who first suggested a title can remove it. Posters are served by Wikimedia, so image availability and licensing depend on each source image. See the [movie search API](docs/rooms.md#movie-suggestions-and-posters).
+
 ## Playback
 
 - Each device independently chooses original-file playback or compatibility streaming. Supported MP4/WebM sources use native decoding; other suitable sources use Movi's WASM demuxer and WebCodecs. Original-file playback preserves source resolution.

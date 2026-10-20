@@ -85,7 +85,10 @@ test("suggestions are normalized, deduplicated, bounded, and validated", () => {
   const suggest = (title) => handler.handleMessage(ws, { type: "suggest-video", title });
   suggest("  Movie   One ");
   suggest("movie one");
-  assert.deepEqual(state.videoSuggestions, [{ id: 1, title: "Movie One" }]);
+  assert.deepEqual(state.videoSuggestions, [{
+    id: 1, title: "Movie One", ownerId: "host", ownerName: "Host"
+  }]);
+  assert.equal(state.videoVotes.get("host"), 1);
   suggest("   ");
   assert.equal(sent.at(-1).type, "error");
   assert.equal(state.videoSuggestions.length, 1);
@@ -101,8 +104,77 @@ test("suggestions are normalized, deduplicated, bounded, and validated", () => {
   for (const suggestionId of [null, "invalid", 999, 1.5]) {
     handler.handleMessage(ws, { type: "vote-video", suggestionId });
     assert.equal(sent.at(-1).type, "error");
-    assert.equal(state.videoVotes.size, 0);
+    assert.equal(state.videoVotes.get("host"), 1);
   }
+});
+
+test("movie suggestion metadata is shared only for trusted Wikimedia URLs", () => {
+  const state = createSession();
+  const ws = { clientId: "host" };
+  state.clients.set("host", { ws, role: "host", name: "Host" });
+  const sent = [];
+  const handler = createMessageHandler({
+    state, transport: { send: (_, message) => sent.push(message), broadcast() {} }, media: {},
+    movieSearch: { getSelection: (pageId) => pageId === 1 ? {
+      pageId: 1, title: "Arrival", pageUrl: "https://en.wikipedia.org/wiki/Arrival_(film)",
+      posterUrl: "https://upload.wikimedia.org/wikipedia/en/Arrival_poster.jpg", description: "A science fiction film."
+    } : null }
+  });
+  const movie = {
+    pageId: 1,
+    title: "Arrival",
+    pageUrl: "https://en.wikipedia.org/wiki/Arrival_(film)",
+    posterUrl: "https://upload.wikimedia.org/wikipedia/en/Arrival_poster.jpg",
+    description: "A science fiction film."
+  };
+
+  handler.handleMessage(ws, { type: "suggest-video", title: movie.title, movie });
+  assert.deepEqual(state.videoSuggestions[0], {
+    id: 1, title: "Arrival", ownerId: "host", ownerName: "Host", movie: {
+      pageUrl: movie.pageUrl, posterUrl: movie.posterUrl, description: movie.description
+    }
+  });
+  handler.handleMessage(ws, { type: "suggest-video", title: "Unsafe", movie: { ...movie, title: "Unsafe", pageId: 2, posterUrl: "https://attacker.example/image.jpg" } });
+  assert.equal(sent.at(-1).type, "error");
+  assert.equal(state.videoSuggestions.length, 1);
+});
+
+test("suggestion owners are preserved, suggestions auto-vote, and only owners can remove them", () => {
+  const state = createSession();
+  const owner = { clientId: "owner" };
+  const other = { clientId: "other" };
+  state.clients.set("owner", { ws: owner, role: "host", name: "Owner" });
+  state.clients.set("other", { ws: other, role: "viewer", name: "Other" });
+  const latest = new Map();
+  const errors = [];
+  const handler = createMessageHandler({
+    state,
+    transport: {
+      send: (ws, message) => {
+        latest.set(ws.clientId, message);
+        if (message.type === "error") errors.push(message);
+      },
+      broadcast() {}
+    },
+    media: {}
+  });
+
+  handler.handleMessage(owner, { type: "suggest-video", title: "Arrival" });
+  assert.equal(state.videoVotes.get("owner"), 1);
+  handler.handleMessage(other, { type: "suggest-video", title: " arrival " });
+  assert.equal(state.videoSuggestions.length, 1);
+  assert.equal(state.videoSuggestions[0].ownerId, "owner");
+  assert.equal(state.videoVotes.get("other"), 1);
+  assert.equal(latest.get("other").suggestions[0].ownerName, "Owner");
+
+  handler.handleMessage(other, { type: "remove-video-suggestion", suggestionId: 1 });
+  assert.equal(errors.at(-1).message, "You can only remove your own video suggestions.");
+  assert.equal(state.videoSuggestions.length, 1);
+  handler.handleMessage(owner, { type: "remove-video-suggestion", suggestionId: 1 });
+  assert.equal(state.videoSuggestions.length, 0);
+  assert.equal(state.videoVotes.size, 0);
+  assert.deepEqual(latest.get("other").suggestions, []);
+  assert.equal(latest.get("other").myVoteId, null);
 });
 
 test("votes are replaceable and party snapshots personalize each participant's selection", () => {

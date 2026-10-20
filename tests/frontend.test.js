@@ -232,6 +232,8 @@ test("frontend modules initialize and route playback, captions, fullscreen, chat
   assert.match(customReaction.getAttribute("aria-label"), /Host, Viewer/);
   el("suggestionInput").value = "  The   Next Movie ";
   el("suggestionForm").dispatch("submit");
+  await flush();
+  el("suggestionResults").children[0].dispatch("click");
   assert.deepEqual(socket.sent.at(-1), { type: "suggest-video", title: "The Next Movie" });
   socket.receive({
     type: "party-state",
@@ -240,11 +242,11 @@ test("frontend modules initialize and route playback, captions, fullscreen, chat
       { clientId: "host-id", name: "Host", role: "host" },
       { clientId: "viewer-id", name: "Viewer", role: "viewer" }
     ],
-    suggestions: [{ id: 2, title: "The Next Movie", votes: 1 }]
+    suggestions: [{ id: 2, title: "The Next Movie", ownerId: "viewer-id", ownerName: "Viewer", votes: 1 }]
   });
   assert.equal(el("participantList").children.length, 2);
   assert.equal(el("voteLeader").textContent, "Leading: The Next Movie (1 vote)");
-  const voteButton = el("voteOptions").children[0].children[1];
+  const voteButton = el("voteOptions").children[0].children[2];
   assert.equal(voteButton.getAttribute("aria-pressed"), "true");
   assert.equal(voteButton.disabled, true);
   assert.equal(el("voteStatus").textContent, "1 vote cast");
@@ -266,7 +268,7 @@ test("frontend modules initialize and route playback, captions, fullscreen, chat
   assert.equal(el("video").customControls.has("watchparty-captions"), false);
 });
 
-test("voting uses party-state for counts, ties, selections, and replaceable votes", async () => {
+test("voting uses party-state for counts, ties, selections, posters, and replaceable votes", async () => {
   const browser = createBrowserDouble();
   await browser.load("js/app.js");
   const socket = browser.sockets[0];
@@ -280,10 +282,10 @@ test("voting uses party-state for counts, ties, selections, and replaceable vote
   el("suggestionForm").dispatch("submit");
   assert.equal(socket.sent.length, sent);
 
-  const suggestions = [{ id: 1, title: "Arrival", votes: 0 }, { id: 2, title: "Moonlight", votes: 0 }];
+  const suggestions = [{ id: 1, title: "Arrival", ownerId: "host-id", ownerName: "Host", votes: 0 }, { id: 2, title: "Moonlight", votes: 0 }];
   socket.receive({ type: "party-state", suggestions, myVoteId: null });
   assert.equal(el("voteLeader").textContent, "No votes yet.");
-  el("voteOptions").children[0].children[1].dispatch("click");
+  el("voteOptions").children[0].children[2].dispatch("click");
   assert.deepEqual(socket.sent.at(-1), { type: "vote-video", suggestionId: 1 });
 
   suggestions[0].votes = 2;
@@ -292,30 +294,103 @@ test("voting uses party-state for counts, ties, selections, and replaceable vote
   assert.equal(el("voteStatus").textContent, "3 votes cast");
   assert.equal(el("voteLeader").textContent, "Leading: Arrival (2 votes)");
   let rows = el("voteOptions").children;
-  assert.equal(rows[0].children[0].children[1].textContent, "2 votes · 67%");
-  assert.equal(rows[0].children[0].children[2].children[0].style.width, "67%");
-  assert.equal(rows[0].children[1].disabled, true);
-  assert.equal(rows[1].children[1].disabled, false);
-  rows[1].children[1].dispatch("click");
+  assert.equal(rows[0].children[1].children[1].textContent, "2 votes · 67%");
+  assert.equal(rows[0].children[1].children[2].children[0].style.width, "67%");
+  assert.equal(rows[0].children[2].disabled, true);
+  assert.equal(rows[1].children[2].disabled, false);
+  rows[1].children[2].dispatch("click");
   assert.deepEqual(socket.sent.at(-1), { type: "vote-video", suggestionId: 2 });
 
   suggestions[0].votes = 1;
   suggestions[1].votes = 2;
   socket.receive({ type: "party-state", suggestions, myVoteId: 2 });
   rows = el("voteOptions").children;
-  assert.equal(rows[0].children[1].getAttribute("aria-pressed"), "false");
-  assert.equal(rows[0].children[1].disabled, false);
-  assert.equal(rows[1].children[1].getAttribute("aria-pressed"), "true");
-  assert.equal(rows[1].children[1].disabled, true);
+  assert.equal(rows[0].children[2].getAttribute("aria-pressed"), "false");
+  assert.equal(rows[0].children[2].disabled, false);
+  assert.equal(rows[1].children[2].getAttribute("aria-pressed"), "true");
+  assert.equal(rows[1].children[2].disabled, true);
 
   suggestions[1].votes = 1;
   socket.receive({ type: "party-state", suggestions, myVoteId: null });
   assert.equal(el("voteLeader").textContent, "Tie: Arrival, Moonlight (1 vote each)");
-  assert.equal(el("voteOptions").children[0].children[0].children[2].children[0].style.width, "50%");
+  assert.equal(el("voteOptions").children[0].children[1].children[2].children[0].style.width, "50%");
   const title = '<img src=x onerror="alert(1)">';
   socket.receive({ type: "party-state", suggestions: [{ id: 3, title, votes: 0 }] });
-  assert.equal(el("voteOptions").children[0].children[0].children[0].textContent, title);
-  assert.equal(el("voteOptions").children[0].children[0].children[0].children.length, 0);
+  assert.equal(el("voteOptions").children[0].children[1].children[0].textContent, title);
+  assert.equal(el("voteOptions").children[0].children[1].children[0].children.length, 0);
+
+  socket.receive({ type: "party-state", suggestions: [{
+    id: 4, title: "Arrival", votes: 1,
+    movie: { pageUrl: "https://en.wikipedia.org/wiki/Arrival_(film)", posterUrl: "https://upload.wikimedia.org/wikipedia/en/poster.jpg", description: "A science fiction film." }
+  }] });
+  const posterRow = el("voteOptions").children[0];
+  assert.equal(posterRow.children[0].children[0].src, "https://upload.wikimedia.org/wikipedia/en/poster.jpg");
+  assert.equal(posterRow.children[1].children[3].textContent, "A science fiction film.");
+  assert.equal(posterRow.children[1].children[4].textContent, "Wikipedia");
+});
+
+test("only the suggestion owner sees its remove control", async () => {
+  const browser = createBrowserDouble();
+  await browser.load("js/app.js");
+  const socket = browser.sockets[0];
+  const el = (id) => browser.elements.get(id);
+  socket.open();
+  socket.receive({ type: "role", role: "host", clientId: "host-id", name: "Host" });
+  socket.receive({ type: "party-state", suggestions: [
+    { id: 1, title: "Host's Movie", ownerId: "host-id", ownerName: "Host", votes: 0 },
+    { id: 2, title: "Viewer's Movie", ownerId: "viewer-id", ownerName: "Viewer", votes: 0 }
+  ] });
+  let rows = el("voteOptions").children;
+  assert.equal(rows[0].children.at(-1).className, "vote-remove-button");
+  assert.equal(rows[1].children.some((child) => child.className === "vote-remove-button"), false);
+  rows[0].children.at(-1).dispatch("click");
+  assert.deepEqual(socket.sent.at(-1), { type: "remove-video-suggestion", suggestionId: 1 });
+
+  socket.receive({ type: "role", role: "viewer", clientId: "viewer-id", name: "Viewer" });
+  socket.receive({ type: "party-state", suggestions: [
+    { id: 1, title: "Host's Movie", ownerId: "host-id", ownerName: "Host", votes: 0 },
+    { id: 2, title: "Viewer's Movie", ownerId: "viewer-id", ownerName: "Viewer", votes: 0 }
+  ] });
+  rows = el("voteOptions").children;
+  assert.equal(rows[0].children.some((child) => child.className === "vote-remove-button"), false);
+  assert.equal(rows[1].children.at(-1).className, "vote-remove-button");
+});
+
+test("movie search selects a matching Wikimedia result and keeps a title-only fallback", async () => {
+  const browser = createBrowserDouble();
+  const movie = {
+    pageId: 23270459,
+    title: "Inception",
+    description: "A science fiction film.",
+    pageUrl: "https://en.wikipedia.org/wiki/Inception",
+    posterUrl: "https://upload.wikimedia.org/wikipedia/en/poster.jpg"
+  };
+  browser.context.fetch = async (url) => {
+    browser.requests.push({ url });
+    return { ok: true, json: async () => ({ movies: [movie] }) };
+  };
+  await browser.load("js/app.js");
+  const socket = browser.sockets[0];
+  socket.open();
+  const el = (id) => browser.elements.get(id);
+  el("suggestionInput").value = "Inception";
+  el("suggestionForm").dispatch("submit");
+  await flush();
+  assert.match(browser.requests[0].url, /\/api\/movies\/search\?q=Inception/);
+  assert.equal(el("suggestionResults").children.length, 2);
+  const result = el("suggestionResults").children[0];
+  assert.equal(result.children[0].src, movie.posterUrl);
+  result.children[1].children[3].dispatch("click");
+  assert.deepEqual(socket.sent.at(-1), { type: "suggest-video", title: "Inception", movie });
+  assert.equal(el("suggestionStatus").textContent, "Suggested “Inception”. Your vote is recorded automatically.");
+
+  browser.context.fetch = async () => { throw new Error("offline"); };
+  el("suggestionInput").value = "Unknown Film";
+  el("suggestionForm").dispatch("submit");
+  await flush();
+  assert.match(el("suggestionStatus").textContent, /You can still suggest the title without a poster/);
+  el("suggestionResults").children[0].dispatch("click");
+  assert.deepEqual(socket.sent.at(-1), { type: "suggest-video", title: "Unknown Film" });
 });
 
 test("participant updates and bounded reactions render through the combined app", async () => {

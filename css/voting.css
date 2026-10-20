@@ -42,6 +42,105 @@
   background: var(--accent-hover);
 }
 
+.suggestion-status {
+  min-height: 1.1em;
+  margin: -.3rem 0 .5rem;
+  color: var(--muted);
+  font-size: .68rem;
+}
+
+.suggestion-results {
+  display: grid;
+  gap: .45rem;
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.movie-search-result {
+  display: flex;
+  align-items: flex-start;
+  gap: .65rem;
+  padding: .5rem;
+  border: 1px solid var(--border);
+  border-radius: .6rem;
+  background: var(--surface-2);
+}
+
+.movie-search-poster {
+  flex: 0 0 3rem;
+  width: 3rem;
+  height: 4.35rem;
+  object-fit: cover;
+  border-radius: .3rem;
+  background: var(--surface-3);
+}
+
+.movie-poster-placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: .55rem;
+  text-align: center;
+}
+
+.movie-search-details {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  gap: .25rem;
+}
+
+.movie-search-details h3,
+.movie-search-details p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.movie-search-details h3 {
+  font-size: .75rem;
+}
+
+.movie-search-details p {
+  color: var(--muted);
+  font-size: .63rem;
+}
+
+.movie-search-details a,
+.vote-source {
+  width: fit-content;
+  color: var(--accent-soft-text);
+  font-size: .62rem;
+}
+
+.movie-search-select,
+.suggestion-title-only {
+  width: fit-content;
+  padding: .35rem .5rem;
+  border: 1px solid var(--border);
+  border-radius: .45rem;
+  color: var(--text);
+  background: var(--surface-3);
+  font-size: .65rem;
+  cursor: pointer;
+}
+
+.movie-search-select:hover,
+.suggestion-title-only:hover {
+  border-color: var(--accent);
+}
+
+.suggestion-title-only {
+  margin-bottom: .45rem;
+}
+
+.movie-search-select:focus-visible,
+.suggestion-title-only:focus-visible,
+.movie-search-details a:focus-visible,
+.vote-source:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .vote-panel .suggestion-form :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -95,6 +194,26 @@
   background: var(--surface-2);
 }
 
+.vote-poster {
+  flex: 0 0 3.25rem;
+  width: 3.25rem;
+  height: 4.75rem;
+  overflow: hidden;
+  border-radius: .35rem;
+  background: var(--surface-3);
+}
+
+.vote-poster img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.vote-option .movie-poster-placeholder {
+  height: 100%;
+}
+
 .vote-option.selected {
   border-color: rgba(124, 92, 255, .55);
   background: rgba(124, 92, 255, .09);
@@ -103,6 +222,26 @@
 .vote-option-details {
   flex: 1;
   min-width: 0;
+}
+
+.vote-description {
+  margin: .35rem 0 0;
+  color: var(--muted);
+  font-size: .62rem;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.vote-source {
+  display: inline-block;
+  margin-top: .3rem;
+}
+
+.vote-suggester {
+  margin: .3rem 0 0;
+  color: var(--muted);
+  font-size: .62rem;
+  overflow-wrap: anywhere;
 }
 
 .vote-option h3 {
@@ -168,8 +307,34 @@
   cursor: default;
 }
 
+.vote-remove-button {
+  flex: 0 0 auto;
+  min-height: 2.25rem;
+  padding: .4rem .55rem;
+  border: 1px solid var(--border);
+  border-radius: .55rem;
+  color: var(--muted);
+  background: transparent;
+  font-size: .65rem;
+  cursor: pointer;
+}
+
+.vote-remove-button:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.vote-remove-button:focus-visible {
+  outline: 2px solid var(--danger);
+  outline-offset: 2px;
+}
+
 @media (max-width: 420px) {
   .vote-panel { padding-inline: .75rem; }
   .vote-heading { align-items: flex-start; flex-direction: column; gap: .35rem; }
   .vote-status { text-align: left; }
+  .vote-option { gap: .5rem; padding: .5rem; }
+  .vote-poster { flex-basis: 2.75rem; width: 2.75rem; height: 4rem; }
+  .vote-button { min-width: 3.75rem; padding-inline: .45rem; }
+  .vote-remove-button { padding-inline: .4rem; }
 }

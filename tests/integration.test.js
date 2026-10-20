@@ -81,7 +81,9 @@ test("HTTP modules, chat names, host-only file sharing, and host handoff work to
   viewer.send({ type: "reaction", emoji: "unsupported" });
   assert.equal((await viewer.next("error")).message, "That emoji reaction is not supported.");
   viewer.send({ type: "suggest-video", title: "  Movie   One " });
-  await host.next("party-state", (message) => message.suggestions.some((suggestion) => suggestion.title === "Movie One"));
+  const firstSuggestion = await host.next("party-state", (message) => message.suggestions.some((suggestion) => suggestion.title === "Movie One"));
+  assert.equal(firstSuggestion.suggestions.find((suggestion) => suggestion.title === "Movie One").ownerId, viewer.role.clientId);
+  assert.equal((await viewer.next("party-state", (message) => message.myVoteId === 1)).myVoteId, 1);
   host.send({ type: "suggest-video", title: "Movie Two" });
   await viewer.next("party-state", (message) => message.suggestions.some((suggestion) => suggestion.title === "Movie Two"));
   viewer.send({ type: "vote-video", suggestionId: 1 });
@@ -98,6 +100,18 @@ test("HTTP modules, chat names, host-only file sharing, and host handoff work to
   assert.equal((await viewer.next("party-state", (message) =>
     message.myVoteId === 2 && message.suggestions.find((suggestion) => suggestion.id === 2)?.votes === 2
   )).myVoteId, 2);
+  host.send({ type: "remove-video-suggestion", suggestionId: 1 });
+  assert.equal((await host.next("error")).message, "You can only remove your own video suggestions.");
+  viewer.send({ type: "remove-video-suggestion", suggestionId: 1 });
+  const afterRemoval = await host.next("party-state", (message) =>
+    !message.suggestions.some((suggestion) => suggestion.id === 1) &&
+    message.suggestions.some((suggestion) => suggestion.id === 2)
+  );
+  assert.equal(afterRemoval.suggestions.find((suggestion) => suggestion.id === 2).votes, 2);
+  const viewerAfterRemoval = await viewer.next("party-state", (message) =>
+    message.myVoteId === null && !message.suggestions.some((suggestion) => suggestion.id === 1)
+  );
+  assert.equal(viewerAfterRemoval.myVoteId, null);
 
   const newcomer = await connectPeer(base.replace("http", "ws"), "Newcomer");
   const joined = await newcomer.next("party-state", (message) => message.participants.length === 3);

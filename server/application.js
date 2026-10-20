@@ -5,6 +5,7 @@ const { createRoomRegistry } = require("./rooms");
 const { createSourceBridge } = require("./source-relay");
 const { createRequestHandler } = require("./http/routes");
 const { createRealtimeServer } = require("./realtime");
+const { createMovieSearch } = require("./movies");
 
 // Rooms share encoder detection and the internal byte bridge, never playback state.
 function createApplication(options = {}) {
@@ -13,9 +14,10 @@ function createApplication(options = {}) {
   const bridge = createSourceBridge(config);
   const registry = createRoomRegistry({ config, encoderPromise, bridge });
   const { state, media } = registry.defaultRoom;
-  const handler = createRequestHandler({ registry, config });
+  const movieSearch = options.movieSearch || createMovieSearch(options.movieSearchOptions);
+  const handler = createRequestHandler({ registry, config, movieSearch });
   const server = http.createServer(handler);
-  const wss = createRealtimeServer(server, { registry, config });
+  const wss = createRealtimeServer(server, { registry, config, movieSearch });
   let closePromise;
 
   async function listen() {

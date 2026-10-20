@@ -5,7 +5,7 @@ const { createMessageHandler } = require("./messages");
 const { sessionState } = require("./state");
 const { validOrigin } = require("./rooms");
 
-function createRealtimeServer(server, { registry, config }) {
+function createRealtimeServer(server, { registry, config, movieSearch }) {
   const wss = new WebSocket.Server({ noServer: true, maxPayload: config.sourceChunkBytes + 4, perMessageDeflate: false });
   server.on("upgrade", (req, socket, head) => {
     const reject = (status) => socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
@@ -32,7 +32,7 @@ function createRealtimeServer(server, { registry, config }) {
     const { state, transport, media } = room;
     const { send, broadcast } = transport;
     const { availableGuestName } = createNameRegistry(state.clients);
-    const { handleMessage, updatePresence } = createMessageHandler({ state, transport, media });
+    const { handleMessage, updatePresence } = createMessageHandler({ state, transport, media, movieSearch });
     ws.clientId = member?.id || crypto.randomUUID();
     const previous = state.clients.get(ws.clientId);
     state.clients.set(ws.clientId, {

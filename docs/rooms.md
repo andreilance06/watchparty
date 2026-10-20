@@ -48,6 +48,30 @@ Viewers use `/api/rooms/join` with the code/password, then navigate to the retur
 
 Errors return `{ "error": "message" }`: `400` invalid input, `401` missing membership/incorrect password, `403` forbidden origin, `404` missing room/endpoint, `405` wrong method, `409` code collision, `413` body over 16 KiB, and `429` admission limits. The defaults permit 100 private rooms, 1,000 memberships per room, and 30 admission attempts per address per minute. No public room listing exists.
 
+## Movie suggestions and posters
+
+`GET /api/movies/search?q=Arrival` searches Wikipedia through its keyless MediaWiki Action API. Queries are normalized, limited to 80 characters, and cached in memory for ten minutes. The API returns up to eight article matches with a title, short description, article URL, and optional Wikimedia thumbnail URL. Requests use the existing admission rate limit.
+
+To add a selected result to the vote, send the result's metadata in the existing `suggest-video` WebSocket message:
+
+```json
+{
+  "type": "suggest-video",
+  "title": "Arrival (film)",
+  "movie": {
+    "pageId": 23270459,
+    "title": "Arrival (film)",
+    "pageUrl": "https://en.wikipedia.org/wiki/Arrival_(film)",
+    "posterUrl": "https://upload.wikimedia.org/wikipedia/en/example.jpg",
+    "description": "A science fiction film."
+  }
+}
+```
+
+The server verifies that the selection came from a recent search, accepts only HTTPS Wikipedia article links and Wikimedia upload/thumbnail image URLs, and shares the selected details in party-state snapshots. `posterUrl` may be `null`; title-only suggestions remain supported. Poster availability and reuse terms vary by image; follow the linked article for source details.
+
+The server records the authenticated client as the suggestion owner and includes `ownerId` and `ownerName` in each party-state suggestion. The first submission owns a title; submitting a duplicate keeps the original owner and casts the submitter's vote for that existing suggestion. Every new suggestion also casts its owner's vote automatically. To remove one, send `{ "type": "remove-video-suggestion", "suggestionId": 1 }`; the server permits only its owner and clears votes for the removed suggestion. The owner fields are server-assigned and cannot be set by the client.
+
 ## Control connection and file declaration
 
 Open `endpoints.websocket`, then send the existing `{ "type": "join", "name": "Alex" }` message. Membership/role comes from the server cookie, not a client-provided ID or role. Existing playback, chat, participant, reaction, and voting messages apply only inside this room. The creator's host slot is reserved even when a viewer connects first.

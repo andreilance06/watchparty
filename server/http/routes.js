@@ -29,7 +29,7 @@ async function readJson(req) {
   });
 }
 
-function createRequestHandler({ registry, config }) {
+function createRequestHandler({ registry, config, movieSearch }) {
   const admissions = new Map();
   function admit(req) {
     const now = Date.now(), key = req.socket.remoteAddress;
@@ -43,6 +43,20 @@ function createRequestHandler({ registry, config }) {
     try {
       const url = new URL(req.url, "http://localhost");
       if (req.method === "POST" && !validOrigin(req, config)) throw failure(403, "Request origin is not allowed.");
+      if (url.pathname === "/api/movies/search") {
+        if (req.method !== "GET") { res.setHeader("Allow", "GET"); throw failure(405, "Use GET for this endpoint."); }
+        admit(req);
+        if (!movieSearch) throw failure(503, "Movie search is unavailable.");
+        const query = (url.searchParams.get("q") || "").replace(/\s+/g, " ").trim();
+        if (query.length < 2) throw failure(400, "Enter at least two characters to search.");
+        try {
+          const movies = await movieSearch.search(query);
+          json(res, 200, { movies });
+        } catch (error) {
+          throw failure(error.status || 502, error.message || "Movie search is temporarily unavailable.");
+        }
+        return;
+      }
       if (url.pathname === "/api/rooms" || url.pathname === "/api/rooms/join") {
         if (req.method !== "POST") { res.setHeader("Allow", "POST"); throw failure(405, "Use POST for this endpoint."); }
         const body = await readJson(req);
