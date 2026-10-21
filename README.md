@@ -2,16 +2,114 @@
 
 A browser-hosted watch party with synchronized playback, chat, private rooms, reactions, and next-video voting.
 
-## Run
+Repository: [andreilance06/watchparty](https://github.com/andreilance06/watchparty)
 
-Requires Node.js 18+. Install dependencies and start the server:
+## Purpose and target users
 
-```sh
-npm install
-npm start
-```
+WatchParty helps friends, classmates, and small groups watch a host's local video together while chatting and deciding what to watch next. The project combines a responsive HTML, CSS, and JavaScript interface with a Node.js server and demonstrates collaborative development through Git branches, commits, and feature integration.
 
-Open `http://localhost:3000`. The server installs FFmpeg automatically; hosts and viewers only need a browser. `FFMPEG_PATH` may point to an existing executable. Use [trusted HTTPS](docs/https.md) for LAN and public access to enable WebCodecs on viewers' devices. HTTP still supports native files and compatibility streaming.
+Its objectives are to keep playback synchronized, make group interaction available in one page, and let members contribute separate features to one working application.
+
+## Major features
+
+| Feature | What users can do |
+| --- | --- |
+| Watch rooms | Create a private room, optionally protect it with a password, and invite others with a link or access code. A public room is also available. |
+| Shared playback | Watch a video supplied by the host's browser, with synchronized playback and automatic compatibility streaming when needed. |
+| Captions | Add SRT, VTT, ASS, or SSA subtitles and choose a caption track independently. |
+| Chat and reactions | Send messages, insert emojis, react to comments, and send floating emoji reactions. |
+| Movie polls | Start a poll as host, suggest titles with optional Wikipedia metadata, vote, and post the result when the host finishes the poll. |
+| Participants and moderation | See connected participants; hosts can manage playback permissions, transfer hosting, and block or unblock viewers. |
+| Responsive interface | Use desktop or mobile layouts and switch between light and dark themes. |
+
+## Technologies
+
+| Technology | Role |
+| --- | --- |
+| HTML, CSS, JavaScript | Page structure, responsive styles, and browser interactions. |
+| Node.js and the `ws` package | HTTP server, rooms, and real-time WebSocket messages. |
+| Movi Player and WebCodecs | Browser playback and video controls. |
+| FFmpeg and HLS | Media inspection and compatibility streaming. |
+| JASSUB | Subtitle rendering, including styled ASS/SSA captions. |
+| Wikipedia MediaWiki API | Optional movie search, metadata, and poster sources; no API key is required. |
+| Git and GitHub | Version history, development branches, and integration of group contributions. |
+
+## Run locally
+
+Prerequisites: Git, Node.js 18 or newer with npm, and a modern browser. The server computer needs these tools; viewers only need a browser. Internet access is needed to install dependencies and use movie search or external posters.
+
+1. Clone the shared repository:
+
+   ```sh
+   git clone https://github.com/andreilance06/watchparty.git
+   ```
+
+2. Enter the project directory:
+
+   ```sh
+   cd watchparty
+   ```
+
+3. Install the dependencies. The `ffmpeg-static` package downloads the FFmpeg executable during installation:
+
+   ```sh
+   npm install
+   ```
+
+4. Start the server and leave the terminal running:
+
+   ```sh
+   npm start
+   ```
+
+5. Open `http://localhost:3000` in your browser. Stop the server with **Ctrl+C** when finished.
+
+On Windows, if PowerShell blocks `npm.ps1`, use `npm.cmd install` and `npm.cmd start` instead. If FFmpeg's download is unavailable, install a compatible executable and set `FFMPEG_PATH` to its path before starting the server.
+
+For another device on the same network, open one of the LAN addresses printed by the server; `localhost` on that device refers to the device itself. Allow the server through the firewall if necessary. Use [trusted HTTPS](docs/https.md) for LAN and public access to enable WebCodecs on viewers' devices. HTTP still supports native files and compatibility streaming. Keep the Node.js server running; opening `index.html` directly does not provide rooms or shared playback.
+
+## Your first watch party
+
+1. Optionally enter a display name on the welcome screen. Choose **Create a room**, enter a room name, and optionally set an access code and password. Select **Create room**, then **Enter room**. You can also choose **Continue to the public room**.
+2. In a private room, use **Invite** to copy the access code. Share the invitation link shown after creation, or have viewers open the same server, choose **Join a room**, and enter the code and password if required. For viewers on another device, use the server's reachable LAN or HTTPS address rather than `localhost`.
+3. As host, select **Choose Video** and choose one video, optionally with subtitle files. Keep the browser page that supplies the video open throughout the session. Other participants join the room to watch.
+4. Type in the chatroom and select **Send**. Use the emoji button to insert an emoji, the plus button beneath a message to react, or the reaction buttons above the messages to send floating reactions.
+5. As host, select **Start poll**. Enter a movie title and select **Find movie**; choose a matching result with **Suggest & vote**, or suggest the title without a poster. Suggesting a title automatically casts your vote. Participants can vote for another suggestion, and the host selects **Finish poll** to post the result in chat. A poll chooses what to watch next; the host still selects the actual video file.
+6. Select a participant's name to inspect playback permissions. Hosts can change permissions or transfer hosting. Use **Leave room / switch** when you want to leave a private room.
+
+## Screenshots
+
+These screenshots show the running application with local demonstration data. The example room has a chat message and an active movie poll; no video has been selected yet.
+
+### Room selection
+
+Create a new room, join by access code, or continue to the public room.
+
+![WatchParty welcome screen with create-room, join-room, display-name, and public-room controls](docs/screenshots/room-selection.png)
+
+### Desktop room
+
+The desktop layout places the video panel beside the participant list, reactions, movie poll, and chat.
+
+![Desktop WatchParty room showing the video panel, host participant, Arrival poll with one vote, and a welcome chat message](docs/screenshots/desktop-room.png)
+
+### Mobile room
+
+At a 390-pixel viewport, the video panel and chatroom stack vertically. This full-page capture includes the poll and chat below the player.
+
+<img src="docs/screenshots/mobile-room.png" alt="Mobile WatchParty room with vertically stacked video panel, participants, movie poll, and chat" width="390">
+
+## Team and contributions
+
+| Team member | GitHub username | Contributions |
+| --- | --- | --- |
+| Jobert Aguirre | `jxa-sh-h` | UI design, responsive layout, light/dark themes, voting interface, room-entry interface, invitation display, and movie suggestion search interface. |
+| Andrei Lance Asuncion | `andreilance06` | Initial application and modular structure, backend and room management, playback and captions, participant permissions and moderation, and integration of group features. |
+| Justin Mandapat | `DarkDream83` | Participant list, shared voting logic, floating emoji reactions, comment reactions, and emoji picker. |
+
+The contribution summary follows the recorded work in the repository. Examples include Jobert's voting interface (`83c0caf`), Justin's participant/reaction/voting implementation (`fcbeee7`) and comment reactions (`b40b5ab`), and Andrei Lance's room/backend work (`3301544`) and integration (`b520781`, `eaff53f`).
+
+## Room behavior
 
 The host selects one video and optional SRT, VTT, ASS, or SSA files. Keep that browser page open: its File objects answer bounded byte requests, with no initial full-file upload. Transferring host keeps that browser as the video provider while the new host controls the room. Refreshing, disconnecting, or blocking the provider ends the current video; the host can choose a replacement from their device.
 
