@@ -7,7 +7,7 @@ const { CPU_ENCODER } = require("../server/encoders");
 const { connectPeer, serveHostFiles } = require("./helpers/peer");
 
 async function setup(t, config = {}) {
-  const app = createApplication({ config: { port: 0, ...config }, encoderPromise: Promise.resolve(CPU_ENCODER) });
+  const app = createApplication({ config: { port: 0, hostReconnectGraceMs: 0, ...config }, encoderPromise: Promise.resolve(CPU_ENCODER) });
   const address = await app.listen();
   t.after(() => app.close());
   const base = `http://127.0.0.1:${address.port}`;
@@ -112,9 +112,11 @@ test("room creators retain hosting and all features stay inside their room", asy
   ]);
   host.send({ type: "reaction", emoji: "👏" });
   await viewer.next("reaction");
-  host.send({ type: "suggest-video", title: "Only One" });
+  host.send({ type: "start-video-poll" });
+  const { poll: { id: pollId } } = await host.next("party-state", message => message.poll.status === "open");
+  host.send({ type: "suggest-video", pollId, title: "Only One" });
   await viewer.next("party-state", (message) => message.suggestions.length === 1);
-  viewer.send({ type: "vote-video", suggestionId: 1 });
+  viewer.send({ type: "vote-video", pollId, suggestionId: 1 });
   await host.next("party-state", (message) => message.suggestions[0]?.votes === 1);
   otherHost.send({ type: "chat", message: "Room two marker" });
   await otherHost.next("chat");

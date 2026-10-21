@@ -42,8 +42,18 @@ if (roomId) {
   }
 }
 try {
-  const response = await fetch("/api/viewer-identity", { method: "POST" });
-  if (!response.ok) throw new Error("Could not establish viewer identity. Reload to reconnect.");
+  const response = await fetch("/api/viewer-identity", { method: "POST" }).catch(() => {
+    throw new Error("Could not establish viewer identity. Check your connection to the server, then reload.");
+  });
+  if (!response.ok) {
+    let result;
+    try { result = await response.json(); } catch {}
+    const detail = typeof result?.error === "string" ? result.error.trim() : "";
+    const guidance = response.status === 403 && detail === "Request origin is not allowed."
+      ? "Check that PUBLIC_ORIGIN matches this page's HTTPS origin and TRUST_PROXY is configured for the tunnel."
+      : "Reload to reconnect.";
+    throw new Error(`Could not establish viewer identity (HTTP ${response.status}).${detail ? ` ${detail}` : ""} ${guidance}`);
+  }
   if (!roomId) {
     const admission = await fetch("/api/session");
     if (!admission.ok) {
@@ -74,6 +84,7 @@ const connection = createConnection({
     setConnectionStatus(elements, connected, text);
     if (!connected) files?.disconnect();
     participants.setConnected(connected);
+    voting.setConnected(connected);
   }
 });
 stopCurrentConnection = connection.dispose;
@@ -81,7 +92,7 @@ const chat = createChat({ elements, state, send: connection.send });
 files = createHostFiles({ send: connection.send, report: chat.addSystemMessage });
 const party = createParty({ elements, send: connection.send });
 const player = createPlayer({ elements, state, send: connection.send, report: chat.addSystemMessage, files });
-const voting = createVoting({ elements, state, send: connection.send });
+const voting = createVoting({ elements, state, send: connection.send, report: chat.addSystemMessage });
 const participants = createParticipants({ elements, state, send: connection.send });
 
 function handleMessage(message) {
@@ -94,6 +105,7 @@ function handleMessage(message) {
       player.applyRole(message.role);
       player.applyPermissions(message.permissions);
       participants.refresh();
+      voting.refresh();
       elements.viewerCount.textContent = `${message.viewerCount} online`;
       break;
     case "presence":
@@ -102,6 +114,9 @@ function handleMessage(message) {
       applyParticipantPermissions(message.participants);
       break;
     case "party-state":
+      elements.hostReconnectStatus.hidden = message.host?.status !== "reconnecting";
+      elements.hostReconnectStatus.textContent = message.host?.status === "reconnecting"
+        ? `${message.host.name || "The host"} is reconnecting. Waiting briefly before assigning a new host.` : "";
       participants.updateParticipants(message.participants);
       applyParticipantPermissions(message.participants);
       voting.applyState(message);

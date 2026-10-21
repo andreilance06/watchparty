@@ -3,6 +3,7 @@ const { sanitizeDisplayName, createNameRegistry } = require("./names");
 const { currentTime, sessionState } = require("./state");
 const { permissionKey, permissionsFor, promoteHost } = require("./permissions");
 const { participants: roomParticipants } = require("./participants");
+const { hostStatus } = require("./hosting");
 
 const MAX_VIDEO_SUGGESTIONS = 30;
 const MAX_COMMENTS = 500;
@@ -56,15 +57,38 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
     return roomParticipants(state);
   }
 
-  function updatePartyState() {
-    const suggestions = state.videoSuggestions.map((suggestion) => ({
+  function isHost(clientId) {
+    return state.hostId === clientId && state.clients.get(clientId)?.role === "host";
+  }
+
+  function canRemove(clientId, suggestion) {
+    return isHost(clientId) || state.suggestionOwners.get(suggestion.id) === permissionKey(state.clients.get(clientId), clientId);
+  }
+
+  function updateName(clientId, name) {
+    const client = state.clients.get(clientId);
+    client.name = name;
+    const identity = permissionKey(client, clientId);
+    for (const suggestion of state.videoSuggestions) {
+      if (state.suggestionOwners.get(suggestion.id) === identity) suggestion.ownerName = name;
+    }
+    if (state.hostId === clientId) state.hostName = name;
+  }
+
+  function pollSuggestions() {
+    return state.videoSuggestions.map((suggestion) => ({
       ...suggestion,
-      ownerName: state.clients.get(suggestion.ownerId)?.name || suggestion.ownerName || "Former participant",
+      ownerName: suggestion.ownerName || "Former participant",
       votes: [...state.videoVotes.values()].filter((id) => id === suggestion.id).length
     }));
+  }
+
+  function updatePartyState() {
+    const suggestions = pollSuggestions();
     for (const [clientId, client] of state.clients) {
       send(client.ws, {
-        type: "party-state", participants: participants(), suggestions,
+        type: "party-state", participants: participants(), poll: state.poll, host: hostStatus(state),
+        suggestions: suggestions.map(suggestion => ({ ...suggestion, canRemove: canRemove(clientId, suggestion) })),
         myVoteId: state.videoVotes.get(clientId) ?? null
       });
     }
@@ -91,7 +115,44 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
   function handleMessage(ws, message) {
     const client = state.clients.get(ws.clientId);
     if (!client) return;
+    const pollAction = ["suggest-video", "vote-video", "remove-video-suggestion", "finish-video-poll"].includes(message.type);
+    if (pollAction && (state.poll.status !== "open" || message.pollId !== state.poll.id)) {
+      send(ws, { type: "error", action: message.type, message: "That poll is no longer open. Use the current poll." });
+      return;
+    }
     switch (message.type) {
+      case "start-video-poll": {
+        if (!isHost(ws.clientId)) {
+          send(ws, { type: "error", action: message.type, message: "Only the current host can start a poll." });
+          break;
+        }
+        if (state.poll.status === "open") {
+          send(ws, { type: "error", action: message.type, message: "A poll is already open." });
+          break;
+        }
+        state.videoSuggestions = [];
+        state.videoVotes.clear();
+        state.suggestionOwners.clear();
+        state.poll = { id: randomUUID(), status: "open", result: null };
+        updatePartyState();
+        break;
+      }
+      case "finish-video-poll": {
+        if (!isHost(ws.clientId)) {
+          send(ws, { type: "error", action: message.type, message: "Only the current host can finish a poll." });
+          break;
+        }
+        const suggestions = pollSuggestions();
+        const totalVotes = suggestions.reduce((sum, option) => sum + option.votes, 0);
+        const highest = Math.max(0, ...suggestions.map(option => option.votes));
+        const winnerIds = suggestions.filter(option => highest > 0 && option.votes === highest).map(option => option.id);
+        state.poll = { id: state.poll.id, status: "closed", result: { suggestions, totalVotes, winnerIds } };
+        state.videoSuggestions = [];
+        state.videoVotes.clear();
+        state.suggestionOwners.clear();
+        updatePartyState();
+        break;
+      }
       case "compatibility-request": {
         if (!state.mediaReady || message.mediaVersion !== state.mediaVersion) {
           send(ws, { type: "error", requestId: message.requestId, message: "The video source changed." });
@@ -107,7 +168,7 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
         {
           const requestedName = client.hasMemberName ? client.name : sanitizeDisplayName(message.name, client.name);
           const nameRejected = isDisplayNameTaken(requestedName, ws.clientId);
-          if (!nameRejected) client.name = requestedName;
+          updateName(ws.clientId, nameRejected ? client.name : requestedName);
           if (!state.hostId) promoteHost(state, ws.clientId);
           send(ws, {
             type: "role", role: client.role, hostId: state.hostId, clientId: ws.clientId,
@@ -152,7 +213,7 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
           });
           break;
         }
-        client.name = requestedName;
+        updateName(ws.clientId, requestedName);
         send(ws, { type: "name-updated", name: client.name });
         updatePresence();
         break;
@@ -223,6 +284,7 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
             ...(movie ? { movie } : {})
           };
           state.videoSuggestions.push(suggestion);
+          state.suggestionOwners.set(suggestion.id, permissionKey(client, ws.clientId));
         }
         state.videoVotes.set(ws.clientId, suggestion.id);
         updatePartyState();
@@ -235,11 +297,12 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
           send(ws, { type: "error", message: "That video suggestion is no longer available." });
           break;
         }
-        if (state.videoSuggestions[index].ownerId !== ws.clientId) {
-          send(ws, { type: "error", message: "You can only remove your own video suggestions." });
+        if (!canRemove(ws.clientId, state.videoSuggestions[index])) {
+          send(ws, { type: "error", action: message.type, message: "Only the host or original suggester can remove this video suggestion." });
           break;
         }
         state.videoSuggestions.splice(index, 1);
+        state.suggestionOwners.delete(suggestionId);
         for (const [clientId, voteId] of state.videoVotes) {
           if (voteId === suggestionId) state.videoVotes.delete(clientId);
         }

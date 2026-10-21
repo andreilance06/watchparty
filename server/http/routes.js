@@ -105,9 +105,12 @@ function createRequestHandler({ registry, config, movieSearch }) {
       if (match && pathname === "/api/leave") {
         if (req.method !== "POST") throw failure(405, "Use POST for this endpoint.");
         room.members.delete(member.token);
-        room.state.clients.get(member.id)?.ws.close(1000, "Left room");
-        if (!room.state.clients.has(member.id) && room.state.hostId === member.id) {
-          room.moderation.releaseHost(member.id);
+        const leaving = room.state.clients.get(member.id);
+        room.hosting.leave(member);
+        if (leaving) {
+          leaving.ws.explicitLeave = true;
+          room.source.disconnectControl(leaving.ws);
+          leaving.ws.close(1000, "Left room");
         }
         registry.setCookie(req, res, room, null);
         registry.scheduleExpiry(room);

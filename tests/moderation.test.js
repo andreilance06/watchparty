@@ -13,7 +13,7 @@ const { createBrowserDouble } = require("./helpers/browser");
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
 async function setup(t, config = {}) {
-  const app = createApplication({ config: { port: 0, ...config }, encoderPromise: Promise.resolve(CPU_ENCODER) });
+  const app = createApplication({ config: { port: 0, hostReconnectGraceMs: 0, ...config }, encoderPromise: Promise.resolve(CPU_ENCODER) });
   const address = await app.listen(); t.after(() => app.close());
   const base = `http://127.0.0.1:${address.port}`;
   const api = async (url, body = {}, cookie = "") => {

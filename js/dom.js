@@ -10,6 +10,8 @@ export function getElements(root = document) {
     "chatMessages", "chatForm", "chatInput", "chatEmojiButton", "emojiPicker", "emojiSearch",
     "emojiPickerGrid", "emojiPickerEmpty", "voteOptions", "voteStatus", "themeToggle",
     "suggestionResults", "suggestionStatus",
+    "chatPanel", "votePanel", "pollDetails", "pollToggle", "startPollButton", "finishPollButton",
+    "hostReconnectStatus",
     "roomEntry", "roomEntryChoices", "createRoomChoice", "joinRoomChoice", "initialDisplayName", "initialDisplayNameField",
     "createRoomForm", "createRoomName", "createRoomCode", "createRoomPassword", "createRoomBack",
     "joinRoomForm", "joinRoomCode", "joinRoomPassword", "joinRoomBack", "continuePublicRoom",

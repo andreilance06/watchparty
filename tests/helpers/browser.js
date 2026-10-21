@@ -76,6 +76,10 @@ class ElementDouble extends EventTargetDouble {
     if (selector.startsWith('.')) return selector.slice(1).split('.').every(name => this.classList.contains(name));
     return this.tagName.toLowerCase() === selector.toLowerCase();
   }
+  contains(node) {
+    for (let current = node; current; current = current.parentNode) if (current === this) return true;
+    return false;
+  }
   getBoundingClientRect() {
     return { top: 0, left: 0, right: this.clientWidth, bottom: this.clientHeight, width: this.clientWidth, height: this.clientHeight };
   }

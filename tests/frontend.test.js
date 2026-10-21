@@ -379,13 +379,14 @@ test("frontend modules initialize and route playback, captions, fullscreen, chat
   assert.equal(customReaction.children[1].textContent, "2");
   assert.equal(customReaction.title, "🫶: Host, Viewer");
   assert.match(customReaction.getAttribute("aria-label"), /Host, Viewer/);
+  socket.receive({ type: "party-state", poll: { id: "poll", status: "open", result: null }, suggestions: [] });
   el("suggestionInput").value = "  The   Next Movie ";
   el("suggestionForm").dispatch("submit");
   await flush();
   el("suggestionResults").children[0].dispatch("click");
-  assert.deepEqual(socket.sent.at(-1), { type: "suggest-video", title: "The Next Movie" });
+  assert.deepEqual(socket.sent.at(-1), { type: "suggest-video", pollId: "poll", title: "The Next Movie" });
   socket.receive({
-    type: "party-state",
+    type: "party-state", poll: { id: "poll", status: "open", result: null },
     myVoteId: 2,
     participants: [
       { clientId: "host-id", name: "Host", role: "host" },
@@ -432,14 +433,14 @@ test("voting uses party-state for counts, ties, selections, posters, and replace
   assert.equal(socket.sent.length, sent);
 
   const suggestions = [{ id: 1, title: "Arrival", ownerId: "host-id", ownerName: "Host", votes: 0 }, { id: 2, title: "Moonlight", votes: 0 }];
-  socket.receive({ type: "party-state", suggestions, myVoteId: null });
+  socket.receive({ type: "party-state", poll: { id: "poll", status: "open", result: null }, suggestions, myVoteId: null });
   assert.equal(el("voteLeader").textContent, "No votes yet.");
   el("voteOptions").children[0].children[2].dispatch("click");
-  assert.deepEqual(socket.sent.at(-1), { type: "vote-video", suggestionId: 1 });
+  assert.deepEqual(socket.sent.at(-1), { type: "vote-video", pollId: "poll", suggestionId: 1 });
 
   suggestions[0].votes = 2;
   suggestions[1].votes = 1;
-  socket.receive({ type: "party-state", suggestions, myVoteId: 1 });
+  socket.receive({ type: "party-state", poll: { id: "poll", status: "open", result: null }, suggestions, myVoteId: 1 });
   assert.equal(el("voteStatus").textContent, "3 votes cast");
   assert.equal(el("voteLeader").textContent, "Leading: Arrival (2 votes)");
   let rows = el("voteOptions").children;
@@ -448,11 +449,11 @@ test("voting uses party-state for counts, ties, selections, posters, and replace
   assert.equal(rows[0].children[2].disabled, true);
   assert.equal(rows[1].children[2].disabled, false);
   rows[1].children[2].dispatch("click");
-  assert.deepEqual(socket.sent.at(-1), { type: "vote-video", suggestionId: 2 });
+  assert.deepEqual(socket.sent.at(-1), { type: "vote-video", pollId: "poll", suggestionId: 2 });
 
   suggestions[0].votes = 1;
   suggestions[1].votes = 2;
-  socket.receive({ type: "party-state", suggestions, myVoteId: 2 });
+  socket.receive({ type: "party-state", poll: { id: "poll", status: "open", result: null }, suggestions, myVoteId: 2 });
   rows = el("voteOptions").children;
   assert.equal(rows[0].children[2].getAttribute("aria-pressed"), "false");
   assert.equal(rows[0].children[2].disabled, false);
@@ -460,15 +461,15 @@ test("voting uses party-state for counts, ties, selections, posters, and replace
   assert.equal(rows[1].children[2].disabled, true);
 
   suggestions[1].votes = 1;
-  socket.receive({ type: "party-state", suggestions, myVoteId: null });
+  socket.receive({ type: "party-state", poll: { id: "poll", status: "open", result: null }, suggestions, myVoteId: null });
   assert.equal(el("voteLeader").textContent, "Tie: Arrival, Moonlight (1 vote each)");
   assert.equal(el("voteOptions").children[0].children[1].children[2].children[0].style.width, "50%");
   const title = '<img src=x onerror="alert(1)">';
-  socket.receive({ type: "party-state", suggestions: [{ id: 3, title, votes: 0 }] });
+  socket.receive({ type: "party-state", poll: { id: "poll", status: "open", result: null }, suggestions: [{ id: 3, title, votes: 0 }] });
   assert.equal(el("voteOptions").children[0].children[1].children[0].textContent, title);
   assert.equal(el("voteOptions").children[0].children[1].children[0].children.length, 0);
 
-  socket.receive({ type: "party-state", suggestions: [{
+  socket.receive({ type: "party-state", poll: { id: "poll", status: "open", result: null }, suggestions: [{
     id: 4, title: "Arrival", votes: 1,
     movie: { pageUrl: "https://en.wikipedia.org/wiki/Arrival_(film)", posterUrl: "https://upload.wikimedia.org/wikipedia/en/poster.jpg", description: "A science fiction film." }
   }] });
@@ -478,27 +479,27 @@ test("voting uses party-state for counts, ties, selections, posters, and replace
   assert.equal(posterRow.children[1].children[4].textContent, "Wikipedia");
 });
 
-test("only the suggestion owner sees its remove control", async () => {
+test("host and original suggester see their server-authorized remove controls", async () => {
   const browser = createBrowserDouble();
   await browser.load("js/app.js");
   const socket = browser.sockets[0];
   const el = (id) => browser.elements.get(id);
   socket.open();
   socket.receive({ type: "role", role: "host", clientId: "host-id", name: "Host" });
-  socket.receive({ type: "party-state", suggestions: [
-    { id: 1, title: "Host's Movie", ownerId: "host-id", ownerName: "Host", votes: 0 },
-    { id: 2, title: "Viewer's Movie", ownerId: "viewer-id", ownerName: "Viewer", votes: 0 }
+  socket.receive({ type: "party-state", poll: { id: "poll", status: "open", result: null }, suggestions: [
+    { id: 1, title: "Host's Movie", ownerId: "host-id", ownerName: "Host", votes: 0, canRemove: true },
+    { id: 2, title: "Viewer's Movie", ownerId: "viewer-id", ownerName: "Viewer", votes: 0, canRemove: true }
   ] });
   let rows = el("voteOptions").children;
   assert.equal(rows[0].children.at(-1).className, "vote-remove-button");
-  assert.equal(rows[1].children.some((child) => child.className === "vote-remove-button"), false);
+  assert.equal(rows[1].children.at(-1).className, "vote-remove-button");
   rows[0].children.at(-1).dispatch("click");
-  assert.deepEqual(socket.sent.at(-1), { type: "remove-video-suggestion", suggestionId: 1 });
+  assert.deepEqual(socket.sent.at(-1), { type: "remove-video-suggestion", pollId: "poll", suggestionId: 1 });
 
   socket.receive({ type: "role", role: "viewer", clientId: "viewer-id", name: "Viewer" });
-  socket.receive({ type: "party-state", suggestions: [
-    { id: 1, title: "Host's Movie", ownerId: "host-id", ownerName: "Host", votes: 0 },
-    { id: 2, title: "Viewer's Movie", ownerId: "viewer-id", ownerName: "Viewer", votes: 0 }
+  socket.receive({ type: "party-state", poll: { id: "poll", status: "open", result: null }, suggestions: [
+    { id: 1, title: "Host's Movie", ownerId: "host-id", ownerName: "Host", votes: 0, canRemove: false },
+    { id: 2, title: "Viewer's Movie", ownerId: "viewer-id", ownerName: "Viewer", votes: 0, canRemove: true }
   ] });
   rows = el("voteOptions").children;
   assert.equal(rows[0].children.some((child) => child.className === "vote-remove-button"), false);
@@ -522,6 +523,7 @@ test("movie search selects a matching Wikimedia result and keeps a title-only fa
   const socket = browser.sockets[0];
   socket.open();
   const el = (id) => browser.elements.get(id);
+  socket.receive({ type: "party-state", poll: { id: "poll", status: "open", result: null }, suggestions: [] });
   el("suggestionInput").value = "Inception";
   el("suggestionForm").dispatch("submit");
   await flush();
@@ -530,7 +532,7 @@ test("movie search selects a matching Wikimedia result and keeps a title-only fa
   const result = el("suggestionResults").children[0];
   assert.equal(result.children[0].src, movie.posterUrl);
   result.children[1].children[3].dispatch("click");
-  assert.deepEqual(socket.sent.at(-1), { type: "suggest-video", title: "Inception", movie });
+  assert.deepEqual(socket.sent.at(-1), { type: "suggest-video", pollId: "poll", title: "Inception", movie });
   assert.equal(el("suggestionStatus").textContent, "Suggested “Inception”. Your vote is recorded automatically.");
 
   browser.context.fetch = async () => { throw new Error("offline"); };
@@ -539,7 +541,7 @@ test("movie search selects a matching Wikimedia result and keeps a title-only fa
   await flush();
   assert.match(el("suggestionStatus").textContent, /You can still suggest the title without a poster/);
   el("suggestionResults").children[0].dispatch("click");
-  assert.deepEqual(socket.sent.at(-1), { type: "suggest-video", title: "Unknown Film" });
+  assert.deepEqual(socket.sent.at(-1), { type: "suggest-video", pollId: "poll", title: "Unknown Film" });
 });
 
 test("participant updates and bounded reactions render through the combined app", async () => {

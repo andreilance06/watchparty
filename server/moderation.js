@@ -1,19 +1,10 @@
-const { permissionKey, permissionsFor, promoteHost, DEFAULT_PERMISSIONS } = require("./permissions");
-const { currentTime, sessionState } = require("./state");
+const { permissionKey, permissionsFor } = require("./permissions");
 const { participants } = require("./participants");
+const { sessionState } = require("./state");
 
 function createModeration(room, scheduleExpiry) {
   const { state, transport } = room;
   let publish = () => transport.broadcast({ type: "presence", count: state.clients.size, participants: participants(state) });
-  const role = clientId => {
-    const client = state.clients.get(clientId);
-    if (client) transport.send(client.ws, { type: "role", clientId, hostId: state.hostId, role: client.role,
-      name: client.name, viewerCount: state.clients.size, permissions: permissionsFor(state, client, clientId) });
-  };
-  function advanceClock() {
-    state.playback = { ...state.playback, time: currentTime(state), updatedAt: Date.now() };
-    state.playbackRevision++;
-  }
   function handle(ws, message) {
     if (!["block-participant", "unblock-participant", "transfer-host"].includes(message.type)) return false;
     const reply = payload => transport.send(ws, { requestId: message.requestId, action: message.type, clientId: message.clientId, ...payload });
@@ -30,13 +21,10 @@ function createModeration(room, scheduleExpiry) {
         if (!target || target.role !== "viewer" || target.ws.readyState !== 1 || message.clientId === ws.clientId) throw new Error("Choose a connected viewer.");
         const key = permissionKey(target, message.clientId);
         if (message.type === "transfer-host") {
-          host.role = "viewer";
-          state.viewerPermissions.set(permissionKey(host, ws.clientId), { ...DEFAULT_PERMISSIONS });
-          promoteHost(state, message.clientId);
-          advanceClock();
-          role(ws.clientId); role(message.clientId);
+          room.hosting.assign(message.clientId, { announce: false });
           transport.broadcast(sessionState(state, "host-transfer"));
         } else {
+          if (room.hosting.isCreator(message.clientId)) throw new Error("The room creator cannot be blocked.");
           if (key === permissionKey(host, ws.clientId)) throw new Error("You cannot block your own browser.");
           state.blockedParticipants.set(key, { clientId: message.clientId, name: target.name,
             permissions: { ...permissionsFor(state, target, message.clientId) } });
@@ -60,16 +48,7 @@ function createModeration(room, scheduleExpiry) {
     } catch (error) { reply({ type: "error", message: error.message }); }
     return true;
   }
-  function releaseHost(clientId) {
-    if (state.hostId !== clientId) return;
-    state.hostId = null;
-    const next = state.clients.keys().next().value;
-    if (next) { promoteHost(state, next); advanceClock(); role(next); }
-    transport.broadcast({ type: "host-left", preserveMedia: Boolean(state.mediaPath), hostId: state.hostId });
-    transport.broadcast(sessionState(state, "host-transfer"));
-    publish();
-  }
-  return { handle, releaseHost, publish: () => publish(), setPublish(fn) { publish = fn; } };
+  return { handle, publish: () => publish(), setPublish(fn) { publish = fn; } };
 }
 
 module.exports = { createModeration };

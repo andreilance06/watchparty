@@ -1,9 +1,50 @@
-export function createVoting({ elements, state, send }) {
+export function createVoting({ elements, state, send, report = () => {} }) {
   const { suggestionForm, suggestionInput, suggestionResults, suggestionStatus, voteOptions } = elements;
   let searchSequence = 0;
+  let latest = { poll: { id: null, status: "idle" }, suggestions: [] };
+  let connected = false, expanded = false, starting = false, lastResultId = null;
+
+  function sendPoll(payload) {
+    if (!connected || latest.poll.status !== "open") return false;
+    return send({ ...payload, pollId: latest.poll.id });
+  }
+
+  function resetSearch() {
+    searchSequence++;
+    suggestionResults.replaceChildren();
+    suggestionStatus.textContent = "";
+    suggestionInput.value = "";
+  }
+
+  function refreshControls() {
+    const open = latest.poll.status === "open";
+    elements.votePanel.hidden = !open;
+    elements.chatPanel.classList.toggle("poll-expanded", open && expanded);
+    elements.startPollButton.hidden = state.role !== "host" || open;
+    elements.startPollButton.disabled = !connected;
+    elements.finishPollButton.hidden = state.role !== "host";
+    elements.finishPollButton.disabled = !connected;
+    elements.pollDetails.hidden = !open || !expanded;
+    elements.pollToggle.setAttribute("aria-expanded", String(open && expanded));
+    elements.pollToggle.textContent = expanded ? "Collapse poll" : "Expand poll";
+    suggestionInput.disabled = !connected || !open;
+    const submit = suggestionForm.querySelector('button[type="submit"]');
+    if (submit) submit.disabled = !connected || !open;
+  }
+
+  elements.startPollButton.addEventListener("click", () => {
+    if (connected && state.role === "host") starting = send({ type: "start-video-poll" }) !== false;
+  });
+  elements.finishPollButton.addEventListener("click", () => {
+    if (state.role === "host") sendPoll({ type: "finish-video-poll" });
+  });
+  elements.pollToggle.addEventListener("click", () => {
+    expanded = !expanded;
+    refreshControls();
+  });
 
   function suggestTitle(title, movie = null) {
-    const sent = send({ type: "suggest-video", title, ...(movie ? { movie: { pageId: movie.pageId, title: movie.title, pageUrl: movie.pageUrl,
+    const sent = sendPoll({ type: "suggest-video", title, ...(movie ? { movie: { pageId: movie.pageId, title: movie.title, pageUrl: movie.pageUrl,
       posterUrl: movie.posterUrl, description: movie.description } } : {}) });
     if (sent === false) {
       suggestionStatus.textContent = "Connect to the room before suggesting a movie.";
@@ -80,6 +121,25 @@ export function createVoting({ elements, state, send }) {
   }
 
   function applyState(message) {
+    const poll = message.poll || { id: null, status: "idle" };
+    let restoreFocus = false;
+    if (poll.id !== latest.poll.id || poll.status !== latest.poll.status) {
+      restoreFocus = poll.status !== "open" && elements.votePanel.contains(document.activeElement);
+      resetSearch();
+      expanded = poll.status === "open" && starting && state.role === "host";
+      starting = false;
+    }
+    latest = { ...message, poll };
+    refreshControls();
+    if (restoreFocus) (state.role === "host" ? elements.startPollButton : elements.chatInput).focus();
+    if (poll.status === "closed" && poll.result && lastResultId !== poll.id) {
+      lastResultId = poll.id;
+      const winners = poll.result.suggestions.filter(option => poll.result.winnerIds.includes(option.id));
+      const outcome = winners.length === 0 ? "No votes cast."
+        : winners.length === 1 ? `Winner: ${winners[0].title} (${winners[0].votes} ${winners[0].votes === 1 ? "vote" : "votes"}).`
+          : `Tie: ${winners.map(option => option.title).join(", ")} (${winners[0].votes} ${winners[0].votes === 1 ? "vote" : "votes"} each).`;
+      report(`Movie poll concluded. ${outcome}`);
+    }
     const options = Array.isArray(message.suggestions)
       ? message.suggestions.filter((option) => option && option.id != null && typeof option.title === "string")
       : [];
@@ -169,19 +229,20 @@ export function createVoting({ elements, state, send }) {
       button.className = "vote-button";
       button.type = "button";
       button.textContent = isSelected ? "Your vote" : "Vote";
-      button.disabled = isSelected;
+      button.disabled = isSelected || !connected || poll.status !== "open";
       button.setAttribute("aria-pressed", String(isSelected));
       button.setAttribute("aria-label", `${isSelected ? "Your vote for" : "Vote for"} ${option.title}`);
-      button.addEventListener("click", () => send({ type: "vote-video", suggestionId: option.id }));
+      button.addEventListener("click", () => sendPoll({ type: "vote-video", suggestionId: option.id }));
 
       row.append(poster, details, button);
-      if (option.ownerId === state.clientId) {
+      if (option.canRemove) {
         const removeButton = document.createElement("button");
         removeButton.className = "vote-remove-button";
         removeButton.type = "button";
         removeButton.textContent = "Remove";
-        removeButton.setAttribute("aria-label", `Remove your suggestion for ${option.title}`);
-        removeButton.addEventListener("click", () => send({ type: "remove-video-suggestion", suggestionId: option.id }));
+        removeButton.setAttribute("aria-label", `Remove suggestion for ${option.title}`);
+        removeButton.disabled = !connected || poll.status !== "open";
+        removeButton.addEventListener("click", () => sendPoll({ type: "remove-video-suggestion", suggestionId: option.id }));
         row.appendChild(removeButton);
       }
       voteOptions.appendChild(row);
@@ -190,6 +251,7 @@ export function createVoting({ elements, state, send }) {
 
   suggestionForm.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (!connected || latest.poll.status !== "open") return;
     const query = suggestionInput.value.replace(/\s+/g, " ").trim().slice(0, 80);
     if (query.length < 2) {
       suggestionStatus.textContent = "Enter at least two characters to search.";
@@ -214,6 +276,14 @@ export function createVoting({ elements, state, send }) {
     }
   });
 
-  applyState({});
-  return { applyState };
+  applyState(latest);
+  return {
+    applyState,
+    refresh: () => applyState(latest),
+    setConnected(value) {
+      connected = value;
+      if (!value) resetSearch();
+      applyState(latest);
+    }
+  };
 }

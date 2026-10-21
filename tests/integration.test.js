@@ -10,7 +10,7 @@ const { connectPeer, serveHostFiles } = require("./helpers/peer");
 
 test("HTTP modules, chat names, host-only file sharing, and host handoff work together", async (t) => {
   const app = createApplication({
-    config: { port: 0 },
+    config: { port: 0, hostReconnectGraceMs: 0 },
     encoderPromise: Promise.resolve(CPU_ENCODER)
   });
   const address = await app.listen();
@@ -87,17 +87,19 @@ test("HTTP modules, chat names, host-only file sharing, and host handoff work to
   assert.equal((await host.next("reaction")).emoji, "😂");
   viewer.send({ type: "reaction", emoji: "unsupported" });
   assert.equal((await viewer.next("error")).message, "That emoji reaction is not supported.");
-  viewer.send({ type: "suggest-video", title: "  Movie   One " });
+  host.send({ type: "start-video-poll" });
+  const { poll: { id: pollId } } = await host.next("party-state", message => message.poll.status === "open");
+  viewer.send({ type: "suggest-video", pollId, title: "  Movie   One " });
   const firstSuggestion = await host.next("party-state", (message) => message.suggestions.some((suggestion) => suggestion.title === "Movie One"));
   assert.equal(firstSuggestion.suggestions.find((suggestion) => suggestion.title === "Movie One").ownerId, viewer.role.clientId);
   assert.equal((await viewer.next("party-state", (message) => message.myVoteId === 1)).myVoteId, 1);
-  host.send({ type: "suggest-video", title: "Movie Two" });
+  host.send({ type: "suggest-video", pollId, title: "Movie Two" });
   await viewer.next("party-state", (message) => message.suggestions.some((suggestion) => suggestion.title === "Movie Two"));
-  viewer.send({ type: "vote-video", suggestionId: 1 });
+  viewer.send({ type: "vote-video", pollId, suggestionId: 1 });
   await host.next("party-state", (message) => message.suggestions.find((suggestion) => suggestion.id === 1)?.votes === 1);
-  host.send({ type: "vote-video", suggestionId: 2 });
+  host.send({ type: "vote-video", pollId, suggestionId: 2 });
   await viewer.next("party-state", (message) => message.suggestions.find((suggestion) => suggestion.id === 2)?.votes === 1);
-  viewer.send({ type: "vote-video", suggestionId: 2 });
+  viewer.send({ type: "vote-video", pollId, suggestionId: 2 });
   const finalVotes = await host.next("party-state", (message) =>
     message.suggestions.find((suggestion) => suggestion.id === 1)?.votes === 0 &&
     message.suggestions.find((suggestion) => suggestion.id === 2)?.votes === 2
@@ -107,18 +109,16 @@ test("HTTP modules, chat names, host-only file sharing, and host handoff work to
   assert.equal((await viewer.next("party-state", (message) =>
     message.myVoteId === 2 && message.suggestions.find((suggestion) => suggestion.id === 2)?.votes === 2
   )).myVoteId, 2);
-  host.send({ type: "remove-video-suggestion", suggestionId: 1 });
-  assert.equal((await host.next("error")).message, "You can only remove your own video suggestions.");
-  viewer.send({ type: "remove-video-suggestion", suggestionId: 1 });
+  host.send({ type: "remove-video-suggestion", pollId, suggestionId: 1 });
   const afterRemoval = await host.next("party-state", (message) =>
     !message.suggestions.some((suggestion) => suggestion.id === 1) &&
     message.suggestions.some((suggestion) => suggestion.id === 2)
   );
   assert.equal(afterRemoval.suggestions.find((suggestion) => suggestion.id === 2).votes, 2);
   const viewerAfterRemoval = await viewer.next("party-state", (message) =>
-    message.myVoteId === null && !message.suggestions.some((suggestion) => suggestion.id === 1)
+    message.myVoteId === 2 && !message.suggestions.some((suggestion) => suggestion.id === 1)
   );
-  assert.equal(viewerAfterRemoval.myVoteId, null);
+  assert.equal(viewerAfterRemoval.myVoteId, 2);
 
   const newcomer = await connectPeer(base.replace("http", "ws"), "Newcomer");
   const joined = await newcomer.next("party-state", (message) => message.participants.length === 3);
@@ -161,7 +161,7 @@ test("captions remain separate, seeks encode the requested segment, and segments
   ], { timeout: 20000, stdio: "pipe" });
 
   const app = createApplication({
-    config: { port: 0, ffmpegPath },
+    config: { port: 0, hostReconnectGraceMs: 0, ffmpegPath },
     encoderPromise: Promise.resolve(CPU_ENCODER)
   });
   const address = await app.listen();

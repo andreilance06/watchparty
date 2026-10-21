@@ -32,6 +32,37 @@ The public configuration blocks the legacy default-room media and control endpoi
 
 For LAN access to the same public hostname, use router hairpin NAT or local DNS resolving that hostname to the server's LAN address. The same trusted public certificate then works on phones without installing a private CA.
 
+## Cloudflare named tunnel
+
+When Node and `cloudflared` run directly on the same PC, configure the named tunnel's public hostname to use the service URL `http://127.0.0.1:3000`. Start Node from PowerShell with:
+
+```powershell
+$env:HOST = '127.0.0.1'
+$env:TRUST_PROXY = 'loopback'
+Remove-Item Env:PUBLIC_ORIGIN -ErrorAction SilentlyContinue
+npm.cmd start
+```
+
+Leave the tunnel's **HTTP Host Header** override unset so it preserves the public hostname, such as `ypothesi.space`. With `PUBLIC_ORIGIN` unset, Node checks each request's origin against its Host and trusted protocol. This supports both `http://localhost:3000` on the host PC and `https://ypothesi.space` on remote devices, while rejecting foreign origins.
+
+In WebStorm's npm run configuration, use `HOST=127.0.0.1;TRUST_PROXY=loopback` and remove `PUBLIC_ORIGIN`, including any inherited setting. Stop the existing Node process and restart it so the change takes effect. Keep your named tunnel running, reload both addresses, and enter the same room to test comments and reactions. Cookies are separate for localhost and the public hostname, so each address needs its own room admission.
+
+For a deployment that should accept only one public origin, set `PUBLIC_ORIGIN` to that exact HTTPS origin, including a port if needed. This pins POST and WebSocket origin checks and intentionally rejects localhost access.
+
+Cloudflare supplies the browser's original protocol through `X-Forwarded-Proto`. Node must explicitly trust the loopback proxy to recognize HTTPS and set Secure cookies. Without proxy trust, the default origin check can compare the browser's HTTPS origin against HTTP and reject `/api/viewer-identity` with `403 Request origin is not allowed.` Identity initialization stops before the reaction buttons and control WebSocket are initialized, so this failure also prevents chat and global reactions. These settings apply to a proxy on the same PC; a container or another machine requires a separately configured trusted connection.
+
+After restarting, reload both browsers and verify in browser DevTools:
+
+- `POST /api/viewer-identity` returns 200 on both addresses and sets an HttpOnly `watchparty-browser` cookie. Through the public HTTPS hostname, both this cookie and the room-scoped `watchparty-member` cookie also have Secure.
+- Creating or joining a room succeeds. Its `wss://.../rooms/<roomId>/ws` request upgrades with status 101; selecting a host file also opens the room's `/source` WebSocket.
+- Send chat messages and global reactions from each browser and confirm they appear in both. Test video playback, sound, captions, and a seek.
+
+Cloudflare supports WebSockets on all plans. Check that **Network > WebSockets** is enabled for the domain. If a request fails at Cloudflare, inspect its security events for a matching challenge or block, and check any Cloudflare Access policy protecting the hostname. Disable shared caching for session, identity, and authenticated media endpoints; do not apply a Cache Everything rule to them. Run one Node instance for this deployment because room state and signed browser identities are held in memory.
+
+If identity and room admission work but the school PC's WebSocket fails, compare that PC on school Wi-Fi and a permitted mobile hotspot using the same URL. A successful hotspot test with a failing school connection points to school-network filtering; ask its administrator about HTTPS WebSocket access. The app cannot establish its real-time connection through a network that blocks the upgrade.
+
+References: [Cloudflare request headers](https://developers.cloudflare.com/fundamentals/reference/http-headers/), [Cloudflare WebSockets](https://developers.cloudflare.com/network/websockets/), [Cloudflare Tunnel configuration](https://developers.cloudflare.com/tunnel/configuration/).
+
 ## Local-only hostname
 
 Run Node with HOST and TRUST_PROXY as above. Set PUBLIC_ORIGIN to the exact local HTTPS origin, and make WATCHPARTY_LOCAL_HOST match that hostname or LAN IP:

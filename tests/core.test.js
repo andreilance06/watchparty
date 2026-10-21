@@ -76,13 +76,14 @@ test("GPU fallback order and media duration parsing are preserved", () => {
 
 test("suggestions are normalized, deduplicated, bounded, and validated", () => {
   const state = createSession();
+  state.poll = { id: "poll", status: "open", result: null };
   const ws = { clientId: "host" };
   state.clients.set("host", { ws, role: "host", name: "Host" });
   const sent = [];
   const handler = createMessageHandler({
     state, transport: { send: (_, message) => sent.push(message), broadcast() {} }, media: {}
   });
-  const suggest = (title) => handler.handleMessage(ws, { type: "suggest-video", title });
+  const suggest = (title) => handler.handleMessage(ws, { type: "suggest-video", pollId: "poll", title });
   suggest("  Movie   One ");
   suggest("movie one");
   assert.deepEqual(state.videoSuggestions, [{
@@ -102,7 +103,7 @@ test("suggestions are normalized, deduplicated, bounded, and validated", () => {
   assert.equal(sent.at(-1).type, "party-state");
 
   for (const suggestionId of [null, "invalid", 999, 1.5]) {
-    handler.handleMessage(ws, { type: "vote-video", suggestionId });
+    handler.handleMessage(ws, { type: "vote-video", pollId: "poll", suggestionId });
     assert.equal(sent.at(-1).type, "error");
     assert.equal(state.videoVotes.get("host"), 1);
   }
@@ -110,6 +111,7 @@ test("suggestions are normalized, deduplicated, bounded, and validated", () => {
 
 test("movie suggestion metadata is shared only for trusted Wikimedia URLs", () => {
   const state = createSession();
+  state.poll = { id: "poll", status: "open", result: null };
   const ws = { clientId: "host" };
   state.clients.set("host", { ws, role: "host", name: "Host" });
   const sent = [];
@@ -128,19 +130,20 @@ test("movie suggestion metadata is shared only for trusted Wikimedia URLs", () =
     description: "A science fiction film."
   };
 
-  handler.handleMessage(ws, { type: "suggest-video", title: movie.title, movie });
+  handler.handleMessage(ws, { type: "suggest-video", pollId: "poll", title: movie.title, movie });
   assert.deepEqual(state.videoSuggestions[0], {
     id: 1, title: "Arrival", ownerId: "host", ownerName: "Host", movie: {
       pageUrl: movie.pageUrl, posterUrl: movie.posterUrl, description: movie.description
     }
   });
-  handler.handleMessage(ws, { type: "suggest-video", title: "Unsafe", movie: { ...movie, title: "Unsafe", pageId: 2, posterUrl: "https://attacker.example/image.jpg" } });
+  handler.handleMessage(ws, { type: "suggest-video", pollId: "poll", title: "Unsafe", movie: { ...movie, title: "Unsafe", pageId: 2, posterUrl: "https://attacker.example/image.jpg" } });
   assert.equal(sent.at(-1).type, "error");
   assert.equal(state.videoSuggestions.length, 1);
 });
 
-test("suggestion owners are preserved, suggestions auto-vote, and only owners can remove them", () => {
+test("suggestion owners are preserved, suggestions auto-vote, and unrelated viewers cannot remove them", () => {
   const state = createSession();
+  state.poll = { id: "poll", status: "open", result: null };
   const owner = { clientId: "owner" };
   const other = { clientId: "other" };
   state.clients.set("owner", { ws: owner, role: "host", name: "Owner" });
@@ -159,18 +162,18 @@ test("suggestion owners are preserved, suggestions auto-vote, and only owners ca
     media: {}
   });
 
-  handler.handleMessage(owner, { type: "suggest-video", title: "Arrival" });
+  handler.handleMessage(owner, { type: "suggest-video", pollId: "poll", title: "Arrival" });
   assert.equal(state.videoVotes.get("owner"), 1);
-  handler.handleMessage(other, { type: "suggest-video", title: " arrival " });
+  handler.handleMessage(other, { type: "suggest-video", pollId: "poll", title: " arrival " });
   assert.equal(state.videoSuggestions.length, 1);
   assert.equal(state.videoSuggestions[0].ownerId, "owner");
   assert.equal(state.videoVotes.get("other"), 1);
   assert.equal(latest.get("other").suggestions[0].ownerName, "Owner");
 
-  handler.handleMessage(other, { type: "remove-video-suggestion", suggestionId: 1 });
-  assert.equal(errors.at(-1).message, "You can only remove your own video suggestions.");
+  handler.handleMessage(other, { type: "remove-video-suggestion", pollId: "poll", suggestionId: 1 });
+  assert.equal(errors.at(-1).message, "Only the host or original suggester can remove this video suggestion.");
   assert.equal(state.videoSuggestions.length, 1);
-  handler.handleMessage(owner, { type: "remove-video-suggestion", suggestionId: 1 });
+  handler.handleMessage(owner, { type: "remove-video-suggestion", pollId: "poll", suggestionId: 1 });
   assert.equal(state.videoSuggestions.length, 0);
   assert.equal(state.videoVotes.size, 0);
   assert.deepEqual(latest.get("other").suggestions, []);
@@ -179,6 +182,7 @@ test("suggestion owners are preserved, suggestions auto-vote, and only owners ca
 
 test("votes are replaceable and party snapshots personalize each participant's selection", () => {
   const state = createSession();
+  state.poll = { id: "poll", status: "open", result: null };
   const host = { clientId: "host" }, viewer = { clientId: "viewer" };
   state.clients.set("host", { ws: host, role: "host", name: "Host" });
   state.clients.set("viewer", { ws: viewer, role: "viewer", name: "Viewer" });
@@ -187,7 +191,7 @@ test("votes are replaceable and party snapshots personalize each participant's s
   const handler = createMessageHandler({
     state, transport: { send: (ws, message) => latest.set(ws.clientId, message), broadcast() {} }, media: {}
   });
-  const vote = (ws, suggestionId) => handler.handleMessage(ws, { type: "vote-video", suggestionId });
+  const vote = (ws, suggestionId) => handler.handleMessage(ws, { type: "vote-video", pollId: "poll", suggestionId });
   vote(host, 1);
   vote(viewer, 2);
   assert.equal(latest.get("host").myVoteId, 1);

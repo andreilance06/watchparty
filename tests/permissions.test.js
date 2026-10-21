@@ -1,6 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { once } = require("node:events");
+const http = require("node:http");
+const WebSocket = require("ws");
 const { createSession } = require("../server/state");
 const { createMessageHandler } = require("../server/messages");
 const { DEFAULT_PERMISSIONS, permissionsFor, promoteHost } = require("../server/permissions");
@@ -95,7 +97,7 @@ test("one browser shares room grants and promotion clears them only for that bro
 });
 
 async function serverFixture(t, config = {}) {
-  const app = createApplication({ config: { port: 0, ...config }, encoderPromise: Promise.resolve(CPU_ENCODER) });
+  const app = createApplication({ config: { port: 0, hostReconnectGraceMs: 0, ...config }, encoderPromise: Promise.resolve(CPU_ENCODER) });
   const address = await app.listen(); t.after(() => app.close());
   const base = `http://127.0.0.1:${address.port}`;
   const api = async (path, body = {}, cookie = "", headers = {}) => {
@@ -126,6 +128,64 @@ test("signed browser identity is persistent, origin checked, HTTPS aware, and re
   assert.equal((await fetch(f.base + "/api/viewer-identity")).status, 405);
   const restarted = await serverFixture(t);
   assert.notEqual((await restarted.api("/api/viewer-identity", {}, first.cookie)).cookie, first.cookie);
+});
+
+test("tunnel forwarding preserves identity, origin checks, chat, and global reactions", async t => {
+  const publicOrigin = "https://watch.example.com";
+  for (const scenario of [
+    { name: "untrusted proxy", trustProxy: false, publicOrigin: "", host: "watch.example.com", status: 403 },
+    { name: "trusted proxy with preserved host", trustProxy: "loopback", publicOrigin: "", host: "watch.example.com", status: 200 },
+    { name: "trusted proxy with pinned origin and rewritten host", trustProxy: "loopback", publicOrigin, host: "localhost:3000", status: 200 }
+  ]) {
+    await t.test(scenario.name, { timeout: 10000 }, async t => {
+      const f = await serverFixture(t, { trustProxy: scenario.trustProxy, publicOrigin: scenario.publicOrigin });
+      const headers = { Host: scenario.host, Origin: publicOrigin, "X-Forwarded-Proto": "https" };
+      // Use node:http: fetch may replace Host, hiding proxy host-rewrite behavior.
+      const identity = (requestHeaders = headers) => new Promise((resolve, reject) => {
+        const req = http.request(f.base + "/api/viewer-identity", { method: "POST", headers: requestHeaders }, response => {
+          let body = "";
+          response.on("data", chunk => { body += chunk; });
+          response.on("error", reject);
+          response.on("end", () => resolve({ status: response.statusCode, headers: response.headers, body: JSON.parse(body) }));
+        });
+        req.on("error", reject); req.end();
+      });
+      const socketUrl = f.base.replace("http", "ws") + "/";
+      const rejectedSocket = requestHeaders => new Promise((resolve, reject) => {
+        const ws = new WebSocket(socketUrl, { headers: requestHeaders });
+        t.after(() => ws.terminate());
+        ws.once("unexpected-response", (_, response) => { response.resume(); resolve(response.statusCode); ws.terminate(); });
+        ws.once("open", () => { ws.terminate(); reject(new Error("A rejected origin opened a WebSocket")); });
+        ws.once("error", reject);
+      });
+      const first = await identity();
+      assert.equal(first.status, scenario.status);
+      const foreignHeaders = { ...headers, Origin: "https://elsewhere.example" };
+      assert.equal((await identity(foreignHeaders)).status, 403);
+      assert.equal(await rejectedSocket(foreignHeaders), 403);
+      if (scenario.status === 403) {
+        assert.equal(first.body.error, "Request origin is not allowed.");
+        assert.equal(first.headers["set-cookie"], undefined);
+        assert.equal(await rejectedSocket(headers), 403);
+        return;
+      }
+      assert.deepEqual(first.body, { ready: true });
+      assert.match(first.headers["set-cookie"][0], /HttpOnly; SameSite=Strict; Max-Age=\d+; Secure/);
+      const second = await identity();
+      const host = await connectPeer(socketUrl, "Host", { headers: { ...headers, Cookie: first.headers["set-cookie"][0].split(";")[0] } });
+      t.after(() => host.ws.terminate());
+      const viewer = await connectPeer(socketUrl, "Viewer", { headers: { ...headers, Cookie: second.headers["set-cookie"][0].split(";")[0] } });
+      t.after(() => viewer.ws.terminate());
+      for (const [sender, receiver] of [[host, viewer], [viewer, host]]) {
+        sender.send({ type: "chat", message: `Hello from ${sender.role.name}` });
+        assert.equal((await receiver.next("chat", message => message.clientId === sender.role.clientId)).message, `Hello from ${sender.role.name}`);
+        sender.send({ type: "reaction", emoji: "👏" });
+        const reaction = await receiver.next("reaction", message => message.clientId === sender.role.clientId);
+        assert.equal(reaction.emoji, "👏");
+        assert.equal(reaction.clientId, sender.role.clientId);
+      }
+    });
+  }
 });
 
 test("public room grants survive reconnects, renames, and another host taking over", async t => {
@@ -249,11 +309,49 @@ test("viewer speed reaches host playback and external seeks cannot impersonate a
   assert.equal(video.currentTime, 80);
 });
 
-test("identity bootstrap fails visibly before opening a control socket", async () => {
-  const b = createBrowserDouble(); b.context.fetch = async () => ({ ok: false });
-  await assert.rejects(b.load("js/app.js"), /establish viewer identity/);
-  assert.equal(b.sockets.length, 0);
-  assert.match(b.elements.get("connectionStatus").textContent, /establish viewer identity/);
+test("identity bootstrap reports actionable failures before opening a control socket", async t => {
+  for (const scenario of [
+    { name: "origin rejection", status: 403, body: { error: "Request origin is not allowed." }, expected: /HTTP 403.*Request origin is not allowed\..*PUBLIC_ORIGIN.*TRUST_PROXY/ },
+    { name: "JSON server error", status: 503, body: { error: "The server is shutting down." }, expected: /HTTP 503.*The server is shutting down\./ },
+    { name: "HTML proxy response", status: 502, raw: "<html>Proxy unavailable</html>", expected: /HTTP 502.*Reload to reconnect/ },
+    { name: "malformed JSON", status: 502, raw: '{"error":', expected: /HTTP 502.*Reload to reconnect/ },
+    { name: "missing error", status: 500, body: {}, expected: /HTTP 500.*Reload to reconnect/ },
+    { name: "non-string error", status: 500, body: { error: {} }, expected: /HTTP 500.*Reload to reconnect/ },
+    { name: "null JSON", status: 500, body: null, expected: /HTTP 500.*Reload to reconnect/ },
+    { name: "network failure", network: true, expected: /establish viewer identity.*Check your connection to the server/ }
+  ]) {
+    await t.test(scenario.name, async () => {
+      const b = createBrowserDouble();
+      const requests = [];
+      b.context.fetch = async (url, options) => {
+        requests.push({ url, options });
+        if (scenario.network) throw new TypeError("Failed to fetch");
+        return { ok: false, status: scenario.status, json: async () => scenario.raw ? JSON.parse(scenario.raw) : scenario.body };
+      };
+      await assert.rejects(b.load("js/app.js"), scenario.expected);
+      assert.equal(b.sockets.length, 0);
+      assert.equal(requests.length, 1);
+      assert.equal(requests[0].url, "/api/viewer-identity");
+      assert.equal(requests[0].options.method, "POST");
+      const status = b.elements.get("connectionStatus").textContent;
+      assert.match(status, scenario.expected);
+      assert.doesNotMatch(status, /<html>|Proxy unavailable|\[object Object\]|undefined/);
+    });
+  }
+});
+
+test("successful identity bootstrap opens the control socket and enables global reactions", async () => {
+  const b = createBrowserDouble();
+  await b.load("js/app.js");
+  assert.equal(b.requests[0].url, "/api/viewer-identity");
+  assert.equal(b.requests[0].options.method, "POST");
+  assert.equal(b.sockets.length, 1);
+  const socket = b.sockets[0];
+  socket.open();
+  b.elements.get("reactClap").dispatch("click");
+  assert.equal(socket.sent.at(-1).type, "reaction");
+  socket.receive({ type: "reaction", emoji: "👏", name: "Viewer" });
+  assert.equal(b.elements.get("reactionFeed").children.at(-1).textContent, "👏 Viewer");
 });
 
 test("delayed native rate events from drift correction never change shared speed", async () => {

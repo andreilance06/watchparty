@@ -56,11 +56,14 @@ Errors return `{ "error": "message" }`: `400` invalid input, `401` missing membe
 
 `GET /api/movies/search?q=Arrival` searches Wikipedia through its keyless MediaWiki Action API. Queries are normalized, limited to 80 characters, and cached in memory for ten minutes. The API returns up to eight article matches with a title, short description, article URL, and optional Wikimedia thumbnail URL. Requests use the existing admission rate limit.
 
-To add a selected result to the vote, send the result's metadata in the existing `suggest-video` WebSocket message:
+The current host starts an empty movie poll with `{ "type": "start-video-poll" }`. Each `party-state` includes `poll: { id, status, result }`, initially `{ id: null, status: "idle", result: null }`. Starting a poll creates a new ID and sets its status to `open`. While open, all admitted participants may suggest titles and vote. Use that poll's ID in every suggestion, vote, removal, and finish command; inactive polls and stale IDs are rejected.
+
+To add a selected result to an open poll, send the result's metadata:
 
 ```json
 {
   "type": "suggest-video",
+  "pollId": "current-poll-id",
   "title": "Arrival (film)",
   "movie": {
     "pageId": 23270459,
@@ -74,13 +77,31 @@ To add a selected result to the vote, send the result's metadata in the existing
 
 The server verifies that the selection came from a recent search, accepts only HTTPS Wikipedia article links and Wikimedia upload/thumbnail image URLs, and shares the selected details in party-state snapshots. `posterUrl` may be `null`; title-only suggestions remain supported. Poster availability and reuse terms vary by image; follow the linked article for source details.
 
-The server records the authenticated client as the suggestion owner and includes `ownerId` and `ownerName` in each party-state suggestion. The first submission owns a title; submitting a duplicate keeps the original owner and casts the submitter's vote for that existing suggestion. Every new suggestion also casts its owner's vote automatically. To remove one, send `{ "type": "remove-video-suggestion", "suggestionId": 1 }`; the server permits only its owner and clears votes for the removed suggestion. The owner fields are server-assigned and cannot be set by the client.
+The server records the original suggester using its verified browser identity, with a membership/connection identity fallback when no browser cookie is available. Each suggestion includes `ownerId`, `ownerName`, `votes`, and a personalized `canRemove` flag. Identity keys stay private. The first submission owns a title; submitting a duplicate preserves that ownership and casts the submitter's vote for the existing suggestion. Every new suggestion also casts its owner's vote automatically. Cast or replace a vote with `{ "type": "vote-video", "pollId": "current-poll-id", "suggestionId": 1 }`.
+
+Active suggestions' `ownerName` values follow accepted display-name changes and rejoining connections with the same verified owner identity. Rejected names do not change attribution. Completed poll results retain their recorded names and counts.
+
+To remove an entry, send `{ "type": "remove-video-suggestion", "pollId": "current-poll-id", "suggestionId": 1 }`. The server permits the current host or original suggester and clears all votes targeting that entry. Ownership survives browser restarts and room leave/rejoin while the same browser profile retains its cookie, the origin stays the same, and the room/server remains alive. Display names and client-supplied owner fields do not grant ownership. Votes themselves retain their existing connection lifetime.
+
+The current host concludes voting with `{ "type": "finish-video-poll", "pollId": "current-poll-id" }`. The resulting `party-state` has status `closed`, an empty active suggestion list, and a frozen `poll.result: { suggestions, totalVotes, winnerIds }`. All highest-voted entries are winners; `winnerIds` is empty when no votes were cast. Clients hide the pinned card and post the result once per poll in chat. The latest result is included in subsequent snapshots for reconnecting/new participants until the host starts a fresh poll. Starting again clears the prior result and creates an empty round. Polls are room-scoped and in memory; finishing does not select or change the shared video.
 
 ## Control connection and file declaration
 
 Before opening a control socket, call `POST /api/viewer-identity` (no body required). It returns `{ "ready": true }` and sets or refreshes a persistent `watchparty-browser` cookie (`Path=/`, `HttpOnly`, `SameSite=Strict`, and `Secure` under HTTPS). The cookie is signed with a per-process secret and has a rolling 400-day browser lifetime. It identifies a browser for room permissions only; it does not grant room admission. Invalid signatures or a server restart cause a fresh identity on the next bootstrap. Clients without this cookie use their server-known membership or connection identity and cannot retain public-room grants after reconnecting.
 
 Open `endpoints.websocket`, then send the existing `{ "type": "join", "name": "Alex" }` message. Membership/role comes from the server cookie, not a client-provided ID or role. Existing playback, chat, participant, reaction, and voting messages apply only inside this room. The creator's host slot is reserved even when a viewer connects first.
+
+### Host reconnection and creator priority
+
+After an unexpected host control-socket disconnect, the server reserves hosting for 15 seconds (`hostReconnectGraceMs: 15000` in server configuration). A reconnect with the same verified browser identity, or the same authenticated membership when no browser identity is available, restores hosting before the deadline. Public default-room reconnects require the browser cookie because their connection IDs change. Client-supplied IDs, roles, and names cannot claim a reservation. After timeout, the next connected participant becomes host; a former temporary host returning afterward becomes a viewer.
+
+Each private room records its creator using the verified browser identity, with the original authenticated membership as fallback. Whenever the creator reconnects, they reclaim the sole host role even after the grace period or a deliberate transfer; the replacement host becomes a viewer with default playback permissions. A deliberate transfer remains in effect while the creator stays on their existing connection. Other hosts cannot block the creator. An explicit Leave request releases the current host immediately, including when its reconnect reservation is pending. The public default room has no permanent creator.
+
+Every `party-state` includes `host: { clientId, name, status, reconnectUntil }`. Status is `connected`, `reconnecting`, or `vacant`; `reconnectUntil` is the deadline in epoch milliseconds during a reservation and `null` otherwise. The private room's initial, not-yet-connected creator slot can have a client ID while status is `vacant`. Identity keys are never included. Clients hydrate a reconnecting notice from this snapshot. The existing `host-left` event is sent on actual release/handoff, not on a successfully restored refresh. Pending reservations delay empty-room expiry and are cancelled on restoration, explicit handoff, destruction, or shutdown.
+
+Connected participant snapshots include an `isCreator` flag so temporary hosts can offer transfer back to the creator without offering a block action. The server independently enforces this protection.
+
+The reservation preserves the host role, not browser File objects. Refreshing the browser supplying video still ends its source; a source supplied by another connected browser survives role changes. Creator identity and reservations are in memory, scoped to each room, and require retained cookies and the same origin to recognize a returning browser.
 
 The host opens a standard browser file chooser and retains the `File` objects. Declare one video and up to eight sidecar files:
 

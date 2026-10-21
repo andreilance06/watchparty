@@ -194,6 +194,23 @@
   100% { opacity: 0; transform: translateY(-90vh) scale(.85) rotate(-8deg); }
 }
 
+.chat-body {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.host-reconnect-status {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: .6rem .8rem;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: .75rem;
+  overflow-wrap: anywhere;
+}
+
 .chat-messages {
   display: flex;
   flex: 1 1 0;
@@ -306,6 +323,8 @@
 
 .system-message {
   align-self: center;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   color: var(--muted);
   font-size: .65rem;
   text-align: center;

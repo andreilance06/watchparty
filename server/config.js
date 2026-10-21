@@ -15,6 +15,7 @@ function createConfig(overrides = {}) {
     segmentSeconds: 2,
     maxSegmentsAhead: 2,
     roomIdleMs: 30 * 60 * 1000,
+    hostReconnectGraceMs: 15000,
     sourceReadTimeoutMs: 30000,
     sourceChunkBytes: 256 * 1024,
     sourceMaxReads: 4,
@@ -24,6 +25,7 @@ function createConfig(overrides = {}) {
     ffmpegPath: resolveFfmpegPath(),
     ...overrides
   };
+  if (!Number.isFinite(config.hostReconnectGraceMs) || config.hostReconnectGraceMs < 0) throw new Error("hostReconnectGraceMs must be a non-negative number.");
   if (config.publicOrigin) {
     const origin = new URL(config.publicOrigin);
     if (!["http:", "https:"].includes(origin.protocol) || origin.username || origin.password) throw new Error("PUBLIC_ORIGIN must be an HTTP(S) origin.");

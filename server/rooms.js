@@ -6,6 +6,7 @@ const { createMediaService } = require("./media");
 const { createHostSource } = require("./source-relay");
 const { sanitizeDisplayName } = require("./names");
 const { createModeration } = require("./moderation");
+const { createHosting } = require("./hosting");
 const scrypt = promisify(crypto.scrypt);
 
 function failure(status, message) { return Object.assign(new Error(message), { status }); }
@@ -46,7 +47,7 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
 
   function scheduleExpiry(room) {
     clearTimeout(room.expiryTimer);
-    if (room.id === "default" || room.state.clients.size) return;
+    if (room.id === "default" || room.state.clients.size || room.state.hostReconnectUntil) return;
     room.expiryTimer = setTimeout(() => destroy(room), config.roomIdleMs);
     room.expiryTimer.unref?.();
   }
@@ -59,6 +60,7 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
     const media = createMediaService({ state, config, encoderPromise, broadcast: transport.broadcast });
     const room = { id, name, accessCode, passwordHash, salt, state, transport, media, members: new Map(), activeResponses: new Map() };
     room.source = createHostSource({ room, bridge, config });
+    room.hosting = createHosting(room, { config, scheduleExpiry });
     room.moderation = createModeration(room, scheduleExpiry);
     rooms.set(id, room);
     if (accessCode) codes.set(accessCode, room);
@@ -72,6 +74,7 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
     if (room.accessCode) codes.delete(room.accessCode);
     clearTimeout(room.expiryTimer);
     room.state.shuttingDown = true;
+    room.hosting.cancel();
     room.source.reset();
     room.media.reset();
     for (const client of room.state.clients.values()) client.ws.terminate();
@@ -156,6 +159,8 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
     const room = build({ name, accessCode, salt, passwordHash });
     const member = membership(room, body.displayName, identity);
     room.state.hostId = member.id;
+    room.state.creatorMemberId = member.id;
+    room.state.creatorIdentity = identity || `member:${member.id}`;
     return { room, member };
   }
 

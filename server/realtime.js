@@ -3,7 +3,6 @@ const WebSocket = require("ws");
 const { createNameRegistry } = require("./names");
 const { createMessageHandler } = require("./messages");
 const { validOrigin } = require("./rooms");
-const { permissionKey } = require("./permissions");
 
 function createRealtimeServer(server, { registry, config, movieSearch }) {
   const wss = new WebSocket.Server({ noServer: true, maxPayload: config.sourceChunkBytes + 4, perMessageDeflate: false });
@@ -34,31 +33,31 @@ function createRealtimeServer(server, { registry, config, movieSearch }) {
     const { availableGuestName } = createNameRegistry(state.clients);
     const { handleMessage, updatePresence } = createMessageHandler({ state, transport, media, movieSearch });
     room.moderation.setPublish(updatePresence);
+    room.hosting.setPublish(updatePresence);
     ws.clientId = member?.id || crypto.randomUUID();
     if (member) member.permissionIdentity ||= identity || `member:${member.id}`;
     const previous = state.clients.get(ws.clientId);
     state.clients.set(ws.clientId, {
-      ws, role: state.hostId === ws.clientId || !state.hostId ? "host" : "viewer",
+      ws, role: "viewer",
       name: previous?.name || member?.name || availableGuestName(ws.clientId),
       permissionIdentity: member?.permissionIdentity || identity,
       hasMemberName: Boolean(member?.name)
     });
-    if (state.clients.get(ws.clientId).role === "host") {
-      state.viewerPermissions.delete(permissionKey(state.clients.get(ws.clientId), ws.clientId));
-    }
+    room.hosting.connect(ws.clientId, member);
     if (previous) {
       room.source.disconnectControl(previous.ws);
       previous.ws.close(4000, "Connection replaced");
     }
     registry.scheduleExpiry(room);
     ws.on("message", async (data, binary) => {
-      if (state.clients.get(ws.clientId)?.ws !== ws) return;
+      if (ws.explicitLeave || ws.readyState !== WebSocket.OPEN || state.clients.get(ws.clientId)?.ws !== ws) return;
       try {
         if (binary || data.length > 16384) throw new Error("Invalid control message.");
         const message = JSON.parse(data.toString());
         if (!message || typeof message !== "object" || Array.isArray(message)) throw new Error("Invalid message.");
         if (room.moderation.handle(ws, message)) return;
-        if (!await room.source.handleControl(ws, message) && state.clients.get(ws.clientId)?.ws === ws) handleMessage(ws, message);
+        if (!await room.source.handleControl(ws, message) && !ws.explicitLeave && ws.readyState === WebSocket.OPEN &&
+            state.clients.get(ws.clientId)?.ws === ws) handleMessage(ws, message);
       } catch { send(ws, { type: "error", message: "Invalid message." }); }
     });
     ws.on("close", () => {
@@ -71,7 +70,7 @@ function createRealtimeServer(server, { registry, config, movieSearch }) {
       state.videoVotes.delete(ws.clientId);
       if (state.shuttingDown) return;
       if (wasHost) {
-        room.moderation.releaseHost(ws.clientId);
+        room.hosting.disconnect(ws.clientId, client, Boolean(ws.explicitLeave));
       }
       updatePresence();
       registry.scheduleExpiry(room);

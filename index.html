@@ -175,29 +175,10 @@
         <p class="control-help">Choose one video and optional subtitle files from this device. Keep this page open while sharing.</p>
       </div>
 
-      <section class="vote-panel" aria-labelledby="vote-title">
-        <div class="vote-heading">
-          <div>
-            <p class="eyebrow">UP NEXT</p>
-            <h2 id="vote-title">Vote for the next video</h2>
-          </div>
-          <span id="voteStatus" class="vote-status" aria-live="polite">0 votes cast</span>
-        </div>
-        <p id="voteLeader" class="vote-leader" aria-live="polite">No suggestions yet.</p>
-        <form id="suggestionForm" class="suggestion-form" autocomplete="off">
-          <label class="sr-only" for="suggestionInput">Suggest a video title</label>
-          <input id="suggestionInput" name="title" type="text" maxlength="80" placeholder="Search for a movie..." required>
-          <button type="submit">Find movie</button>
-        </form>
-        <p id="suggestionStatus" class="suggestion-status" role="status" aria-live="polite"></p>
-        <div id="suggestionResults" class="suggestion-results" aria-label="Movie search results"></div>
-        <div id="voteOptions" class="vote-options" aria-live="polite" aria-label="Next-video options">
-          <p class="vote-empty">Suggest a title to start voting.</p>
-        </div>
-      </section>
+
     </section>
 
-    <aside class="chat-panel" aria-labelledby="chat-title">
+    <aside id="chatPanel" class="chat-panel" aria-labelledby="chat-title">
       <div class="chat-heading">
         <div>
           <p class="eyebrow">LIVE</p>
@@ -205,6 +186,7 @@
         </div>
         <div class="chat-heading-actions">
           <span id="viewerCount" class="viewer-count">0 online</span>
+          <button id="startPollButton" class="start-poll-button" type="button" hidden>Start poll</button>
           <form id="nameForm" class="name-form" autocomplete="off">
             <label class="sr-only" for="displayNameInput">Display name</label>
             <input id="displayNameInput" name="displayName" type="text" maxlength="24" placeholder="Display name" aria-label="Display name" required>
@@ -234,8 +216,36 @@
         </div>
       </section>
 
-      <div id="chatMessages" class="chat-messages" role="log" aria-live="polite" aria-label="Chat messages">
-        <div class="system-message">Welcome to WatchParty.</div>
+      <div class="chat-body">
+        <p id="hostReconnectStatus" class="host-reconnect-status" role="status" hidden></p>
+        <section id="votePanel" class="vote-panel" hidden aria-labelledby="vote-title">
+          <div class="vote-heading">
+            <div>
+              <p class="eyebrow">UP NEXT</p>
+              <h2 id="vote-title">Movie poll</h2>
+            </div>
+            <button id="pollToggle" class="poll-toggle" type="button" aria-expanded="false" aria-controls="pollDetails">Expand poll</button>
+            <button id="finishPollButton" class="finish-poll-button" type="button" hidden>Finish poll</button>
+            <span id="voteStatus" class="vote-status" aria-live="polite">0 votes cast</span>
+          </div>
+          <p id="voteLeader" class="vote-leader" aria-live="polite">No suggestions yet.</p>
+          <div id="pollDetails" class="poll-details" hidden>
+            <form id="suggestionForm" class="suggestion-form" autocomplete="off">
+              <label class="sr-only" for="suggestionInput">Suggest a video title</label>
+              <input id="suggestionInput" name="title" type="text" maxlength="80" placeholder="Search for a movie..." required>
+              <button type="submit">Find movie</button>
+            </form>
+            <p id="suggestionStatus" class="suggestion-status" role="status" aria-live="polite"></p>
+            <div id="suggestionResults" class="suggestion-results" aria-label="Movie search results"></div>
+            <div id="voteOptions" class="vote-options" aria-live="polite" aria-label="Next-video options">
+              <p class="vote-empty">Suggest a title to start voting.</p>
+            </div>
+          </div>
+        </section>
+
+        <div id="chatMessages" class="chat-messages" role="log" aria-live="polite" aria-label="Chat messages">
+          <div class="system-message">Welcome to WatchParty.</div>
+        </div>
       </div>
 
       <form id="chatForm" class="chat-form" autocomplete="off">

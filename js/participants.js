@@ -79,8 +79,9 @@ export function createParticipants({ elements, state, send }) {
       };
       if (person.blocked) addAction("Unblock", "unblock-participant");
       else {
-        addAction("Transfer host", "transfer-host"); addAction("Kick and block", "block-participant", true);
-        if (person.suppliesVideo) {
+        addAction("Transfer host", "transfer-host");
+        if (!person.isCreator) addAction("Kick and block", "block-participant", true);
+        if (person.suppliesVideo && !person.isCreator) {
           const warning = document.createElement("p"); warning.className = "participant-action-warning";
           warning.textContent = "Blocking this viewer stops the current video."; actions.appendChild(warning);
         }
