@@ -2,6 +2,115 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createBrowserDouble, captionItems, selectedCaption, pickCaption } = require('./helpers/browser');
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
+const webCodecsInfo = { mime: 'video/x-matroska', videoCodec: 'h264', bitDepth: 8, pixelFormat: 'yuv420p',
+ width: 1920, height: 1080, fps: 30, hasAudio: false };
+
+test('silent WebCodecs playback needs only a video decoder and clears its assessment timer', async () => {
+ const b=createBrowserDouble();b.context.isSecureContext=true;b.context.VideoDecoder={};
+ const {choosePlayback}=await b.load('js/player/playback.js');
+ assert.equal(await choosePlayback(webCodecsInfo),'wasm');
+ assert.equal(b.timers.size,0);
+ assert.equal(await choosePlayback({...webCodecsInfo,hasAudio:true,audioCodec:'aac'}),'compatibility');
+ delete b.context.VideoDecoder;
+ assert.equal(await choosePlayback(webCodecsInfo),'compatibility');
+});
+
+test('WebCodecs selection requires a smooth browser decoder rather than the standalone WASM decoder', async () => {
+ for(const assessment of [
+  {playable:true,smooth:true,video:{decoder:'hardware'}},
+  {playable:true,smooth:true,video:{decoder:'software'}},
+  {playable:true,smooth:true,video:{decoder:'wasm'}},
+  {playable:true,smooth:false,video:{decoder:'hardware'}},
+  {playable:false,smooth:true,video:{decoder:'hardware'}},
+  null
+ ]){
+  const b=createBrowserDouble({assessPlayback:async()=>assessment});
+  b.context.isSecureContext=true;b.context.VideoDecoder={};
+  const {choosePlayback}=await b.load('js/player/playback.js');
+  const expected=assessment?.playable&&assessment.smooth&&['hardware','software'].includes(assessment.video.decoder)?'wasm':'compatibility';
+  assert.equal(await choosePlayback(webCodecsInfo),expected,JSON.stringify(assessment));
+  assert.equal(b.timers.size,0);
+ }
+});
+
+test('one assessment deadline bounds video and audio queries, and late rejections are handled', async () => {
+ for(const stalled of ['video','audio']){
+  let rejectQuery;
+  const pending=new Promise((_,reject)=>{rejectQuery=reject;});
+  const b=createBrowserDouble({assessPlayback:async()=>stalled==='video'?pending:{playable:true,smooth:true,video:{decoder:'hardware'}}});
+  b.context.isSecureContext=true;b.context.VideoDecoder={};
+  b.context.AudioDecoder={isConfigSupported:async()=>stalled==='audio'?pending:{supported:true}};
+  const {choosePlayback}=await b.load('js/player/playback.js');
+  const selection=choosePlayback({...webCodecsInfo,hasAudio:true,audioCodec:'aac'});
+  await flush();assert.equal(b.timers.size,1);
+  b.runTimers(500);
+  assert.equal(await selection,'compatibility',stalled);
+  assert.equal(b.timers.size,0);
+  rejectQuery(new Error('late capability rejection'));await flush();
+ }
+});
+
+test('failed video or audio capability checks use compatibility and release the deadline', async () => {
+ for(const failed of ['video','audio','both']){
+  const b=createBrowserDouble({assessPlayback:async()=>{
+   if(failed!=='audio')throw new Error('video configuration rejected');
+   return {playable:true,smooth:true,video:{decoder:'hardware'}};
+  }});
+  b.context.isSecureContext=true;b.context.VideoDecoder={};
+  b.context.AudioDecoder={isConfigSupported:()=>{throw new Error('audio configuration rejected');}};
+  const {choosePlayback}=await b.load('js/player/playback.js');
+  assert.equal(await choosePlayback({...webCodecsInfo,hasAudio:failed!=='video',audioCodec:'aac'}),'compatibility');
+  assert.equal(b.timers.size,0);
+ }
+});
+
+test('measured hardware or software stutter falls back once and preserves transport and captions', async () => {
+ for(const software of [false,true]){
+  const b=createBrowserDouble();b.context.isSecureContext=true;b.context.VideoDecoder={};
+  await b.load('js/app.js');const socket=b.sockets[0],video=b.elements.get('video');
+  socket.open();socket.receive({type:'role',role:'host',clientId:'host',name:'Host',viewerCount:1});
+  socket.receive({type:'session-state',mediaVersion:1,hasVideo:true,paused:true,time:17,playbackRate:1.25,
+   originalUrl:'/media/original?v=1',mediaInfo:webCodecsInfo,
+   captions:[{id:'caption',url:'/caption.ass',label:'Caption',format:'ass'}]});
+  await flush();
+  assert.equal(video.getAttribute('engine'),'wasm native');
+  assert.equal(video.watchpartyMetrics.playbackMode,'wasm');
+  assert.equal(socket.sent.some(m=>m.type==='compatibility-request'),false);
+  const warning=video.dispatch('smoothwarning',{detail:{measured:true,software,media:'video'}});
+  assert.equal(warning.defaultPrevented,true);
+  video.dispatch('smoothwarning',{detail:{measured:true,software,media:'video'}});
+  const requests=socket.sent.filter(m=>m.type==='compatibility-request');assert.equal(requests.length,1);
+  assert.equal(video.watchpartyMetrics.fallbackReason,'decoder cannot keep up');
+  socket.receive({type:'compatibility-ready',requestId:requests[0].requestId,mediaVersion:1,
+   url:'/hls/master.m3u8?v=1',time:17,paused:true,playbackRate:1.25});
+  assert.equal(video.currentTime,17);assert.equal(video.paused,true);assert.equal(video.playbackRate,1.25);
+  assert.equal(selectedCaption(video),'caption');
+  assert.equal(video.watchpartyMetrics.playbackMode,'compatibility');
+  assert.equal(socket.sent.filter(m=>m.type==='video-state').length,0);
+ }
+});
+
+test('late WebCodecs selection cannot replace a newer native source or revive a timed-out source', async () => {
+ let resolveAssessment;
+ const b=createBrowserDouble({assessPlayback:()=>new Promise(resolve=>{resolveAssessment=resolve;})});
+ b.context.isSecureContext=true;b.context.VideoDecoder={};
+ const create=b.document.createElement;
+ b.document.createElement=tag=>{const el=create(tag);if(tag==='video')el.canPlayType=()=> 'probably';return el;};
+ await b.load('js/app.js');const socket=b.sockets[0],video=b.elements.get('video');socket.open();
+ const snapshot={type:'session-state',mediaVersion:1,hasVideo:true,paused:true,time:0,playbackRate:1,
+  originalUrl:'/media/original?v=1',mediaInfo:webCodecsInfo,captions:[]};
+ socket.receive(snapshot);await flush();
+ socket.receive({...snapshot,mediaVersion:2,originalUrl:'/media/original?v=2',mediaInfo:{...webCodecsInfo,mime:'video/mp4'}});await flush();
+ resolveAssessment({playable:true,smooth:true,video:{decoder:'hardware'}});await flush();
+ assert.equal(video.children.find(c=>c.tagName==='source').src,'/media/original?v=2');
+ assert.equal(video.getAttribute('engine'),'native wasm');assert.equal(video.watchpartyMetrics.playbackMode,'native');
+ socket.receive({...snapshot,mediaVersion:3,originalUrl:'/media/original?v=3'});await flush();
+ b.runTimers(500);await flush();
+ assert.equal(socket.sent.filter(m=>m.type==='compatibility-request').length,1);
+ resolveAssessment({playable:true,smooth:true,video:{decoder:'hardware'}});await flush();
+ assert.equal(video.children.find(c=>c.tagName==='source').src,'/media/original?v=2');
+ assert.equal(socket.sent.filter(m=>m.type==='compatibility-request').length,1);
+});
 
 test('a local fallback preserves playback/captions, rejects stale replies, and ignores synthetic control events',async()=>{
  const b=createBrowserDouble();await b.load('js/app.js');const socket=b.sockets[0],video=b.elements.get('video');

@@ -29,8 +29,10 @@ export function createPlayer({ elements, state: session, send, report, files }) 
     video.querySelectorAll("source[data-watchparty-source]").forEach((source) => source.remove());
     if (!url) return;
     session.activeMediaUrl = url;
-    mode = engine === "hlsjs native" ? "compatibility" : engine;
+    mode = engine === "hlsjs native" ? "compatibility" : engine.split(" ")[0];
     session.playbackMode = mode;
+    metrics.playbackMode = mode;
+    video.watchpartyMetrics = metrics;
     video.setAttribute("engine", engine);
     video.setAttribute("startat", String(latest?.time || 0));
     const source = document.createElement("source");
@@ -60,6 +62,7 @@ export function createPlayer({ elements, state: session, send, report, files }) 
     session.sourceSwitching = true;
     session.suppressVideoEvents = true;
     metrics.fallbackReason = reason; metrics.fallbackStarted = performance.now();
+    video.watchpartyMetrics = metrics;
     syncStatus.textContent = "Switching to compatible playback…";
     send({ type: "compatibility-request", mediaVersion: session.mediaVersion, requestId: `playback-${generation}` });
   }
@@ -282,7 +285,7 @@ export function createPlayer({ elements, state: session, send, report, files }) 
     if (openingStalled || playbackStalled || seekStalled) requestCompatibility("playback stalled");
   }, 1000);
   video.addEventListener("smoothwarning", (event) => {
-    if (event.detail?.software || event.detail?.playable === false || event.detail?.smooth === false) {
+    if (event.detail?.measured || event.detail?.software || event.detail?.playable === false || event.detail?.smooth === false) {
       event.preventDefault(); requestCompatibility("decoder cannot keep up");
     }
   });

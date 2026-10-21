@@ -84,7 +84,8 @@ class ElementDouble extends EventTargetDouble {
   click() { this.dispatch("click"); }
 }
 
-function createBrowserDouble({ storageFailure, rendererReady, autoContinuePublic = true } = {}) {
+function createBrowserDouble({ storageFailure, rendererReady, autoContinuePublic = true,
+  assessPlayback = async () => ({ playable: true, smooth: true, video: { decoder: "hardware" } }) } = {}) {
   const elements = new Map();
   const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
   for (const match of html.matchAll(/id="([^"]+)"/g)) {
@@ -200,7 +201,7 @@ function createBrowserDouble({ storageFailure, rendererReady, autoContinuePublic
     if (modules.has(filename)) return modules.get(filename);
     let module;
     if (filename === path.join(root, "vendor/movi-player.js")) module = new vm.SyntheticModule(["MoviPlayer"], function () {
-      this.setExport("MoviPlayer", { assessPlayback: async () => ({ playable: true, smooth: true }) });
+      this.setExport("MoviPlayer", { assessPlayback });
     }, { context, identifier: filename });
     else if (filename === path.join(root, "vendor/jassub/jassub.js")) {
       module = new vm.SyntheticModule(["default"], function () { this.setExport("default", SubtitleRendererDouble); }, { context, identifier: filename });
@@ -222,7 +223,7 @@ function createBrowserDouble({ storageFailure, rendererReady, autoContinuePublic
   function runFrame(now = 1000) {
     const pending = [...frames]; frames.clear(); pending.forEach(([, fn]) => fn(now));
   }
-  return { load, elements, sockets, renderers, requests, storage, document, window, runTimers, runFrame, context };
+  return { load, elements, sockets, renderers, requests, storage, document, window, runTimers, runFrame, context, timers };
 }
 
 const captionItems = video => [...video.shadowRoot.querySelector('.movi-subtitle-track-list').children].filter(row => row.dataset.roomCaptionKey);
