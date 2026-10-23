@@ -4,6 +4,8 @@ import { createClientId } from "./utils/client-id.js";
 export function createHostFiles({ send, report }) {
   const files = new Map(), requests = new Map();
   const captionRelays = new Set();
+  const readQueue = [];
+  let activeReads = 0;
   let relay, sourceId = null, role = "viewer", generation = 0;
   let activeSourceId = null;
   let picker = null;
@@ -19,8 +21,26 @@ export function createHostFiles({ send, report }) {
     if (closeRelay) relay?.close();
     relay = null;
     files.clear();
+    for (const job of readQueue.splice(0)) job.reject(new Error("The host connection changed."));
     for (const request of requests.values()) { clearTimeout(request.timer); request.reject(new Error("The host connection changed.")); }
     requests.clear();
+  }
+
+  function readRange(file, offset, length, socket, current) {
+    return new Promise((resolve, reject) => {
+      readQueue.push({ file, offset, length, socket, current, resolve, reject });
+      pumpReads();
+    });
+  }
+
+  function pumpReads() {
+    while (activeReads < 4 && readQueue.length) {
+      const job = readQueue.shift();
+      if (job.current !== generation || job.socket.readyState !== WebSocket.OPEN) { job.reject(new Error("Read cancelled.")); continue; }
+      activeReads++;
+      Promise.resolve().then(() => job.file.slice(job.offset, job.offset + job.length).arrayBuffer())
+        .then(job.resolve, job.reject).finally(() => { activeReads--; pumpReads(); });
+    }
   }
 
   function request(message) {
@@ -104,23 +124,28 @@ export function createHostFiles({ send, report }) {
     ready.catch(() => {});
     if (captionOnly) captionRelays.add(socket);
     socket.addEventListener("open", () => socket.send(JSON.stringify({ type: "source-attach", sourceId: reply.sourceId, token: reply.token,
-      ...(reply.providerId ? { providerId: reply.providerId } : {}) })));
+      capabilities: ["batch-reads-v1"], ...(reply.providerId ? { providerId: reply.providerId } : {}) })));
     socket.addEventListener("message", async (event) => {
       let message;
       try {
         message = JSON.parse(event.data);
         if (message.type === "source-attached") { resolveReady(); return; }
         const file = files.get(message.fileId);
-        if (message.type !== "source-read" || !file || !Number.isInteger(message.requestId) || message.requestId < 1 || message.requestId > 0xffffffff ||
-            !Number.isSafeInteger(message.offset) || !Number.isInteger(message.length) || message.offset < 0 || message.length < 1 || message.length > 256 * 1024 || message.offset + message.length > file.size) {
+        const ranges = message.type === "source-read-batch" ? message.ranges : [{ offset: message.offset, length: message.length }];
+        if (!["source-read", "source-read-batch"].includes(message.type) || !file || !Number.isInteger(message.requestId) || message.requestId < 1 || message.requestId > 0xffffffff ||
+            !Array.isArray(ranges) || !ranges.length || ranges.length > 64 || ranges.some(range => !range || !Number.isSafeInteger(range.offset) || !Number.isInteger(range.length) ||
+              range.offset < 0 || range.length < 1 || range.length > 256 * 1024 || range.offset + range.length > file.size)) {
           throw new Error("Invalid file range.");
         }
-        const bytes = await file.slice(message.offset, message.offset + message.length).arrayBuffer();
+        const length = ranges.reduce((sum, range) => sum + range.length, 0);
+        if (length > 256 * 1024) throw new Error("Invalid file range batch.");
+        const buffers = await Promise.all(ranges.map(range => readRange(file, range.offset, range.length, socket, current)));
         while (socket.readyState === WebSocket.OPEN && socket.bufferedAmount > 1024 * 1024) await new Promise((resolve) => setTimeout(resolve, 20));
         if (current !== generation || socket.readyState !== WebSocket.OPEN) return;
-        const frame = new Uint8Array(4 + bytes.byteLength);
+        const frame = new Uint8Array(4 + length);
         new DataView(frame.buffer).setUint32(0, message.requestId);
-        frame.set(new Uint8Array(bytes), 4);
+        let offset = 4;
+        for (const bytes of buffers) { frame.set(new Uint8Array(bytes), offset); offset += bytes.byteLength; }
         socket.send(frame);
       } catch {
         if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: "source-error", requestId: message?.requestId }));
@@ -180,7 +205,7 @@ export function createHostFiles({ send, report }) {
       if (sourceId && sourceId !== state.sourceId) clear();
       activeSourceId = state.sourceId;
     },
-    chooseVideo: () => pick("video/*,.mkv,.avi,.ts,.mts,.m2ts,.mpg,.mpeg,.flv,.wmv,.srt,.vtt,.ass,.ssa", selectFiles),
+    chooseVideo: () => pick("video/*,.mkv,.webm,.mp4,.m4v,.mov,.3gp,.3g2,.avi,.ogm,.ogv,.ogg,.ts,.mts,.m2ts,.mpg,.mpeg,.flv,.wmv,.srt,.vtt,.ass,.ssa", selectFiles),
     chooseCaptions: () => pick(".srt,.vtt,.ass,.ssa", addFiles),
     async removeCaption(trackId) {
       if (!trackId || !activeSourceId || role !== "host") return;

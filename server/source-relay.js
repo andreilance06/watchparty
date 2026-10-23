@@ -97,22 +97,25 @@ function createHostSource({ room, bridge, config }) {
   function pump(source) {
     if (source.closed) return;
     while (source.pending.size < config.sourceMaxReads && source.queue.length) {
-      const job = source.queue.shift();
+      const preferred = source.queue.findIndex(job => job.caption === Boolean(source.preferCaptions));
+      const job = source.queue.splice(preferred < 0 ? 0 : preferred, 1)[0];
       if (job.done) continue;
       if (job.provider.ws?.readyState !== 1) { job.fail(new Error("File provider unavailable.")); continue; }
       source.pending.set(job.id, job);
-      send(job.provider.ws, { type: "source-read", requestId: job.id, fileId: job.fileId, offset: job.offset, length: job.length });
+      source.preferCaptions = !job.caption;
+      send(job.provider.ws, { type: job.ranges ? "source-read-batch" : "source-read", requestId: job.id, fileId: job.fileId,
+        ...(job.ranges ? { ranges: job.ranges } : { offset: job.offset, length: job.length }) });
     }
   }
 
-  function read(source, fileId, offset, length, signal) {
+  function read(source, fileId, offset, length, signal, caption = false, ranges = null) {
     return new Promise((resolve, reject) => {
       const provider = source.providers.get(source.files.get(fileId)?.providerId || source.id);
       if (source.closed || provider?.ws?.readyState !== 1 || signal.aborted) { reject(new Error("Source unavailable.")); return; }
       if (source.queue.length >= 64) { reject(new Error("Source is busy.")); return; }
       const id = source.nextRequest++;
       if (id > 0xffffffff) { reject(new Error("Source request limit reached. Reselect the video.")); return; }
-      const job = { id, fileId, offset, length, provider, done: false };
+      const job = { id, fileId, offset, length, provider, done: false, caption, ranges };
       const finish = (error, bytes) => {
         if (job.done) return;
         job.done = true;
@@ -136,6 +139,54 @@ function createHostSource({ room, bridge, config }) {
 
   function descriptor(source, file) {
     return { input: source.bridge.url(file.id), remote: true, fileId: file.id, codec: file.codec, label: file.name, lang: "und" };
+  }
+
+  // Subtitle parsers skip media payloads using tiny header reads. Expanding
+  // those requests to cache pages would pull the video through the relay again.
+  async function preciseReadMany(source, fileId, ranges, signal) {
+    const file = source.files.get(fileId);
+    if (!file || source.closed || signal.aborted || !Array.isArray(ranges) || ranges.length > 64) throw new Error("Invalid caption source range.");
+    const misses = [], outputs = ranges.map(() => []);
+    let total = 0;
+    for (const [index, { offset, length }] of ranges.entries()) {
+      if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(length) || offset < 0 || length < 1 || offset + length > file.size) throw new Error("Invalid caption source range.");
+      total += length;
+      if (total > 256 * 1024) throw new Error("Caption read batch is too large.");
+      for (let at = offset; at < offset + length;) {
+        const page = Math.floor(at / config.sourceChunkBytes) * config.sourceChunkBytes;
+        const count = Math.min(config.sourceChunkBytes - at % config.sourceChunkBytes, offset + length - at);
+        const cached = source.cache.get(`${fileId}:${page}`), slot = outputs[index].length;
+        outputs[index].push(cached ? cached.subarray(at - page, at - page + count) : null);
+        if (cached) source.captionMetrics.cacheHitBytes += count;
+        else misses.push({ offset: at, length: count, index, slot });
+        at += count;
+      }
+    }
+    const provider = source.providers.get(file.providerId || source.id);
+    for (let at = 0; at < misses.length;) {
+      const batch = []; let length = 0;
+      while (at < misses.length && batch.length < 64 && length + misses[at].length <= config.sourceChunkBytes) {
+        length += misses[at].length; batch.push(misses[at++]);
+      }
+      signal.throwIfAborted();
+      source.captionMetrics.ranges += batch.length; source.captionMetrics.bytes += length;
+      if (provider.batchReads) {
+        source.captionMetrics.requests++;
+        const bytes = await read(source, fileId, 0, length, signal, true, batch.map(({ offset, length }) => ({ offset, length })));
+        let start = 0;
+        for (const piece of batch) { outputs[piece.index][piece.slot] = bytes.subarray(start, start + piece.length); start += piece.length; }
+      } else {
+        let next = 0;
+        await Promise.all(Array.from({ length: Math.min(4, batch.length) }, async () => {
+          while (next < batch.length) {
+            const piece = batch[next++]; source.captionMetrics.requests++;
+            outputs[piece.index][piece.slot] = await read(source, fileId, piece.offset, piece.length, signal, true);
+          }
+        }));
+      }
+    }
+    signal.throwIfAborted();
+    return outputs.map(chunks => chunks.length === 1 ? chunks[0] : Buffer.concat(chunks));
   }
 
   function cachedRead(source, fileId, offset, length, signal) {
@@ -207,6 +258,7 @@ function createHostSource({ room, bridge, config }) {
           source = candidate;
           provider = selected;
           provider.ws = ws;
+          provider.batchReads = Array.isArray(message.capabilities) && message.capabilities.includes("batch-reads-v1");
           provider.token = null;
           clearTimeout(timer);
           clearTimeout(provider.attachTimer);
@@ -217,7 +269,11 @@ function createHostSource({ room, bridge, config }) {
           room.state.sourceId = source.id;
           room.state.sourceOwnerId = source.owner.clientId;
           room.media.select(source.bridge.url(video.id), video.name);
-          Promise.resolve(room.media.prepare(source.bridge.url(video.id), source.captionIds.map((id) => descriptor(source, source.files.get(id)))))
+          Promise.resolve(room.media.prepare(source.bridge.url(video.id), source.captionIds.map((id) => descriptor(source, source.files.get(id))), {
+            size: video.size, metrics: source.captionMetrics,
+            read: async (offset, length, signal) => (await preciseReadMany(source, video.id, [{ offset, length }], signal))[0],
+            readMany: (ranges, signal) => preciseReadMany(source, video.id, ranges, signal)
+          }))
             .then(() => {
               if (active !== source) return;
               for (const id of source.captionIds) {
@@ -270,7 +326,8 @@ function createHostSource({ room, bridge, config }) {
         room.media.reset();
         active = { id: crypto.randomUUID(), token: crypto.randomBytes(32).toString("base64url"), owner: ws,
           files, videoId: video.id, captionIds: captions.map((file) => file.id), pending: new Map(), queue: [],
-          cache: new Map(), reads: new Map(), nextRequest: 1, closed: false };
+          cache: new Map(), reads: new Map(), nextRequest: 1, closed: false,
+          captionMetrics: { requests: 0, ranges: 0, bytes: 0, cacheHitBytes: 0 } };
         const source = active;
         source.providers = new Map([[source.id, source]]);
         source.attachTimer = setTimeout(() => unavailable(source), config.sourceReadTimeoutMs);

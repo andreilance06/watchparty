@@ -44,8 +44,11 @@ export function createSubtitles({ elements, report, onAddCaptions = () => {} }) 
 
   function loadContent(url) {
     if (!contents.has(url)) {
-      const pending = fetch(url).then((response) => {
-        if (!response.ok) throw new Error("This caption track could not be extracted.");
+      const pending = fetch(url).then(async (response) => {
+        if (!response.ok) throw new Error((await response.text?.()) || "This caption track could not be extracted. Add an external SRT, VTT, ASS, or SSA subtitle file.");
+        if (tracks.some(track => track.id === selected && track.url === url)) {
+          try { video.watchpartyCaptionMetrics = JSON.parse(response.headers?.get("X-WatchParty-Caption-Metrics") || "null"); } catch {}
+        }
         return response.text();
       }).catch((error) => { if (contents.get(url) === pending) contents.delete(url); throw error; });
       contents.set(url, pending);
@@ -89,7 +92,7 @@ export function createSubtitles({ elements, report, onAddCaptions = () => {} }) 
     const changed = key != null && key !== sourceKey;
     if (reset || changed) menu.close();
     if (changed) {
-      sourceKey = key; contents.clear(); initialized = false; pictureAvailable = false;
+      sourceKey = key; contents.clear(); initialized = false; pictureAvailable = false; video.watchpartyCaptionMetrics = null;
       const old = adapter; adapter = null; old?.destroy();
       clearNotice(); status = "off"; phase = null;
     }

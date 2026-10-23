@@ -15,9 +15,63 @@ export function createPlayer({ elements, state: session, send, report, files }) 
   const mediaEvents = createMediaEventBridge(video);
   const compatibilityBuffer = createCompatibilityBuffer(video);
   createFullscreen({ elements, getHostPaused: () => session.latestHostPaused, afterResize: subtitles.refreshLayout });
-  let latest, latestAt = 0, sourceKey = "", generation = 0, mode = "", pendingCompatibility = false;
+  let latest, latestAt = 0, sourceKey = "", generation = 0, mode = "", pendingCompatibility;
   let switchStarted = 0, lastProgress = 0, lastTime = -1, metrics = {}, selectionStarted = 0;
-  const readyState = () => (video.player?.getHLSVideoElement?.() || video.player?.getVideoElement?.() || video).readyState;
+  let requestSequence = 0, requestTimer, recoveryTimer, recovery, recoveryUsed = false, terminalError = false;
+  let watchingPlayback = false;
+  const surface = () => video.player?.getHLSVideoElement?.() || video.player?.getVideoElement?.() || video;
+  const readyState = () => surface().readyState;
+
+  function resetProgress() {
+    lastProgress = performance.now(); lastTime = Number(surface().currentTime) || 0;
+    watchingPlayback = false;
+  }
+
+  function clearCompatibilityRequest() {
+    clearTimeout(requestTimer); requestTimer = undefined; pendingCompatibility = undefined;
+  }
+
+  function cancelRecovery() {
+    clearCompatibilityRequest();
+    clearTimeout(recoveryTimer); recoveryTimer = undefined; recovery = undefined;
+  }
+
+  function failPlayback(message) {
+    if (terminalError) return;
+    terminalError = true;
+    cancelRecovery(); sync.cancel();
+    session.suppressVideoEvents = true;
+    session.sourceSwitching = false;
+    video.pause();
+    syncStatus.textContent = "Could not play this video";
+    report(message);
+  }
+
+  // Source changes are asynchronous in Movi. Never use the retired player's
+  // readyState or errors to complete/fail its replacement.
+  const awaitingReplacement = () => recovery?.phase === "loading" && recovery.player && recovery.player === video.player;
+
+  function reloadCompatibility(url) {
+    const sameSource = session.activeMediaUrl === url;
+    const attempt = recovery;
+    if (recovery) {
+      recovery.phase = "loading";
+      recovery.player = video.player;
+      clearTimeout(recoveryTimer);
+      recoveryTimer = setTimeout(() => failPlayback("Playback could not reconnect. Check the host connection and try again."), 10000);
+    }
+    setVideoSource(url, "application/vnd.apple.mpegurl", "hlsjs native");
+    if (recovery) syncStatus.textContent = "Reconnecting playback…";
+    // Movi ignores identical <source> signatures. An idle connection failure
+    // usually keeps the same URL, so explicitly rebuild through its public API.
+    if (attempt && sameSource && typeof video.load === "function") {
+      Promise.resolve().then(() => {
+        if (recovery === attempt) return video.load();
+      }).catch(error => {
+        if (recovery === attempt) failPlayback(error.message || "Playback could not reconnect.");
+      });
+    }
+  }
 
   function setVideoSource(url, type, engine) {
     subtitles.sourceChanging();
@@ -46,7 +100,8 @@ export function createPlayer({ elements, state: session, send, report, files }) 
   }
 
   function showNoVideo(status = "Waiting for host") {
-    generation++; latest = null; sourceKey = ""; pendingCompatibility = false;
+    cancelRecovery(); terminalError = false; recoveryUsed = false;
+    generation++; latest = null; sourceKey = "";
     session.activeMediaUrl = ""; session.latestHostPaused = true;
     setVideoSource(null);
     session.sourceSwitching = false;
@@ -56,26 +111,49 @@ export function createPlayer({ elements, state: session, send, report, files }) 
     fileName.textContent = "No video selected"; syncStatus.textContent = status;
   }
 
-  function requestCompatibility(reason) {
-    if (!latest?.hasVideo || pendingCompatibility || mode === "compatibility") return;
-    pendingCompatibility = true;
+  function sendCompatibilityRequest() {
+    pendingCompatibility = { requestId: `playback-${generation}-${++requestSequence}` };
+    if (send({ type: "compatibility-request", mediaVersion: session.mediaVersion, requestId: pendingCompatibility.requestId }) === false) {
+      failPlayback("Playback could not reconnect. Check your connection and try again.");
+    }
+  }
+
+  function requestCompatibility(reason, recover = false) {
+    if (!latest?.hasVideo || terminalError || pendingCompatibility || (mode === "compatibility" && !recover)) return;
+    if (recover) {
+      if (recoveryUsed) { failPlayback(reason); return; }
+      recoveryUsed = true;
+      recovery = { phase: "request", started: performance.now(), player: video.player };
+      metrics.recoveryAttempts = 1;
+    } else {
+      metrics.fallbackReason = reason; metrics.fallbackStarted = performance.now();
+    }
     session.sourceSwitching = true;
     session.suppressVideoEvents = true;
-    metrics.fallbackReason = reason; metrics.fallbackStarted = performance.now();
+    sync.cancel();
     video.watchpartyMetrics = metrics;
-    syncStatus.textContent = "Switching to compatible playback…";
-    send({ type: "compatibility-request", mediaVersion: session.mediaVersion, requestId: `playback-${generation}` });
+    syncStatus.textContent = recover ? "Reconnecting playback…" : "Switching to compatible playback…";
+    requestTimer = setTimeout(() => failPlayback("Playback could not reconnect. Check the host connection and try again."), 10000);
+    sendCompatibilityRequest();
   }
   function applyCompatibility(message) {
-    if (!latest || message.mediaVersion !== session.mediaVersion || message.requestId !== `playback-${generation}` || !pendingCompatibility) return;
-    pendingCompatibility = false;
+    if (!latest || terminalError || !pendingCompatibility || message.mediaVersion !== session.mediaVersion || message.requestId !== pendingCompatibility.requestId) return;
+    if ((message.playbackRevision ?? 0) < (session.playbackRevision ?? 0)) {
+      // A seek/host transfer can overtake the reply. Keep the original deadline
+      // while requesting the current revision with a new correlation ID.
+      sendCompatibilityRequest(); return;
+    }
+    clearCompatibilityRequest();
     session.playbackRevision = message.playbackRevision ?? session.playbackRevision;
-    const authoritative = { ...latest, time: message.time, paused: message.paused, playbackRate: message.playbackRate };
+    const authoritative = { ...latest, playbackRevision: session.playbackRevision, compatibilityUrl: message.url,
+      streamGeneration: message.streamGeneration ?? latest.streamGeneration,
+      time: message.time, paused: message.paused, playbackRate: message.playbackRate };
     latest = authoritative;
+    latestAt = performance.now();
     session.latestHostPaused = Boolean(message.paused);
     session.activeEncoder = "Compatibility playback";
-    metrics.fallbackPending = true;
-    setVideoSource(message.url, "application/vnd.apple.mpegurl", "hlsjs native");
+    if (!recovery) metrics.fallbackPending = true;
+    reloadCompatibility(message.url);
   }
 
   function applySessionState(state) {
@@ -90,6 +168,7 @@ export function createPlayer({ elements, state: session, send, report, files }) 
     session.latestHostPaused = Boolean(state.paused);
     subtitles.setAvailability({ hasVideo: Boolean(state.hasVideo && !state.processing), canAdd: session.role === "host" });
     if (state.processing) {
+      cancelRecovery(); terminalError = false; recoveryUsed = false;
       generation++; latest = null; sourceKey = "";
       selectionStarted = performance.now();
       session.activeMediaUrl = "";
@@ -110,7 +189,8 @@ export function createPlayer({ elements, state: session, send, report, files }) 
     fileName.textContent = state.fileName || "Selected video";
     videoPlaceholder.hidden = true; viewerControls.hidden = true;
     if (key !== sourceKey) {
-      sourceKey = key; generation++; pendingCompatibility = false; mode = "";
+      cancelRecovery(); terminalError = false; recoveryUsed = false;
+      sourceKey = key; generation++; mode = "";
       const token = generation;
       metrics = { selectionStarted: selectionStarted || performance.now() };
       session.sourceSwitching = true; session.activeEncoder = "Direct playback";
@@ -118,14 +198,18 @@ export function createPlayer({ elements, state: session, send, report, files }) 
       // Legacy sessions and non-browser tests can still supply HLS alone.
       if (!state.originalUrl) { setVideoSource(state.mediaUrl, "application/vnd.apple.mpegurl", "hlsjs native"); return; }
       choosePlayback(state.mediaInfo).then((choice) => {
-        if (token !== generation || !latest) return;
+        if (token !== generation || !latest || terminalError) return;
         if (choice === "compatibility") requestCompatibility("device capabilities");
         else setVideoSource(latest.originalUrl, latest.mediaInfo?.mime || "application/octet-stream", choice === "native" ? "native wasm" : "wasm native");
       });
     } else {
       if (state.captions) subtitles.setTracks(state.captions);
-      if (compatibilityChanged) setVideoSource(state.compatibilityUrl, "application/vnd.apple.mpegurl", "hlsjs native");
-      else if (session.activeMediaUrl && !pendingCompatibility) sync.apply(state, false);
+      if (terminalError) return;
+      if (compatibilityChanged) {
+        clearCompatibilityRequest();
+        reloadCompatibility(state.compatibilityUrl);
+      } else if (session.activeMediaUrl && !pendingCompatibility && !awaitingReplacement()) sync.apply(state, false);
+      if (recovery) syncStatus.textContent = "Reconnecting playback…";
     }
   }
 
@@ -208,6 +292,9 @@ export function createPlayer({ elements, state: session, send, report, files }) 
     syncStatus.textContent = `${video.paused ? "Ready" : "Playing"} · ${encoder}`;
   }
   function showMediaError(message) {
+    terminalError = true; cancelRecovery(); sync.cancel();
+    session.suppressVideoEvents = true; session.sourceSwitching = false;
+    video.pause();
     placeholderTitle.textContent = "Could not prepare video"; placeholderText.textContent = message;
     videoPlaceholder.hidden = false; syncStatus.textContent = "Choose another video or check the host connection"; report(message);
   }
@@ -215,7 +302,7 @@ export function createPlayer({ elements, state: session, send, report, files }) 
     if (message.mediaVersion === session.mediaVersion) subtitles.setTracks(message.captions);
   }
   function ready() {
-    if (!latest || !session.activeMediaUrl) return;
+    if (!latest || !session.activeMediaUrl || terminalError || pendingCompatibility || awaitingReplacement()) return;
     mediaEvents.connect();
     compatibilityBuffer.update();
     sync.update();
@@ -240,16 +327,26 @@ export function createPlayer({ elements, state: session, send, report, files }) 
   video.addEventListener("canplay", ready);
   video.addEventListener("loadeddata", progress);
   video.addEventListener("playing", progress);
+  document.addEventListener("visibilitychange", resetProgress);
   // Some native-engine wrappers expose readyState without forwarding every
   // HTML media event. Also observe a first frame while initially paused.
   setInterval(() => {
-    if (!latest || !session.activeMediaUrl || pendingCompatibility) return;
+    if (!latest || !session.activeMediaUrl || terminalError || pendingCompatibility || awaitingReplacement()) return;
     mediaEvents.connect();
     compatibilityBuffer.update();
     sync.update();
     if (session.sourceSwitching && readyState() >= 1) ready();
     if (readyState() >= 2 && (!metrics.firstPictureMs || metrics.fallbackPending)) {
       progress(); video.dispatchEvent(new Event("watchparty-picture-ready"));
+    }
+    if (recovery) {
+      if (readyState() >= 2 && !session.sourceSwitching) {
+        metrics.recoveryMs = performance.now() - recovery.started;
+        clearTimeout(recoveryTimer); recoveryTimer = undefined; recovery = undefined;
+        syncStatus.textContent = session.role === "host"
+          ? `You control playback${session.activeEncoder ? ` • ${session.activeEncoder}` : ""}`
+          : session.latestHostPaused ? "Paused" : "Synchronized with host";
+      } else syncStatus.textContent = "Reconnecting playback…";
     }
   }, 100);
   video.addEventListener("seeked", () => {
@@ -263,8 +360,8 @@ export function createPlayer({ elements, state: session, send, report, files }) 
     if (!session.latestHostPaused && video.paused) video.play().catch(() => {});
   });
   chooseVideoButton.addEventListener("click", files.chooseVideo);
-  video.addEventListener("play", () => localIntent("play"));
-  video.addEventListener("pause", () => localIntent("pause"));
+  video.addEventListener("play", () => { resetProgress(); localIntent("play"); });
+  video.addEventListener("pause", () => { resetProgress(); localIntent("pause"); });
   video.addEventListener("watchparty-seek-intent", event => {
     if (!session.suppressVideoEvents && !session.sourceSwitching && !canControl(session, "seek")) event.preventDefault();
     localIntent("seek", event.detail.time);
@@ -276,11 +373,15 @@ export function createPlayer({ elements, state: session, send, report, files }) 
   video.addEventListener("ratechange", () => localIntent("rate"));
   setInterval(() => { if (session.role === "host" && !video.paused) sync.broadcast("tick"); }, 2000);
   setInterval(() => {
-    if (!latest || !session.activeMediaUrl || pendingCompatibility || mode === "compatibility" || document.hidden) return;
-    const time = Number(video.currentTime) || 0, now = performance.now();
+    if (!latest || !session.activeMediaUrl || terminalError || pendingCompatibility || mode === "compatibility") return;
+    const active = surface(), time = Number(active.currentTime) || 0, now = performance.now();
+    const playing = !document.hidden && !active.paused && !video.ended && !session.sourceSwitching;
+    if (!playing || !watchingPlayback) { lastProgress = now; lastTime = time; }
+    watchingPlayback = playing;
+    if (document.hidden) return;
     if (Math.abs(time - lastTime) > 0.05) { lastTime = time; lastProgress = now; }
-    const openingStalled = readyState() < 2 && now - switchStarted > 5000;
-    const playbackStalled = !latest.paused && !video.paused && !video.ended && now - lastProgress > 5000;
+    const openingStalled = session.sourceSwitching && readyState() < 2 && now - switchStarted > 5000;
+    const playbackStalled = playing && now - lastProgress >= 5000;
     const seekStalled = metrics.seekStarted && video.seeking && now - metrics.seekStarted > 5000;
     if (openingStalled || playbackStalled || seekStalled) requestCompatibility("playback stalled");
   }, 1000);
@@ -290,11 +391,12 @@ export function createPlayer({ elements, state: session, send, report, files }) 
     }
   });
   function playbackError(event) {
-    if (!latest || session.sourceSwitching && !session.activeMediaUrl) return;
+    if (!latest || terminalError || pendingCompatibility || awaitingReplacement() || session.sourceSwitching && !session.activeMediaUrl) return;
     if (mode !== "compatibility") requestCompatibility("video or audio decoder failed");
     else {
-      syncStatus.textContent = "Could not play this video";
-      report(event.detail?.message || video.error?.message || "Compatible playback failed. Check the host connection and server encoder.");
+      const message = event.detail?.message || video.error?.message || "Compatible playback failed. Check the host connection and server encoder.";
+      if (recovery) failPlayback(message);
+      else requestCompatibility(message, true);
     }
   }
   video.addEventListener("error", playbackError);

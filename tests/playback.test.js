@@ -5,6 +5,167 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
 const webCodecsInfo = { mime: 'video/x-matroska', videoCodec: 'h264', bitDepth: 8, pixelFormat: 'yuv420p',
  width: 1920, height: 1080, fps: 30, hasAudio: false };
 
+async function playbackHarness({ mode = 'compatibility', paused = true, role = 'host' } = {}) {
+ const b = createBrowserDouble(); let now = 1000;
+ b.context.performance = { now: () => now };
+ const create = b.document.createElement;
+ b.document.createElement = tag => { const el = create(tag); if (tag === 'video') el.canPlayType = () => 'probably'; return el; };
+ const { getElements } = await b.load('js/dom.js');
+ const { createPlayer } = await b.load('js/player/controller.js');
+ const elements = getElements(), video = elements.video, sent = [], reports = [];
+ video.readyState = 4;
+ const state = { role, clientId: role, mediaVersion: 0 };
+ const player = createPlayer({ elements, state, send: message => { sent.push(message); }, report: message => reports.push(message),
+  files: { setRole() {}, chooseVideo() {}, chooseCaptions() {} } });
+ const snapshot = { type: 'session-state', mediaVersion: 1, playbackRevision: 1, hasVideo: true,
+  paused, time: 17, playbackRate: 1.25, mediaUrl: '/hls/master.m3u8?v=1&g=0', compatibilityUrl: '/hls/master.m3u8?v=1&g=0',
+  captions: [{ id: 'caption', url: '/caption.ass', label: 'Caption', format: 'ass' }],
+  ...(mode === 'native' ? { originalUrl: '/media/original?v=1', mediaInfo: { ...webCodecsInfo, mime: 'video/mp4' } } : {}) };
+ player.applySessionState(snapshot); await flush(); b.runTimers(100); await flush();
+ const requests = () => sent.filter(message => message.type === 'compatibility-request');
+ const reply = (values = {}) => player.applyCompatibility({ ...snapshot, type: 'compatibility-ready',
+  requestId: requests().at(-1)?.requestId, url: snapshot.compatibilityUrl, ...values });
+ return { b, player, state, video, elements, sent, reports, snapshot, requests, reply,
+  advance: ms => { now += ms; }, source: () => video.children.find(child => child.tagName === 'source') };
+}
+
+test('long pauses and foreground return give active playback a fresh five-second stall window', async () => {
+ for (const role of ['host', 'viewer']) {
+  const h = await playbackHarness({ mode: 'native', role });
+  for (let attempt = 0; attempt < 2; attempt++) {
+   h.advance(180000); h.b.runTimers(1000); assert.equal(h.requests().length, 0);
+   await h.video.play(); h.player.applySessionState({ ...h.snapshot, paused: false, syncMode: 'play' }); await flush();
+   h.b.runTimers(1000); h.advance(4999); h.b.runTimers(1000);
+   assert.equal(h.requests().length, 0, 'paused time must not count as a playback stall');
+   h.video.currentTime += 1; h.b.runTimers(1000);
+   h.video.pause(); h.player.applySessionState({ ...h.snapshot, time: h.video.currentTime, syncMode: 'pause' }); await flush();
+  }
+  await h.video.play(); h.player.applySessionState({ ...h.snapshot, paused: false, syncMode: 'play' }); await flush();
+  h.b.runTimers(1000); h.b.document.hidden = true; h.b.document.dispatch('visibilitychange');
+  h.advance(180000); h.b.runTimers(1000); assert.equal(h.requests().length, 0);
+  h.b.document.hidden = false; h.b.document.dispatch('visibilitychange'); h.b.runTimers(1000);
+  h.advance(4999); h.b.runTimers(1000); assert.equal(h.requests().length, 0);
+  h.advance(1); h.b.runTimers(1000);
+  assert.equal(h.requests().length, 1, 'a genuine active stall still falls back');
+ }
+});
+
+test('startup and seek timeouts still trigger compatibility fallback', async () => {
+ for (const phase of ['startup', 'seek']) {
+  const h = await playbackHarness({ mode: 'native' });
+  if (phase === 'startup') {
+   h.video.readyState = 0;
+   h.player.applySessionState({ ...h.snapshot, mediaVersion: 2, originalUrl: '/media/original?v=2' }); await flush();
+  } else {
+   h.video.seeking = true; h.video.dispatch('seeking');
+  }
+  h.advance(5001); h.b.runTimers(1000);
+  assert.equal(h.requests().length, 1, phase);
+ }
+});
+
+test('compatibility errors reload locally once and preserve shared transport and captions', async () => {
+ for (const paused of [true, false]) {
+  const h = await playbackHarness({ paused }); const original = h.source();
+  h.video.dispatch('error', { detail: { message: 'Network error: fragLoadTimeOut' } });
+  h.video.dispatch('errordisplay', { detail: { message: 'Duplicate fatal notification' } });
+  h.video.dispatch('pause'); h.video.dispatch('seeking'); h.video.dispatch('ratechange');
+  assert.equal(h.requests().length, 1); assert.equal(h.reports.length, 0);
+  assert.equal(h.elements.syncStatus.textContent, 'Reconnecting playback…');
+  h.reply({ time: 42, paused, playbackRate: 1.5 }); await flush(); h.b.runTimers(100); await flush();
+  assert.notEqual(h.source(), original);
+  assert.equal(h.video.currentTime, 42); assert.equal(h.video.paused, paused); assert.equal(h.video.playbackRate, 1.5);
+  assert.equal(selectedCaption(h.video), 'caption');
+  assert.equal(h.sent.filter(message => message.type === 'video-state').length, 0);
+  assert.equal(h.video.watchpartyMetrics.recoveryAttempts, 1);
+  assert.doesNotMatch(h.elements.syncStatus.textContent, /Reconnecting/);
+  assert.equal(h.state.sourceSwitching, false); assert.equal(h.state.suppressVideoEvents, false);
+  assert.equal([...h.b.timers.values()].filter(timer => timer.delay === 10000).length, 0);
+  h.video.dispatch('error', { detail: { message: 'Replacement failed' } }); h.video.dispatch('errordisplay');
+  assert.equal(h.requests().length, 1); assert.deepEqual(h.reports, ['Replacement failed']);
+ }
+});
+
+test('recovery ignores retired-player readiness and duplicate errors until the replacement arrives', async () => {
+ const h = await playbackHarness();
+ const native = h.b.document.createElement('video'); Object.assign(native, { readyState: 4, paused: true, currentTime: 17 });
+ const oldPlayer = { getHLSVideoElement: () => native }; h.video.player = oldPlayer;
+ h.video.dispatch('error'); h.reply(); h.b.runTimers(100); await flush();
+ assert.equal(h.state.sourceSwitching, true);
+ h.video.dispatch('errordisplay'); assert.equal(h.reports.length, 0); assert.equal(h.requests().length, 1);
+ const replacement = h.b.document.createElement('video'); Object.assign(replacement, { readyState: 0, paused: true, currentTime: 17 });
+ h.video.player = { getHLSVideoElement: () => replacement }; h.b.runTimers(100);
+ replacement.readyState = 4; h.b.runTimers(100); await flush(); h.b.runTimers(100);
+ assert.equal(h.state.sourceSwitching, false); assert.equal(h.reports.length, 0);
+ assert.equal([...h.b.timers.values()].filter(timer => timer.delay === 10000).length, 0);
+});
+
+test('same-URL recovery explicitly reloads Movi and ignores obsolete load failures', async () => {
+ for (const superseded of [false, true]) {
+  const h = await playbackHarness(); let rejectLoad, loads = 0;
+  h.video.load = () => { loads++; return new Promise((resolve, reject) => { rejectLoad = reject; }); };
+  h.video.dispatch('error'); h.reply(); await flush(); assert.equal(loads, 1);
+  if (superseded) { h.player.applySessionState({ ...h.snapshot, mediaVersion: 2 }); await flush(); }
+  rejectLoad(new Error('Reload failed')); await flush();
+  assert.deepEqual(h.reports, superseded ? [] : ['Reload failed']);
+ }
+});
+
+test('recovery request and replacement loading each stop after ten seconds', async () => {
+ for (const phase of ['request', 'loading']) {
+  const h = await playbackHarness(); h.video.dispatch('error');
+  if (phase === 'loading') { h.video.readyState = 0; h.reply(); }
+  h.b.runTimers(10000); h.video.dispatch('errordisplay');
+  assert.equal(h.reports.length, 1); assert.match(h.reports[0], /could not reconnect/);
+  assert.equal(h.elements.syncStatus.textContent, 'Could not play this video');
+  assert.equal(h.requests().length, 1); const source = h.source();
+  h.reply(); h.b.runTimers(100); await flush();
+  assert.equal(h.source(), source, 'a late reply cannot revive timed-out playback');
+  assert.equal(h.sent.filter(message => message.type === 'video-state').length, 0);
+ }
+});
+
+test('replacement errors fail immediately without a second recovery request', async () => {
+ const h = await playbackHarness(); h.video.dispatch('error'); h.video.readyState = 0; h.reply();
+ h.video.dispatch('error', { detail: { message: 'Decoder failed' } }); h.video.dispatch('errordisplay');
+ assert.deepEqual(h.reports, ['Decoder failed']); assert.equal(h.requests().length, 1);
+ h.b.runTimers(10000); assert.equal(h.reports.length, 1);
+});
+
+test('newer playback revisions and sources supersede recovery replies', async () => {
+ const h = await playbackHarness(); h.video.dispatch('error'); const firstRequest = h.requests()[0];
+ h.player.applySessionState({ ...h.snapshot, playbackRevision: 2, time: 60, syncMode: 'host-transfer' });
+ h.reply({ requestId: firstRequest.requestId });
+ assert.equal(h.requests().length, 2); assert.notEqual(h.requests()[1].requestId, firstRequest.requestId);
+ const original = h.source(); h.reply({ requestId: firstRequest.requestId, playbackRevision: 2 }); assert.equal(h.source(), original);
+ h.reply({ playbackRevision: 2, time: 60 }); await flush(); h.b.runTimers(100);
+ assert.equal(h.video.currentTime, 60); assert.equal(h.state.playbackRevision, 2);
+ h.player.applySessionState({ ...h.snapshot, mediaVersion: 2 }); await flush();
+ const newSource = h.source(); h.reply({ mediaVersion: 1 }); assert.equal(h.source(), newSource);
+ h.video.dispatch('error'); assert.equal(h.requests().length, 3, 'a new video gets its own recovery budget');
+});
+
+test('stream generation changes supersede pending recovery without reloading twice', async () => {
+ const h = await playbackHarness(); h.video.dispatch('error');
+ const next = { ...h.snapshot, playbackRevision: 2, time: 60, compatibilityUrl: '/hls/master.m3u8?v=1&g=1', syncMode: 'seek' };
+ h.player.applySessionState(next); await flush(); h.b.runTimers(100); await flush();
+ const source = h.source(); assert.equal(source.src, next.compatibilityUrl);
+ h.reply(); assert.equal(h.source(), source);
+ h.player.applySessionState({ ...next, syncMode: 'tick' }); assert.equal(h.source(), source);
+ assert.equal(h.requests().length, 1); assert.equal(h.sent.filter(message => message.type === 'video-state').length, 0);
+});
+
+test('source removal and server media failures cancel recovery and remain terminal', async () => {
+ for (const failure of ['removed', 'server']) {
+  const h = await playbackHarness(); h.video.dispatch('error');
+  if (failure === 'removed') h.player.showNoVideo('Host disconnected');
+  else h.player.showMediaError('The host file is unavailable.');
+  const source = h.source(); h.reply(); h.video.dispatch('error'); h.b.runTimers(10000);
+  assert.equal(h.source(), source); assert.equal(h.requests().length, 1);
+  assert.deepEqual(h.reports, failure === 'server' ? ['The host file is unavailable.'] : []);
+ }
+});
+
 test('silent WebCodecs playback needs only a video decoder and clears its assessment timer', async () => {
  const b=createBrowserDouble();b.context.isSecureContext=true;b.context.VideoDecoder={};
  const {choosePlayback}=await b.load('js/player/playback.js');

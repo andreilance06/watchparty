@@ -9,7 +9,8 @@ function parseMediaInfo(output, fileName = "") {
   const channels = /\bmono\b/.test(audioLine) ? 1 : /\bstereo\b/.test(audioLine) ? 2 :
     Number(/(\d+) channels/.exec(audioLine)?.[1]) || (layout ? Number(layout[1]) + Number(layout[2]) : 2);
   const extension = path.extname(fileName).toLowerCase();
-  const mime = ({ ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm",
+  const mime = ({ ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".3gp": "video/3gpp", ".3g2": "video/3gpp2", ".webm": "video/webm",
+    ".ogv": "video/ogg", ".ogg": "video/ogg", ".ogm": "video/ogg",
     ".mkv": "video/x-matroska", ".avi": "video/x-msvideo", ".ts": "video/mp2t" })[extension] || "application/octet-stream";
   return { mime, videoCodec: /Video:\s*(\w+)/.exec(videoLine)?.[1] || "",
     audioCodec: /Audio:\s*(\w+)/.exec(audioLine)?.[1] || "", hasAudio: Boolean(audioLine),
@@ -39,7 +40,8 @@ function parseSubtitleStreams(output, sourcePath) {
     if (!["ass", "ssa", "subrip", "srt", "webvtt", "mov_text", "text"].includes(codec)) continue;
     const title = /^\s+title\s*:\s*(.+)$/im.exec(block)?.[1].trim() ||
       /^\s+handler_name\s*:\s*(.+)$/im.exec(block)?.[1].trim();
-    subtitles.push({ input: sourcePath, map: `0:${match[1]}`, codec, lang: match[2] || "und",
+    const identifier = /Stream #0:\d+\[([^\]]+)\]/.exec(line)?.[1];
+    subtitles.push({ input: sourcePath, map: `0:${match[1]}`, ...(identifier && /^(?:0x[\da-f]+|\d+)$/i.test(identifier) ? { streamId: Number(identifier) } : {}), codec, lang: match[2] || "und",
       title, label: title || `Captions ${subtitles.length + 1}`,
       default: /\(default\)/i.test(line), forced: /\(forced\)/i.test(line) });
   }

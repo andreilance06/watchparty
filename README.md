@@ -130,6 +130,7 @@ The host starts movie polls from the chatroom. An active poll stays pinned above
 - Host seeks are acknowledged with a new playback revision. Old ticks and HLS recovery seeks cannot reset the room clock. Compatibility clients reload the acknowledged generation while preserving pause, speed, and caption selection.
 - Direct streams reuse a bounded 16 MiB byte cache and share concurrent reads. HTTP backpressure, cancelled requests, stale source generations, and room membership apply to original bytes as well as generated media.
 - Playback-path switches are local to a viewer and preserve the shared timestamp, pause state, speed, and caption choice. They do not replace the room's source or send synthetic play/pause actions.
+- Paused and background-tab time does not count toward playback stalls. If compatibility playback fails, the affected browser attempts one local reload per selected video at the current shared position, preserving pause, speed, and captions. Reconnection and replacement loading each have a ten-second limit; failures then show an error without changing the room clock.
 - Movi's measured stutter warnings trigger compatibility fallback for hardware and software decoding alike. Browsers may decode supported codecs in software; suitable smooth browser decoding still qualifies for WebCodecs playback.
 
 FFmpeg/HLS remain the compatibility path because browser decoding alone cannot reliably cover every video/audio codec on every phone. The server attempts available hardware encoders, remembers failures for the current source, and falls back to libx264. Conversion uses software decoding so scaling and HDR filters work consistently across encoders.
@@ -141,6 +142,20 @@ Movi's native **Subtitles/Captions** button, **Settings → Subtitles** page, an
 A valid external subtitle file is attached to the current video regardless of filename. Its timestamps follow the video's clock; unrelated subtitles can show incorrect dialogue or timing. The app does not detect movie matches or automatically align subtitles. Unsupported or unconvertible files report an error and leave the existing captions available.
 
 JASSUB is retained as a libass renderer behind Movi's public renderer/overlay APIs. ASS/SSA styles, positioned signs, karaoke, and embedded font attachments are preserved. Other supported text formats are normalized to ASS. Bitmap subtitles remain unsupported in this version. Selected caption content and fonts begin loading as soon as track descriptors arrive and are cached per browser/source; extraction and renderer initialization never gate the first video frame. A player notice shows “Preparing captions…” followed by “Captions ready” for three seconds, with current status retained in the caption menu. Caption errors leave playback available.
+
+Embedded caption preparation reads container metadata and subtitle payloads selectively, skipping audio/video payloads. It does not upload or copy the entire video for captions, including on localhost. Small framing reads are still necessary; normal media probing and playback have their own read requirements. Subtitle indexes and extracted tracks are shared across viewers of the current source, and replacing the video cancels obsolete work.
+
+Indexed MKVs use `SeekHead` and subtitle `Cues` to jump directly to caption blocks. The index is accepted only when its unique, validated entries match the selected track's `NUMBER_OF_FRAMES` statistic, linked by its full 64-bit TrackUID. Incomplete, inconsistent, or unavailable indexes use complete structural extraction, which can take longer on episode/movie-sized files. Caption ranges travel in bounded batches instead of one relay round trip per tiny header, and caption and playback reads share the relay fairly. Fonts load independently of the complete caption block index. Replacing a video or opening another room starts fresh source-scoped work.
+
+| Container | Embedded text captions |
+| --- | --- |
+| MKV / Matroska | ASS, SSA, SubRip, and supported WebVTT mappings; styled captions and font attachments are retained. |
+| WebM | WebVTT subtitle/caption tracks. |
+| MP4 / M4V / MOV / 3GP / 3G2 | MPEG-4 timed text (`mov_text` / `tx3g`), QuickTime text, and WebVTT, including fragmented MP4. Track tables and fragment metadata locate caption samples directly. |
+| AVI / OpenDML | Text streams and GAB2-embedded ASS/SRT files, using indexes or RIFF chunk headers. |
+| Ogg / OGM / OGV | OGM text subtitle streams; page timing and continued packets are retained. |
+
+Support depends on the actual container layout and subtitle codec, rather than the filename extension. Unsupported or malformed layouts report a caption error and suggest adding an external SRT, VTT, ASS, or SSA file; they never fall back to a full-video caption scan. Other containers, including MPEG transport/program streams and ASF, require external captions. Bitmap subtitles, OCR, Kate, and captions carried inside the video bitstream are not supported. Caption availability does not affect video playback.
 
 Native/HLS engines use the adapter's clock bridge because Movi's embedded renderer hook only runs on its WASM pipeline. The caption canvas lives inside the player, including fullscreen. Native video Picture-in-Picture cannot include this separate subtitle surface; Document PiP support depends on the browser/player.
 
@@ -162,13 +177,15 @@ The performance targets are a first playable frame within **3 seconds** of selec
 
 In DevTools, inspect `document.getElementById('video').watchpartyMetrics` for `playbackMode` (`native`, `wasm`, or `compatibility`), first-picture, seek, and fallback timings and `fallbackReason`. Here `wasm` identifies Movi's WASM demuxer with WebCodecs video decoding. First-picture timing includes source preparation after registration; the file-picker interaction is excluded. Measure cold page/asset loading separately. Browser autoplay denial must not be classified as codec failure.
 
+`document.getElementById('video').watchpartyCaptionMetrics` records the selected caption's index mode (`cues`, `structural`, `samples`, or `external`) and extraction/conversion timings. Embedded-source metrics also include caption relay requests, ranges, transferred bytes, and bytes reused from the playback cache; counters are scoped to the current source. Caption responses expose the same snapshot in `X-WatchParty-Caption-Metrics`, with index/conversion durations in `Server-Timing`. Use these to distinguish indexing delays from renderer initialization. The local target for a representative indexed 24-minute episode is caption readiness within five seconds across first and later selections; unindexed files and slow storage/network paths can take longer.
+
 See the [WebCodecs validation results](docs/webcodecs-validation.md) for a three-run comparison of native, WebCodecs, and compatibility playback, resource measurements, and local Caddy HTTPS checks.
 
 ```sh
 npm test
 ```
 
-Tests cover room admission/isolation, range validation/cancellation/deduplication, stale generations, fast readiness independent of captions/encoder detection, local fallback negotiation, bounded continuous encoding, AAC timestamps and decoded audio across pause/resume, HEVC Main 10/E-AC-3 conversion, downscaling, encoder failure, seek acknowledgements, caption lifecycle, chat, voting, and proxy trust. Media tests create temporary fixtures and skip if FFmpeg is unavailable. DOM doubles test wiring, not visual decoding.
+Tests cover room admission/isolation, range validation/cancellation/deduplication, stale generations, fast readiness independent of captions/encoder detection, selective caption reads across supported container families, local fallback negotiation, bounded continuous encoding, AAC timestamps and decoded audio across pause/resume, HEVC Main 10/E-AC-3 conversion, downscaling, encoder failure, seek acknowledgements, caption lifecycle, chat, voting, and proxy trust. Media tests create temporary fixtures and skip if FFmpeg is unavailable. DOM doubles test wiring, not visual decoding.
 
 For release testing, use real desktop Chrome/Edge/Firefox/Safari, Android Chrome, and iPhone/iPad Safari. Check visible motion and audible audio for H.264/AAC MP4, HEVC MKV, VP9/AV1, multichannel/unusual audio, 4K/HDR conversion, and styled ASS. Test cold/warm startup, uncached seeks, fullscreen captions, autoplay gestures, and mixed direct/compatibility viewers in one room.
 

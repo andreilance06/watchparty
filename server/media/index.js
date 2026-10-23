@@ -45,7 +45,7 @@ function createMediaService({ state, config, encoderPromise, broadcast }) {
     return { ...subtitle, id: crypto.randomUUID(), fileName: `captions_${nextCaption++}.ass` };
   }
 
-  async function prepareMedia(sourcePath, externalCaptions = []) {
+  async function prepareMedia(sourcePath, externalCaptions = [], sourceReader) {
     stop();
     probeController = new AbortController();
     const controller = probeController;
@@ -54,6 +54,7 @@ function createMediaService({ state, config, encoderPromise, broadcast }) {
     state.hlsDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "watchparty-hls-"));
     if (oldDirectory) removeTempDirectory(oldDirectory);
     const version = state.mediaVersion;
+    subtitlesService.setSource(sourceReader);
     try {
       const probe = await probeMedia(sourcePath, config.ffmpegPath, controller.signal, state.fileName);
       if (version !== state.mediaVersion || !state.mediaPath || !state.hlsDirectory) return;
@@ -69,6 +70,18 @@ function createMediaService({ state, config, encoderPromise, broadcast }) {
       state.mediaReady = true;
       state.mediaProcessing = false;
       broadcast(sessionState(state, "source"));
+      // Some legacy subtitle streams are absent from FFmpeg's short probe.
+      // Discover them without holding up the first frame or extracting payloads.
+      subtitlesService.discover().then((discovered) => {
+        if (version !== state.mediaVersion || controller.signal.aborted) return;
+        const missing = discovered.filter((track) => !probe.subtitles.some((original) =>
+          original.streamId != null ? original.streamId === track.streamId : original.map === track.map));
+        const additions = missing.slice(0, Math.max(0, 16 - state.captionTracks.length))
+          .map(assignCaption).map((track) => subtitlesService.register(track, version));
+        if (!additions.length) return;
+        state.captionTracks.push(...additions);
+        broadcast({ type: "captions-updated", mediaVersion: version, captions: state.captionTracks });
+      }).catch(() => {}); // Selected unsupported tracks report their own caption error.
     } catch (error) {
       if (version !== state.mediaVersion) return;
       state.mediaProcessing = false;
@@ -144,6 +157,7 @@ function createMediaService({ state, config, encoderPromise, broadcast }) {
     cancelSegmentJobs: segments.cancel,
     restartStream: segments.restart,
     waitForCaption: subtitlesService.wait,
+    captionMetrics: subtitlesService.metrics,
     waitForFonts: subtitlesService.waitForFonts,
     fontFiles: subtitlesService.fontFiles
   };

@@ -625,12 +625,21 @@ test("browser host serves exact file ranges and caption controls use the active 
   const socket = browser.sockets[0];
   socket.open();
   assert.equal(socket.url, "ws://localhost:3000/rooms/room/source");
-  assert.deepEqual(socket.sent[0], { type: "source-attach", sourceId: "source", token: "secret" });
+  assert.deepEqual(socket.sent[0], { type: "source-attach", sourceId: "source", token: "secret", capabilities: ["batch-reads-v1"] });
   socket.receive({ type: "source-read", requestId: 7, fileId: registration.video.id, offset: 3, length: 4 });
   await flush();
   const frame = socket.sent.at(-1);
   assert.equal(new DataView(frame.buffer).getUint32(0), 7);
   assert.equal(Buffer.from(frame.subarray(4)).toString(), "3456");
+  socket.receive({ type: "source-read-batch", requestId: 70, fileId: registration.video.id,
+    ranges: [{ offset: 8, length: 2 }, { offset: 0, length: 3 }, { offset: 5, length: 1 }] });
+  await flush();
+  assert.equal(new DataView(socket.sent.at(-1).buffer).getUint32(0), 70);
+  assert.equal(Buffer.from(socket.sent.at(-1).subarray(4)).toString(), "890125");
+  socket.receive({ type: "source-read-batch", requestId: 71, fileId: registration.video.id,
+    ranges: [{ offset: 0, length: 1 }, { offset: 9, length: 2 }] });
+  await flush();
+  assert.deepEqual(socket.sent.at(-1), { type: "source-error", requestId: 71 });
   socket.receive({ type: "source-read", requestId: 8, fileId: registration.video.id, offset: 9, length: 100 });
   await flush();
   assert.deepEqual(socket.sent.at(-1), { type: "source-error", requestId: 8 });
@@ -674,6 +683,44 @@ test("browser host serves exact file ranges and caption controls use the active 
   files.disconnect();
   assert.equal(nextSocket.readyState, 3);
   assert.deepEqual(errors, []);
+});
+
+test("browser batch reads validate all ranges and bound file operations to four", async () => {
+  const browser = createBrowserDouble();
+  const { createHostFiles } = await browser.load("js/host-files.js");
+  const sent = [], pending = [];
+  let active = 0, peak = 0, operations = 0;
+  const file = { name: "episode.mkv", size: 1024 * 1024, type: "video/x-matroska", slice(start, end) {
+    operations++;
+    return { arrayBuffer: () => new Promise(resolve => {
+      active++; peak = Math.max(peak, active);
+      pending.push(() => { active--; resolve(new Uint8Array(end - start).fill(start % 256).buffer); });
+    }) };
+  } };
+  const files = createHostFiles({ send: message => { sent.push(message); return true; }, report() {} });
+  files.setRole("host"); files.chooseVideo();
+  const chooser = browser.document.body.children.at(-1); chooser.files = [file]; chooser.dispatch("change"); await flush();
+  const registered = sent.at(-1);
+  files.handleMessage({ type: "source-registered", requestId: registered.requestId, sourceId: "batch", token: "secret", relayPath: "/source" }); await flush();
+  const socket = browser.sockets[0]; socket.open();
+  const message = (requestId, ranges) => ({ type: "source-read-batch", requestId, fileId: registered.video.id, ranges });
+  for (const ranges of [[], Array(65).fill({ offset: 0, length: 1 }), [{ offset: 0, length: 1 }, { offset: -1, length: 1 }],
+    [{ offset: 0, length: 256 * 1024 }, { offset: 0, length: 1 }]]) {
+    socket.receive(message(90, ranges)); await flush();
+    assert.equal(socket.sent.at(-1).type, "source-error");
+  }
+  assert.equal(operations, 0, "invalid batches cannot trigger even their valid ranges");
+  socket.receive(message(91, Array.from({ length: 12 }, (_, index) => ({ offset: index, length: 1 })))); await flush();
+  assert.equal(active, 4);
+  while (pending.length) { pending.splice(0).forEach(resolve => resolve()); await flush(); }
+  assert.equal(peak, 4);
+  assert.deepEqual([...socket.sent.at(-1).subarray(4)], Array.from({ length: 12 }, (_, index) => index));
+  socket.receive(message(92, Array.from({ length: 12 }, (_, index) => ({ offset: index, length: 1 })))); await flush();
+  const before = operations;
+  files.disconnect();
+  pending.splice(0).forEach(resolve => resolve()); await flush();
+  assert.equal(operations, before, "source replacement discards queued reads");
+  assert.equal(active, 0);
 });
 
 test("live caption edits preserve viewer choice and playback without recreating the source", async () => {

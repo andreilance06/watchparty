@@ -57,16 +57,18 @@ async function serveHostFiles(peer, origin, video, captions = [], options = {}) 
   ws.on("error", () => {});
   ws.on("message", (raw) => {
     const message = JSON.parse(raw.toString());
-    if (message.type !== "source-read") return;
-    reads.push(message);
+    if (!["source-read", "source-read-batch"].includes(message.type)) return;
+    const ranges = message.ranges || [{ offset: message.offset, length: message.length }];
+    for (const range of ranges) reads.push({ ...message, ...range });
     const bytes = files.get(message.fileId);
-    const frame = Buffer.alloc(4 + message.length);
+    const frame = Buffer.alloc(4 + ranges.reduce((sum, range) => sum + range.length, 0));
     frame.writeUInt32BE(message.requestId);
-    bytes.copy(frame, 4, message.offset, message.offset + message.length);
+    let at = 4;
+    for (const range of ranges) { bytes.copy(frame, at, range.offset, range.offset + range.length); at += range.length; }
     ws.send(frame);
   });
   await new Promise((resolve, reject) => { ws.once("open", resolve); ws.once("error", reject); });
-  ws.send(JSON.stringify({ type: "source-attach", sourceId: registered.sourceId, token: registered.token }));
+  ws.send(JSON.stringify({ type: "source-attach", sourceId: registered.sourceId, token: registered.token, capabilities: ["batch-reads-v1"] }));
   return { ws, reads, files, declare, sourceId: registered.sourceId };
 }
 

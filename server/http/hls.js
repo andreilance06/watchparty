@@ -35,6 +35,11 @@ function createHlsHandler({ state, config, media }) {
         finally { res.removeListener("close", abort); }
       } else if (/^captions_\d+\.ass$/.test(relative)) {
         await media.waitForCaption(relative);
+        const metrics = media.captionMetrics?.(relative);
+        if (metrics && !res.destroyed) {
+          res.setHeader("Server-Timing", `caption-index;dur=${(metrics.indexMs || 0).toFixed(1)}, caption-convert;dur=${(metrics.conversionMs || 0).toFixed(1)}`);
+          res.setHeader("X-WatchParty-Caption-Metrics", JSON.stringify(metrics));
+        }
       } else if (font) {
         await media.waitForFonts();
       }
@@ -52,7 +57,7 @@ function createHlsHandler({ state, config, media }) {
       }
       serveFile(req, res, filePath);
     } catch (error) {
-      if (!res.headersSent) { res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8", "Retry-After": "1" }); res.end("The stream is temporarily unavailable. Check the host's file connection."); }
+      if (!res.headersSent) { res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8", "Retry-After": "1" }); res.end(/^captions_\d+\.ass$/.test(relative) ? error.message : "The stream is temporarily unavailable. Check the host's file connection."); }
     }
   }
 
