@@ -42,6 +42,7 @@ function createSession() {
     nextSuggestionId: 1,
     hlsDirectory: null,
     selectedEncoder: "Detecting hardware",
+    transcodeInfo: null,
     playback: createPlayback(),
     shuttingDown: false
   };
@@ -70,6 +71,7 @@ function sessionState(state, syncMode = "tick") {
     mediaInfo: state.mediaInfo,
     fileName: state.mediaPath ? state.fileName || path.basename(state.mediaPath) : null,
     duration: state.mediaDuration, encoder: state.selectedEncoder,
+    ...(state.transcodeInfo ? { transcodeInfo: state.transcodeInfo } : {}),
     paused: state.playback.paused, time: currentTime(state), playbackRate: state.playback.rate,
     syncMode
   };

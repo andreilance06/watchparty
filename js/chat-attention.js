@@ -1,6 +1,6 @@
 const REVEAL_MS = 4000;
 
-export function createChatAttention({ elements }) {
+export function createChatAttention({ elements, notifications }) {
   const { video, chatMessages, fullscreenChatToggle, fullscreenChatLabel, fullscreenChatUnread } = elements;
   const sound = createNotificationSound();
   let active = false, chatVisible = true, atLatest = true, unread = 0;
@@ -80,6 +80,7 @@ export function createChatAttention({ elements }) {
       const wasShown = chatShown();
       const entering = nextActive && !active;
       active = nextActive;
+      notifications?.setFullscreen(active);
       chatVisible = nextVisible;
       if (!wasShown && chatShown()) onShown?.();
       refresh();
@@ -89,7 +90,8 @@ export function createChatAttention({ elements }) {
     },
     setAtLatest(value) { atLatest = value; refresh(); },
     onChatShown(handler) { onShown = handler; },
-    receiveMessage() {
+    receiveMessage(message) {
+      if (active && message) notifications?.receiveChat(message);
       const away = !windowFocused();
       const hidden = !chatShown();
       if (hidden || away || !atLatest || !latestVisible()) {

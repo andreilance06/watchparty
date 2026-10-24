@@ -29,7 +29,7 @@ Its objectives are to keep playback synchronized, make group interaction availab
 | HTML, CSS, JavaScript | Page structure, responsive styles, and browser interactions. |
 | Node.js and the `ws` package | HTTP server, rooms, and real-time WebSocket messages. |
 | Movi Player and WebCodecs | Browser playback and video controls. |
-| FFmpeg and HLS | Media inspection and compatibility streaming. |
+| ffprobe, FFmpeg, and HLS | Structured media inspection, processing, and compatibility streaming. |
 | JASSUB | Subtitle rendering, including styled ASS/SSA captions. |
 | Wikipedia MediaWiki API | Optional movie search, metadata, and poster sources; no API key is required. |
 | Git and GitHub | Version history, development branches, and integration of group contributions. |
@@ -50,7 +50,7 @@ Prerequisites: Git, Node.js 18 or newer with npm, and a modern browser. The serv
    cd watchparty
    ```
 
-3. Install the dependencies. The `ffmpeg-static` package downloads the FFmpeg executable during installation:
+3. Install the dependencies. The `ffmpeg-static` and `@derhuerst/ffprobe-static` packages provide bundled FFmpeg and ffprobe executables:
 
    ```sh
    npm install
@@ -64,7 +64,11 @@ Prerequisites: Git, Node.js 18 or newer with npm, and a modern browser. The serv
 
 5. Open `http://localhost:3000` in your browser. Stop the server with **Ctrl+C** when finished.
 
-On Windows, if PowerShell blocks `npm.ps1`, use `npm.cmd install` and `npm.cmd start` instead. If FFmpeg's download is unavailable, install a compatible executable and set `FFMPEG_PATH` to its path before starting the server.
+On Windows, if PowerShell blocks `npm.ps1`, use `npm.cmd install` and `npm.cmd start` instead. If a bundled download is unavailable, install a compatible executable and set `FFMPEG_PATH` or `FFPROBE_PATH` to its path before starting the server.
+
+At startup, the server compares FFmpeg executables from `FFMPEG_PATH` and `PATH`, preferring complete GPU processing capabilities before partial acceleration and codec/filter coverage. Ties prefer `FFMPEG_PATH`, then PATH order. Candidates must support the app's software compatibility and caption conversion paths. If none qualify, the server uses bundled FFmpeg. The chosen path, version, and selection reason appear in the terminal; changing installations requires a server restart.
+
+ffprobe is discovered independently using `FFPROBE_PATH`, `PATH`, and its bundled fallback. Usable external candidates are ranked by relevant demuxer/decoder support, then overall inspection coverage; ties prefer `FFPROBE_PATH`, then PATH order. Both executables are required. All probing uses ffprobe JSON, including duration, streams, captions, fonts, and HDR metadata. FFmpeg handles conversion, extraction, thumbnails, and encoding; a failed probe reports an error without starting a second scan through FFmpeg.
 
 For another device on the same network, open one of the LAN addresses printed by the server; `localhost` on that device refers to the device itself. Allow the server through the firewall if necessary. Use [trusted HTTPS](docs/https.md) for LAN and public access to enable WebCodecs on viewers' devices. HTTP still supports native files and compatibility streaming. Keep the Node.js server running; opening `index.html` directly does not provide rooms or shared playback.
 
@@ -129,6 +133,7 @@ The host starts movie polls from the chatroom. An active poll stays pinned above
 - The server permits two concurrent compatibility encoder processes across all rooms by default. Set `WATCHPARTY_MAX_ENCODERS` to a positive integer to change this limit. At capacity, Auto can reuse an eligible active rendition; an unavailable manual selection shows a local busy notice and retains current playback. Necessary HLS bootstrap fragments are also subject to this limit.
 - Server transcoding still reads the original from its browser provider. Lower output quality helps viewer downloads, but cannot fix a provider upload too slow to supply that original. A local notice identifies sustained provider starvation; no separate speed-test upload or browser-side transcoding is performed.
 - Each device independently chooses original-file playback or compatibility streaming. Supported MP4/WebM sources use native decoding; other suitable sources use Movi's WASM demuxer and WebCodecs. Original-file playback preserves source resolution.
+- Original HDR requires an HDR display and a positive, smooth Media Capabilities assessment for the source's codec, color gamut, transfer function, and audio. Missing APIs, unknown metadata, and checks exceeding 500 ms use SDR compatibility. HDR currently uses verified native playback with MP4 codec metadata; WASM/canvas and unverified dynamic HDR formats use SDR compatibility. Display changes and foreground return recheck support independently for each viewer, including manual Original selections. All transcoded renditions remain SDR.
 - Fragmented and hybrid MP4s use their validated tail fragment index for server probing, compatibility encoding, and seeking. The full timeline comes from track and final-fragment timing, including when the initial header reports zero duration. Native-compatible MP4s still use native playback; fragmented MP4s that would require Movi's sequential WASM demuxer use compatibility streaming instead. Caption discovery reuses the track metadata and does not walk every fragment when there are no subtitles.
 - Preparation has a shared 32 MiB read budget and a 30-second deadline. Missing or invalid indexes use metadata-only structural inspection within those limits; unindexed compatibility startup has the same limits until its first segment is published. Exceeding a limit stops the work and asks for a seekable remux rather than retrying the scan with another encoder. Normal playback after startup follows the existing bounded segment window.
 - WebCodecs selection requires a secure context, smooth browser video decoding, and supported audio at the source's actual channel count and sample rate. Silent videos need only `VideoDecoder`. Video and audio checks share a 500 ms deadline; timeouts and standalone WASM video decoding use compatibility streaming.
@@ -137,12 +142,13 @@ The host starts movie polls from the chatroom. An active poll stays pinned above
 - The server publishes the full seekable timeline after probing metadata, without waiting for encoder detection or caption extraction.
 - Compatibility segments use a fixed frame count near two seconds. Each requested rendition uses a continuous encoder shared by its viewers, retaining AAC state across boundaries and pauses. A private loopback upload sink grants permission before each segment body, bounding production to the shared playhead plus two segments while playing and the target while paused. A paused seek near a segment end may also decode the next fragment; preceding preroll and fragment zero support HLS initialization. Seeks replace stream generations and discard retired files; hls.js loading is suspended during a pause.
 - Host seeks are acknowledged with a new playback revision. Old ticks and HLS recovery seeks cannot reset the room clock. Compatibility clients reload the acknowledged generation while preserving pause, speed, and caption selection.
+- Seeks retain the last available video frame and keep the requested position and known duration visible through stream replacement. The frame is released once the current player presents the target and synchronization settles. Rapid seeks retain only one snapshot; source removal, errors, and a ten-second timeout clear it.
 - Direct streams reuse a bounded 16 MiB byte cache and share concurrent reads. HTTP backpressure, cancelled requests, stale source generations, and room membership apply to original bytes as well as generated media.
 - Playback-path switches are local to a viewer and preserve the shared timestamp, pause state, speed, and caption choice. They do not replace the room's source or send synthetic play/pause actions.
 - Paused and background-tab time does not count toward playback stalls. If compatibility playback fails, the affected browser attempts one local reload per selected video at the current shared position, preserving pause, speed, and captions. Reconnection and replacement loading each have a ten-second limit; failures then show an error without changing the room clock.
 - Movi's measured stutter warnings trigger compatibility fallback for hardware and software decoding alike. Browsers may decode supported codecs in software; suitable smooth browser decoding still qualifies for WebCodecs playback.
 
-FFmpeg/HLS remain the compatibility path because browser decoding alone cannot reliably cover every video/audio codec on every phone. The server attempts available hardware encoders, remembers failures for the current source, and falls back to libx264. Conversion uses software decoding so scaling and HDR filters work consistently across encoders.
+FFmpeg/HLS remain the compatibility path because browser decoding alone cannot reliably cover every video/audio codec on every phone. The server attempts hardware decoding, GPU scaling and HDR-to-SDR tone mapping, and hardware encoding with NVIDIA CUDA/NVENC, Intel QSV, AMD AMF/D3D11, or Apple VideoToolbox where supported. NVIDIA HDR processing can use Vulkan/libplacebo; direct GPU frame sharing is preferred, with explicit frame transfers when driver interoperability fails. Unsupported GPU stages fall back independently to CPU processing, retaining working hardware encoding before falling back to libx264. Failures are remembered per source and pipeline, including across seeks. Audio processing remains on the CPU. Encoder status identifies the actual processing stages.
 
 ## Captions and controls
 
@@ -217,6 +223,8 @@ For release testing, use real desktop Chrome/Edge/Firefox/Safari, Android Chrome
 Third-party distributions are bundled locally; replace generated distributions as a unit rather than editing them. Movi Player **0.4.1** (slim JS/WASM) is covered by `vendor/MOVI_PLAYER_LICENSE.txt`; JASSUB **2.5.16** and its worker/WASM assets are covered by `vendor/jassub/LICENSE.txt`.
 
 The hls.js pause/resume bridge uses Movi 0.4.1's internal stream-wrapper loader because Movi has no public adaptive-loader pause API. This dependency is isolated in `js/player/compatibility-buffer.js`; verify its integration when upgrading Movi.
+
+`js/player/seek-presentation.js` isolates Movi 0.4.1's UI clock, seek-intent, and disposal hooks. It preserves the controls during replacement without changing the media clock used for synchronization, and holds a bounded canvas snapshot through Movi's public overlay API. Verify paused/playing seeks and source replacement against the real renderer when upgrading Movi.
 
 `js/player/native-quality-menu.js` isolates the quality Settings hooks, including menu placement when viewer seeking is disabled. `js/player/adaptive-quality.js` observes completed downloads and the pinned hls.js fragment-loading bridge. Verify these integrations and native mobile Settings when upgrading Movi; vendor distributions remain unchanged.
 

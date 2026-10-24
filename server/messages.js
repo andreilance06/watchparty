@@ -173,7 +173,8 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
         send(ws, { type: "compatibility-ready", requestId: message.requestId, mediaVersion: state.mediaVersion,
           playbackRevision: state.playbackRevision, streamGeneration: state.streamGeneration,
           url: snapshot.compatibilityUrl, time: snapshot.time, paused: snapshot.paused, playbackRate: snapshot.playbackRate,
-          ...selected, ...(selected ? { segmentSeconds: media.segmentSeconds?.() || segmentSchedule(state).seconds } : {}) });
+          ...(selected || (snapshot.transcodeInfo ? { transcodeInfo: snapshot.transcodeInfo } : {})),
+          ...(selected ? { segmentSeconds: media.segmentSeconds?.() || segmentSchedule(state).seconds } : {}) });
         break;
       }
       case "quality-selection":

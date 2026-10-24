@@ -4,6 +4,7 @@ const os = require("os");
 const crypto = require("crypto");
 const { createPlayback, sessionState } = require("../state");
 const { probeMedia } = require("./probe");
+const { isoVideoCodec } = require("./video-codec");
 const { writePlaylists, segmentSchedule } = require("./playlists");
 const { removeTempDirectory } = require("./temp-files");
 const { createSegmentService } = require("./segments");
@@ -49,6 +50,7 @@ function createMediaService({ state, config, encoderPromise, broadcast, thumbnai
     state.mediaReady = false;
     state.mediaProcessing = true;
     state.selectedEncoder = "Detecting hardware";
+    state.transcodeInfo = null;
     state.playback = createPlayback();
     const snapshot = sessionState(state, "source");
     broadcast(snapshot);
@@ -83,12 +85,13 @@ function createMediaService({ state, config, encoderPromise, broadcast, thumbnai
       }
       subtitlesService.setSource(sourceReader ? { ...sourceReader, isoMetadata: () => metadata } : null);
       probeLease = sourceReader?.openLease?.(budget);
-      const probe = await probeMedia(probeLease?.url || sourcePath, config.ffmpegPath, budget.signal, state.fileName, { inputArgs: timeline?.inputArgs });
+      const probe = await probeMedia(probeLease?.url || sourcePath, config.ffprobePath, budget.signal, state.fileName,
+        { inputArgs: timeline?.inputArgs, durationFallback: timeline?.durationEnd });
       if (timeline) probe.duration = timeline.durationEnd - Math.min(0, probe.start);
       if (version !== state.mediaVersion || !state.mediaPath || !state.hlsDirectory) return;
       state.selectedEncoder = "Direct playback";
       state.mediaDuration = probe.duration;
-      state.mediaInfo = probe.info;
+      state.mediaInfo = { ...probe.info, videoCodecString: isoVideoCodec(metadata) };
       state.mediaInputArgs = timeline?.inputArgs || [];
       state.openMediaLease = sourceReader?.openLease || null;
       if (metadata) state.mediaInfo.container = { family: "iso-bmff", fragmented: metadata.fragmented, indexed: Boolean(timeline?.indexed) };
@@ -107,7 +110,7 @@ function createMediaService({ state, config, encoderPromise, broadcast, thumbnai
       state.mediaReady = true;
       state.mediaProcessing = false;
       broadcast(sessionState(state, "source"));
-      // Some legacy subtitle streams are absent from FFmpeg's short probe.
+      // Some legacy subtitle streams are absent from ffprobe's short inspection.
       // Discover them without holding up the first frame or extracting payloads.
       subtitlesService.discover().then((discovered) => {
         if (version !== state.mediaVersion || controller.signal.aborted) return;
@@ -122,11 +125,12 @@ function createMediaService({ state, config, encoderPromise, broadcast, thumbnai
     } catch (error) {
       if (version !== state.mediaVersion) return;
       state.mediaProcessing = false;
-      broadcast({ type: "media-error", ...(budget.error ? { code: budget.error.code } : {}), message: budget.error?.message || "The selected video could not be prepared. Check that the host's file is available and supported by FFmpeg." });
+      broadcast({ type: "media-error", ...(budget.error ? { code: budget.error.code } : {}), message: budget.error?.message || "The selected video could not be prepared. Check that the host's file is available and supported by ffprobe." });
     } finally { probeLease?.close(); budget.finish(); }
   }
 
   function reset() {
+    state.transcodeInfo = null;
     if (state.mediaPath || state.hlsDirectory || state.mediaProcessing) state.mediaVersion += 1;
     state.playbackRevision += 1;
     state.mediaPath = null;

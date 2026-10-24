@@ -4,20 +4,13 @@ const http = require("node:http");
 const crypto = require("node:crypto");
 const { pipeline } = require("node:stream/promises");
 const { spawn } = require("node:child_process");
-const { encoderAttempts, CPU_ENCODER } = require("../encoders");
+const { CPU_ENCODER } = require("../encoders");
+const { compatibilityFilter, transcodeAttempts } = require("./transcode");
 const { currentTime, sessionState } = require("../state");
 const { segmentSchedule, streamDirectory, writePlaylists } = require("./playlists");
 const { isWatchPartyTempDirectory } = require("./temp-files");
 const { createPreparationBudget } = require("./preparation-budget");
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-
-function compatibilityFilter(info = {}, profile) {
-  const filters = [];
-  if (info.hdr) filters.push("zscale=t=linear:npl=100", "format=gbrpf32le", "zscale=p=bt709", "tonemap=tonemap=hable:desat=0", "zscale=t=bt709:m=bt709:r=tv");
-  filters.push(profile ? `scale=${profile.width}:${profile.height}` :
-    "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2", "format=yuv420p");
-  return filters.join(",");
-}
 
 function renditionEncoderArgs(encoder, profile) {
   if (!profile) return encoder.args;
@@ -131,7 +124,10 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
           if (!job.announced) {
             job.announced = true;
             state.selectedEncoder = encoder.label;
-            broadcast({ type: "transcode-info", encoder: encoder.label });
+            state.transcodeInfo = { encoder: encoder.label, sessionId: state.sessionId, mediaVersion: job.version,
+              streamGeneration: job.sharedGeneration,
+              ...(state.rendition ? { renditionId: state.rendition.id, renditionGeneration: job.generation } : {}) };
+            broadcast({ type: "transcode-info", ...state.transcodeInfo });
           }
         } else {
           res.writeContinue();
@@ -183,12 +179,13 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
       }
       if (job.preparationBudget) job.inputLease = state.openMediaLease?.(job.preparationBudget);
       const input = job.inputLease?.url || state.mediaPath;
-      const args = ["-hide_banner", "-loglevel", "warning", "-y", ...encoder.input,
+      const args = ["-hide_banner", "-loglevel", "warning", "-y", ...encoder.init, ...encoder.input,
         "-ss", start.toFixed(9), ...(input.startsWith("http:") ? ["-rw_timeout", "30000000"] : []), ...(state.mediaInputArgs || []),
         "-i", input, "-t", duration.toFixed(9), "-map", "0:v:0", "-map", "0:a:0?",
-        "-vf", `${compatibilityFilter(state.mediaInfo, state.rendition)},fps=${job.schedule.fps}`, "-c:v", encoder.name, ...renditionEncoderArgs(encoder, state.rendition),
+        "-vf", encoder.filter, "-c:v", encoder.name, ...renditionEncoderArgs(encoder, state.rendition),
         ...(state.rendition ? ["-b:v", String(state.rendition.bitrate)] : []),
-        "-maxrate", String(state.rendition?.bitrate || 8000000), "-bufsize", String((state.rendition?.bitrate || 8000000) * 2), "-pix_fmt", "yuv420p", "-bf", "0",
+        "-maxrate", String(state.rendition?.bitrate || 8000000), "-bufsize", String((state.rendition?.bitrate || 8000000) * 2), "-pix_fmt", encoder.pixelFormat, "-bf", "0",
+        ...(state.mediaInfo?.hdr ? ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv"] : []),
         "-r", String(job.schedule.fps), "-profile:v", "high", "-level:v", "4.1",
         "-g", String(job.schedule.frames), "-keyint_min", String(job.schedule.frames),
         "-force_key_frames", `expr:gte(n,n_forced*${job.schedule.frames})`, "-sc_threshold", "0",
@@ -233,21 +230,22 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
     const schedule = segmentSchedule(state, config.segmentSeconds);
     const index = bootstrap ? 0 : state.compatibilityStartIndex || 0;
     const job = { index, end: bootstrap ? 1 : schedule.count, schedule, version: state.mediaVersion,
-      generation: state.streamGeneration || 0, epoch: cancelEpoch, directory: streamDirectory(state), published: 0 };
+      generation: state.streamGeneration || 0, sharedGeneration: state.roomState?.streamGeneration ?? state.streamGeneration ?? 0,
+      epoch: cancelEpoch, directory: streamDirectory(state), published: 0 };
     fs.mkdirSync(job.directory, { recursive: true });
     jobs.add(job);
     job.promise = (async () => {
       if (failureVersion !== job.version) { failedEncoders.clear(); recoveryFailures = 0; failureVersion = job.version; }
       let lastError;
-      for (const encoder of encoderAttempts(preferredEncoder).filter(e => !e.input.length)) {
-        if (failedEncoders.has(encoder.name)) continue;
+      for (const encoder of transcodeAttempts(preferredEncoder, state.mediaInfo, state.rendition, schedule.fps)) {
+        if (failedEncoders.has(encoder.id)) continue;
         try { await encode(job, encoder); return; }
         catch (error) {
           lastError = error;
           if (error.code === "QUALITY_BUSY") throw error;
           if (error.code === "MEDIA_PREPARATION_LIMIT") break;
           if (!valid(job)) throw error;
-          if (encoder.name !== "libx264") failedEncoders.add(encoder.name);
+          if (encoder.name !== "libx264") failedEncoders.add(encoder.id);
           if (job.published && recoveryFailures++ < 2) {
             // Never change published bytes or splice encoder timelines.
             restart(true);

@@ -193,7 +193,7 @@ export function createChat({ elements, state: session, send, attention }) {
       comments.delete(oldId);
     }
     afterAppend();
-    if (!self) attention.receiveMessage();
+    if (!self) attention.receiveMessage({ commentId, name, message });
   }
 
   function acceptName(name, invalid = false) {

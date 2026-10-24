@@ -7,7 +7,8 @@ const { execFileSync, spawnSync } = require('node:child_process');
 const { createApplication } = require('../server/application');
 const { CPU_ENCODER } = require('../server/encoders');
 const { connectPeer, serveHostFiles } = require('./helpers/peer');
-const { parseMediaInfo } = require('../server/media/probe');
+const { parseProbe, probeMedia } = require('../server/media/probe');
+const { resolveFfprobe } = require('../server/ffprobe');
 const { compatibilityFilter } = require('../server/media/segments');
 const { streamDirectory } = require('../server/media/playlists');
 const { segmentSchedule } = require('../server/media/playlists');
@@ -110,9 +111,18 @@ test('quality renditions are lazy, shared by settings, isolated across switches,
   const [first,duplicate]=await Promise.all([fetch(base+segment).then(r=>r.arrayBuffer()),fetch(base+segment).then(r=>r.arrayBuffer())]);
   assert.deepEqual(Buffer.from(first),Buffer.from(duplicate));
   assert.equal(app.config.encoderBudget.snapshot().active,1);
+  const pipeline = await viewer.next('transcode-info', message => message.renditionId === low.rendition.id);
+  assert.equal(pipeline.sessionId, ready.sessionId);
+  assert.equal(pipeline.mediaVersion, ready.mediaVersion);
+  assert.equal(pipeline.streamGeneration, ready.streamGeneration);
+  assert.equal(pipeline.renditionGeneration, low.renditionGeneration);
+  const cached = await select(another, 'cached-low', '360', 750000);
+  const { type: pipelineType, ...pipelineDetails } = pipeline;
+  assert.equal(pipelineType, 'transcode-info');
+  assert.deepEqual(cached.transcodeInfo, pipelineDetails, 'cached/shared selections return the confirmed pipeline without starting another encoder');
   const entry=app.media.rendition(low.rendition.id);
-  const probe=spawnSync(source.ffmpeg,['-hide_banner','-i',path.join(streamDirectory(entry.state),'segment_000000.ts')],{encoding:'utf8',windowsHide:true});
-  assert.match(probe.stderr,/640x360/);assert.match(probe.stderr,/Audio: aac/);
+  const probe=await probeMedia(path.join(streamDirectory(entry.state),'segment_000000.ts'),app.config.ffprobePath,undefined,'segment.ts');
+  assert.equal(probe.info.width,640);assert.equal(probe.info.height,360);assert.equal(probe.info.audioCodec,'aac');
   viewer.send({type:'quality-selection',mediaVersion:ready.mediaVersion,renditionId:low.rendition.id});
   another.send({type:'quality-selection',mediaVersion:ready.mediaVersion,renditionId:low.rendition.id});
   const high=await select(viewer,'high','720',3000000);
@@ -191,12 +201,22 @@ test('compatibility requests are local to a viewer and one run publishes bounded
   assert.deepEqual(Buffer.from(outputs[0]),Buffer.from(outputs[1]));
   for(let i=0;i<100&&!fs.existsSync(path.join(streamDirectory(app.state),'segment_000002.ts'));i++)await delay(20);
   assert.equal(fs.readdirSync(streamDirectory(app.state)).filter(f=>f.endsWith('.ts')).length,3);
-  await host.next('transcode-info');
+  const pipeline = await host.next('transcode-info');
+  assert.equal(pipeline.sessionId, ready.sessionId);
+  assert.equal(pipeline.mediaVersion, ready.mediaVersion);
+  assert.equal(pipeline.streamGeneration, ready.streamGeneration);
+  viewer.send({type:'compatibility-request',requestId:'cached-default',mediaVersion:ready.mediaVersion});
+  const cached = await viewer.next('compatibility-ready', message => message.requestId === 'cached-default');
+  const { type: pipelineType, ...pipelineDetails } = pipeline;
+  assert.equal(pipelineType, 'transcode-info');
+  assert.deepEqual(cached.transcodeInfo, pipelineDetails);
   assert.equal(host.messages.filter(m=>m.type==='transcode-info').length,1,'overlapping fragment requests share one continuous encoding run');
-  const probe=spawnSync(source.ffmpeg,['-hide_banner','-i',path.join(streamDirectory(app.state),'segment_000000.ts')],{encoding:'utf8',windowsHide:true});
-  assert.match(probe.stderr,/Video: h264/);
-  assert.match(probe.stderr,/Audio: aac.*48000 Hz, stereo/);
-  assert.match(probe.stderr,/320x180/,'lower resolution is preserved');
+  const probe=await probeMedia(path.join(streamDirectory(app.state),'segment_000000.ts'),app.config.ffprobePath,undefined,'segment.ts');
+  assert.equal(probe.info.videoCodec,'h264');
+  assert.equal(probe.info.audioCodec,'aac');assert.equal(probe.info.sampleRate,48000);assert.equal(probe.info.channels,2);
+  assert.equal(probe.info.width,320);assert.equal(probe.info.height,180,'lower resolution is preserved');
+  app.media.reset();
+  assert.equal(app.state.transcodeInfo, null, 'source removal clears the confirmed pipeline');
 });
 
 test('compatibility output downscales above 1080p and survives a failed hardware encoder',async t=>{
@@ -208,12 +228,13 @@ test('compatibility output downscales above 1080p and survives a failed hardware
   const response=await fetch(base+ready.compatibilityUrl.replace('master.m3u8','segment_000000.ts'));
   assert.equal(response.status,200);
   await response.arrayBuffer();
-  const probe=spawnSync(source.ffmpeg,['-hide_banner','-i',path.join(streamDirectory(app.state),'segment_000000.ts')],{encoding:'utf8',windowsHide:true});
-  assert.match(probe.stderr,/1920x1080/);
+  const probe=await probeMedia(path.join(streamDirectory(app.state),'segment_000000.ts'),app.config.ffprobePath,undefined,'segment.ts');
+  assert.equal(probe.info.width,1920);assert.equal(probe.info.height,1080);
 });
 
 test('metadata includes HDR and audio information, and compatibility tone maps before encoding',()=>{
-  const info=parseMediaInfo('Stream #0:0: Video: hevc (Main 10), yuv420p10le(tv, bt2020nc/bt2020/smpte2084), 3840x2160, 24 fps\nStream #0:1: Audio: dts, 48000 Hz, 5.1','film.mkv');
+  const info=parseProbe({format:{duration:'12'},streams:[{codec_type:'video',codec_name:'hevc',pix_fmt:'yuv420p10le',color_transfer:'smpte2084',color_primaries:'bt2020',color_space:'bt2020nc',width:3840,height:2160,avg_frame_rate:'24/1'},
+    {codec_type:'audio',codec_name:'dts',sample_rate:'48000',channels:6}]},'film.mkv').info;
   assert.equal(info.hdr,true);assert.equal(info.bitDepth,10);assert.equal(info.audioCodec,'dts');
   assert.match(compatibilityFilter(info),/tonemap=.*scale=/);
 });
@@ -290,8 +311,7 @@ test('HDR compatibility conversion produces decodable SDR H264 output',async t=>
 test('fractional-rate segments keep continuous AAC across backpressure, pause, and resume', async t => {
   const { createSegmentService } = require('../server/media/segments');
   const source = fixture(t, { video: 'libx265', fps: '24000/1001', audio: 'eac3' }); if (!source) return;
-  const metadata = spawnSync(source.ffmpeg, ['-hide_banner', '-i', path.join(source.directory, 'source.mkv')], { encoding: 'utf8', windowsHide: true });
-  const info = { ...parseMediaInfo(metadata.stderr, 'source.mkv'), fps: 24000 / 1001 };
+  const { info } = await probeMedia(path.join(source.directory, 'source.mkv'), (await resolveFfprobe()).path, new AbortController().signal, 'source.mkv');
   assert.equal(info.videoCodec, 'hevc'); assert.equal(info.bitDepth, 10);
   assert.equal(info.audioCodec, 'eac3'); assert.equal(info.channels, 6);
   const state = { mediaVersion: 1, streamGeneration: 0, hlsDirectory: source.directory,

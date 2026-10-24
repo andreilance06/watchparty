@@ -1,37 +1,19 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { parseSubtitleStreams } = require('../server/media/probe');
+const { parseProbe } = require('../server/media/probe');
 const { createSubtitleService } = require('../server/media/subtitles');
 
 test('subtitle names and dispositions come from their own stream metadata', () => {
-  const output = `Input #0, matroska,webm, from 'movie.mkv':
-  Metadata:
-    title           : Container title
-  Duration: 00:00:12.00, start: 0.000000
-  Stream #0:0: Video: h264, yuv420p, 640x360
-    Metadata:
-      title           : Video title
-  Stream #0:1(jpn): Subtitle: ass (default) (forced)
-    Metadata:
-      title           : Signs & Songs 日本語
-      handler_name    : Less specific name
-  Stream #0:2[0x3](eng): Subtitle: subrip
-    Metadata:
-      HANDLER_NAME    : English dialogue
-  Stream #0:3: Subtitle: webvtt
-    Metadata:
-      encoder         : Lavc
-  Stream #0:4(fra): Subtitle: hdmv_pgs_subtitle (default)
-    Metadata:
-      title           : Bitmap track
-  Stream #0:5(eng): Audio: aac, 48000 Hz, stereo
-    Metadata:
-      title           : Audio title
-  Stream #0:6(eng): Subtitle: mov_text
-    Metadata:
-      title           : Commentary
-`;
-  const tracks = parseSubtitleStreams(output, '/movie.mkv');
+  const output = { format: { duration: '12', tags: { title: 'Container title' } }, streams: [
+    { index: 0, codec_type: 'video', codec_name: 'h264', tags: { title: 'Video title' } },
+    { index: 1, codec_type: 'subtitle', codec_name: 'ass', tags: { title: 'Signs & Songs 日本語', language: 'jpn', handler_name: 'Less specific name' }, disposition: { default: 1, forced: 1 } },
+    { index: 2, id: '0x3', codec_type: 'subtitle', codec_name: 'subrip', tags: { handler_name: 'English dialogue', language: 'eng' } },
+    { index: 3, codec_type: 'subtitle', codec_name: 'webvtt', tags: { encoder: 'Lavc' } },
+    { index: 4, codec_type: 'subtitle', codec_name: 'hdmv_pgs_subtitle', tags: { title: 'Bitmap track', language: 'fra' } },
+    { index: 5, codec_type: 'audio', codec_name: 'aac', tags: { title: 'Audio title' } },
+    { index: 6, codec_type: 'subtitle', codec_name: 'mov_text', tags: { title: 'Commentary', language: 'eng' } }
+  ] };
+  const tracks = parseProbe(output, 'movie.mkv', '/movie.mkv').subtitles;
   assert.equal(tracks.length, 4);
   assert.deepEqual(tracks.map(track => [track.map, track.label, track.lang, track.default, track.forced]), [
     ['0:1', 'Signs & Songs 日本語', 'jpn', true, true],

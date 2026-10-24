@@ -2,8 +2,45 @@ import { MoviPlayer } from "../../vendor/movi-player.js";
 
 const audioCodecs = { aac: "mp4a.40.2", mp3: "mp3", opus: "opus", vorbis: "vorbis", flac: "flac" };
 
+export function hdrDisplaySupported() {
+  try {
+    return Boolean(globalThis.matchMedia?.("(video-dynamic-range: high)").matches || globalThis.matchMedia?.("(dynamic-range: high)").matches);
+  } catch { return false; }
+}
+
+async function hdrPlayback(info) {
+  // HDR presentation by the WASM/canvas renderer is not established. Only
+  // native playback is eligible, and only with explicit source color metadata.
+  const transferFunction = { smpte2084: "pq", "arib-std-b67": "hlg" }[info.colorTransfer];
+  const colorGamut = { bt2020: "rec2020", smpte432: "p3" }[info.colorPrimaries];
+  const api = globalThis.navigator?.mediaCapabilities;
+  if (!hdrDisplaySupported() || !api?.decodingInfo || !transferFunction || !colorGamut || !info.videoCodecString ||
+    info.dynamicHdr || !["video/mp4", "video/webm"].includes(info.mime)) return "compatibility";
+  const contentType = `${info.mime}; codecs="${info.videoCodecString}"`;
+  if (!document.createElement("video").canPlayType?.(contentType)) return "compatibility";
+  if (info.hasAudio && !audioCodecs[info.audioCodec]) return "compatibility";
+  let timer;
+  try {
+    const configuration = { type: "file", video: { contentType, width: info.width, height: info.height,
+      bitrate: info.bitrate || 8000000, framerate: info.fps || 30, transferFunction, colorGamut } };
+    if (info.hdrMetadataType) configuration.video.hdrMetadataType = info.hdrMetadataType;
+    if (info.hasAudio) configuration.audio = { contentType: `${info.mime.replace("video/", "audio/")}; codecs="${audioCodecs[info.audioCodec]}"`,
+      channels: String(info.channels || 2), samplerate: info.sampleRate || 48000, bitrate: 192000 };
+    const result = await Promise.race([Promise.resolve().then(() => api.decodingInfo(configuration)),
+      new Promise(resolve => { timer = setTimeout(() => resolve(null), 500); })]);
+    // Check the returned configuration too: older implementations can silently
+    // ignore HDR dictionary fields and answer only the basic codec question.
+    const checked = result?.configuration?.video;
+    return result?.supported && result.smooth && checked?.transferFunction === transferFunction && checked?.colorGamut === colorGamut &&
+      (!info.hdrMetadataType || checked.hdrMetadataType === info.hdrMetadataType) &&
+      hdrDisplaySupported() ? "native" : "compatibility";
+  } catch { return "compatibility"; }
+  finally { clearTimeout(timer); }
+}
+
 export async function choosePlayback(info) {
   if (!info) return "compatibility";
+  if (info.hdr) return hdrPlayback(info);
   if (info.videoCodec === "h264" && (info.bitDepth > 8 || /(?:444|422)/.test(info.pixelFormat || ""))) return "compatibility";
   const native = document.createElement("video");
   const nativeVideo = info.bitDepth <= 8 && (

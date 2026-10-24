@@ -63,7 +63,7 @@ function createRenditionService({ state, config, encoderPromise, broadcast }) {
     generations.set(profile.id, initialGeneration);
     Object.assign(local, { roomState: state, rendition: profile, streamGeneration: initialGeneration,
       compatibilityStartIndex: Math.max(0, Math.floor(currentTime(state) / segmentSchedule(state, config.segmentSeconds).seconds) - 1),
-      hlsDirectory: path.join(state.hlsDirectory, `r_${profile.id}_${initialGeneration}`), selectedEncoder: "Compatibility playback" });
+      hlsDirectory: path.join(state.hlsDirectory, `r_${profile.id}_${initialGeneration}`), selectedEncoder: "Compatibility playback", transcodeInfo: null });
     const entry = { profile, state: local, usedAt: Date.now(), retired: false, idleAt: null };
     entry.service = createSegmentService({ state: local, config, encoderPromise, broadcast(message) {
       if (message.type === "session-state") sendReplacement(entry);
@@ -92,7 +92,8 @@ function createRenditionService({ state, config, encoderPromise, broadcast }) {
     const viewer = viewers.get(clientId) || {};
     Object.assign(viewer, { pending: profile.id, pendingAt: Date.now(), lastSeen: Date.now() });
     viewers.set(clientId, viewer);
-    return { rendition: profile, url: url(entry), renditionGeneration: entry.state.streamGeneration };
+    return { rendition: profile, url: url(entry), renditionGeneration: entry.state.streamGeneration,
+      ...(entry.state.transcodeInfo ? { transcodeInfo: entry.state.transcodeInfo } : {}) };
   }
   function commit(clientId, id) {
     const viewer = viewers.get(clientId);

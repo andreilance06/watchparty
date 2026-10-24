@@ -572,3 +572,51 @@ test('play immediately after seeking survives the seek acknowledgement', async (
  assert.equal(sync.accept(ack),true);sync.apply(ack,false);await flush();
  assert.equal(video.paused,false);assert.equal(sent.at(-1).syncMode,'play');assert.equal(sent.at(-1).playbackRevision,2);
 });
+
+test('sync speed adjustments and restoration only update the bottom indicator, while manual speed keeps its OSD', async () => {
+ const b=createBrowserDouble(),video=b.elements.get('video'),sent=[],osd=[];
+ let rate=1;
+ video.showOSD=(icon,text)=>osd.push(text);
+ Object.defineProperty(video,'playbackRate',{get:()=>rate,set:value=>{
+  rate=value;video.showOSD('stopwatch',`${value}x`);video.dispatch('ratechange');
+ }});
+ video.readyState=4;video.paused=false;video.currentTime=10;
+ const {createPlaybackSync}=await b.load('js/player/sync.js');
+ const state={role:'viewer',mediaVersion:1,activeMediaUrl:'/stream',permissions:{playbackRate:true}};
+ const sync=createPlaybackSync({elements:{video,syncStatus:b.elements.get('syncStatus')},state,send:m=>sent.push(m)});
+ video.addEventListener('ratechange',()=>sync.broadcast('rate'));
+ sync.apply({mediaVersion:1,time:10.3,paused:false,playbackRate:1,syncMode:'tick'},false);await flush();
+ assert.equal(video.customControls.get('watchparty-playback-rate').label,'1.03×');
+ assert.equal(sync.isAppliedRate(),true);
+ sync.apply({mediaVersion:1,time:10,paused:false,playbackRate:1,syncMode:'tick'},false);await flush();
+ assert.equal(video.customControls.get('watchparty-playback-rate').label,'1×');
+ assert.deepEqual(osd,[]);assert.deepEqual(sent,[]);
+ video.playbackRate=1.5;
+ assert.deepEqual(osd,['1.5x']);
+ assert.equal(video.customControls.get('watchparty-playback-rate').label,'1.5×');
+ assert.equal(sent.at(-1).syncMode,'rate');
+ video.showOSD('volume','50%');assert.equal(osd.at(-1),'50%');
+});
+
+test('replacement waits for wrapper readiness and its seek even when native video already reports ready', async () => {
+ const b=createBrowserDouble(),video=b.elements.get('video'),native=b.document.createElement('video');
+ Object.assign(native,{readyState:4,currentTime:0,paused:true,seeking:false});
+ video.readyState=0;video.player={getVideoElement:()=>native};
+ const targets=[];
+ Object.defineProperty(video,'currentTime',{get:()=>native.currentTime,set:time=>{
+  targets.push(time);if(video.readyState){native.currentTime=time;video.isSeeking=true;}
+ }});
+ video.play=async()=>{assert.equal(video.isSeeking,false);native.paused=false;};
+ const {createPlaybackSync}=await b.load('js/player/sync.js');
+ const state={role:'host',mediaVersion:1,sourceSwitching:true};
+ const sync=createPlaybackSync({elements:{video,syncStatus:b.elements.get('syncStatus')},state,send:()=>{}});
+ sync.apply({mediaVersion:1,time:30,paused:false,playbackRate:1},true);await flush();
+ assert.deepEqual(targets,[],'native readiness must not queue a seek against a loading wrapper');
+ assert.equal(state.sourceSwitching,true);
+ video.readyState=4;sync.update();await flush();
+ assert.deepEqual(targets,[30]);assert.equal(native.paused,true);
+ assert.equal(state.suppressVideoEvents,true,'wrapper seek still holds transport even without native seeking');
+ video.isSeeking=false;sync.update();await flush();
+ assert.equal(native.paused,false);assert.equal(native.currentTime,30);
+ assert.equal(state.sourceSwitching,false);
+});

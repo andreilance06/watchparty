@@ -2,6 +2,7 @@ export function createParty({ elements }) {
   const { reactionFeed, floatingReactions } = elements;
   const animations = new Map();
   const notices = new Map();
+  let fullscreen = false;
   const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
 
   function removeFloatingReaction(reaction) {
@@ -33,10 +34,24 @@ export function createParty({ elements }) {
     const reaction = document.createElement("p");
     reaction.className = "reaction-item";
     reaction.textContent = `${message.emoji} ${message.name}`;
-    reactionFeed.appendChild(reaction);
-    notices.set(reaction, setTimeout(() => removeNotice(reaction), 4000));
-    while (reactionFeed.children.length > 5) removeNotice(reactionFeed.children[0]);
+    appendNotice(reaction);
     showFloatingReaction(message.emoji);
+  }
+
+  function appendNotice(notice) {
+    reactionFeed.appendChild(notice);
+    notices.set(notice, setTimeout(() => removeNotice(notice), fullscreen ? 6000 : 4000));
+    while (reactionFeed.children.length > 5) removeNotice(reactionFeed.children[0]);
+  }
+
+  function receiveChat({ name, message }) {
+    if (!fullscreen) return;
+    const card = document.createElement("div");
+    card.className = "reaction-item chat-notification";
+    const sender = document.createElement("strong"); sender.textContent = name;
+    const text = document.createElement("p"); text.textContent = message;
+    card.append(sender, text);
+    appendNotice(card);
   }
 
   function removeNotice(reaction) {
@@ -44,5 +59,10 @@ export function createParty({ elements }) {
     notices.delete(reaction);
     reaction.remove();
   }
-  return { receiveReaction };
+  return { receiveReaction, receiveChat, setFullscreen(active) {
+    fullscreen = active;
+    if (!active) for (const notice of notices.keys()) {
+      if (notice.classList.contains("chat-notification")) removeNotice(notice);
+    }
+  } };
 }

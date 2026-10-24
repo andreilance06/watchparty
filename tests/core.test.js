@@ -6,7 +6,6 @@ const path = require("node:path");
 const { createSession, currentTime, sessionState } = require("../server/state");
 const { sanitizeDisplayName, displayNameKey, createNameRegistry } = require("../server/names");
 const { createMessageHandler } = require("../server/messages");
-const { parseDuration } = require("../server/media/probe");
 const { encoderAttempts, CPU_ENCODER } = require("../server/encoders");
 const { createSegmentService } = require("../server/media/segments");
 const { isWatchPartyTempDirectory } = require("../server/media/temp-files");
@@ -87,13 +86,12 @@ test("viewer play/pause is shared, while seeking and speed changes are host-only
   assert.equal(state.playback.rate, 1.5);
 });
 
-test("GPU fallback order and media duration parsing are preserved", () => {
+test("GPU fallback order is preserved", () => {
   const hardware = { name: "h264_nvenc", input: ["-hwaccel", "cuda"], args: [], label: "NVENC" };
   const attempts = encoderAttempts(hardware);
   assert.equal(attempts[0], hardware);
   assert.deepEqual(attempts[1].input, []);
   assert.equal(attempts[2], CPU_ENCODER);
-  assert.equal(parseDuration("Duration: 01:02:03.500, start: 0"), 3723.5);
 });
 
 test("suggestions are normalized, deduplicated, bounded, and validated", () => {

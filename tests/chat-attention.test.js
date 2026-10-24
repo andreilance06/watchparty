@@ -48,6 +48,34 @@ const hide = async browser => {
   toggle(browser).click();
 };
 
+test('fullscreen cards show accepted incoming text and reactions, stay bounded, expire and clear on exit', async () => {
+  const b = await setup(), feed = b.el('reactionFeed');
+  b.add('outside'); assert.equal(feed.children.length, 0);
+  await b.el('videoShell').requestFullscreen();
+  b.add('visible', { name: '<b>Friend</b>', message: '<img src=x onerror=alert(1)>' });
+  assert.equal(feed.children.length, 1);
+  const card = feed.children[0];
+  assert.equal(card.children[0].textContent, '<b>Friend</b>');
+  assert.equal(card.children[1].textContent, '<img src=x onerror=alert(1)>');
+  assert.equal(card.children[1].children.length, 0, 'message content is text');
+  b.add('visible'); b.add('mine', { clientId: 'self' });
+  b.socket.receive({ type: 'error', message: 'System notice' });
+  assert.equal(feed.children.length, 1);
+  toggle(b).click(); b.add('hidden');
+  assert.equal(feed.children.length, 2, 'cards also appear with the full panel hidden');
+  b.socket.receive({ type: 'reaction', emoji: '❤️', name: 'Friend' });
+  assert.equal(feed.children.at(-1).textContent, '❤️ Friend');
+  for (let i=0;i<8;i++) b.add(`burst-${i}`);
+  assert.equal(feed.children.length, 5);
+  assert.equal(card.parentNode, null, 'oldest cards are evicted');
+  b.runTimers(4000); assert.equal(feed.children.length, 5);
+  b.runTimers(6000); assert.equal(feed.children.length, 0);
+  b.add('exit'); await b.document.exitFullscreen();
+  assert.equal(feed.children.length, 0);
+  await b.el('videoShell').requestFullscreen();
+  assert.equal(feed.children.length, 0, 'old messages do not replay');
+});
+
 test("fullscreen chat preference survives native, WebKit and fallback transitions until reload", async () => {
   const b = await setup();
   await hide(b);

@@ -1,7 +1,7 @@
 import { chooseAutomaticQuality, createQualityHysteresis } from "./quality-policy.js";
 import { createNativeQualityMenu } from "./native-quality-menu.js";
 
-export function createAdaptiveQuality({ video, session, send, switchSource, switchRendition, fail, report, surface }) {
+export function createAdaptiveQuality({ video, session, send, switchSource, switchRendition, fail, report, surface, validateOriginal, onRenditionReady }) {
   let source, engine, current, pending, serial = 0, throughput = 0, measuredAt = 0, demand = {}, blockedUntil = 0;
   let preferences = { quality: "auto", bitrate: "auto" }, warning = "", retryUsed = false, loading, loader;
   const hysteresis = createQualityHysteresis();
@@ -64,6 +64,25 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
     cancelPending();
     if (current?.id === profile.id && !recover) { preferences = { ...settings }; paint(reason); return; }
     if (profile.id === "source") {
+      if (source.mediaInfo?.hdr && validateOriginal) {
+        const attempt = pending = { target: profile, settings: { ...settings } };
+        paint(reason);
+        Promise.resolve().then(validateOriginal).then(choice => {
+          if (pending !== attempt) return;
+          pending = null;
+          engine = choice;
+          if (choice !== "native") {
+            const compatible = { quality: "auto", bitrate: settings.bitrate };
+            request(profileFor(compatible), compatible, "HDR playback is unavailable on this display");
+            return;
+          }
+          beginLoading(() => switchSource(choice)); changed(profile, settings, reason);
+        }).catch(() => {
+          if (pending !== attempt) return;
+          pending = null; updatePlayback("compatibility");
+        });
+        return;
+      }
       beginLoading(() => switchSource(engine)); changed(profile, settings, reason); return;
     }
     const requestId = `quality-${source.mediaVersion}-${++serial}`;
@@ -94,6 +113,7 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
     if ((message.playbackRevision ?? 0) < (session.playbackRevision ?? 0)) {
       request(attempt.target, attempt.settings, attempt.reason, true); return true;
     }
+    onRenditionReady?.(message);
     try {
       // This is the selected rendition's first real demand. Prepare just the
       // current fragment before replacing a working player; HLS reuses its cache.
@@ -202,7 +222,10 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
     }
     if (/decoder|capabil/.test(reason)) engine = "compatibility";
     blockedUntil = now() + 60000;
-    if (preferences.quality === "source") { warning = `${reason}. Choose Auto for compatible playback.`; paint(); fail(warning); return true; }
+    if (preferences.quality === "source") {
+      if (source.mediaInfo?.hdr) preferences = { quality: "auto", bitrate: preferences.bitrate };
+      else { warning = `${reason}. Choose Auto for compatible playback.`; paint(); fail(warning); return true; }
+    }
     request(profileFor(preferences), preferences, reason); return true;
   }
   function handle(message) {
@@ -222,7 +245,15 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
     }
     return false;
   }
-  return { enabled, reset, start, fallback, handle, settleLoading,
+  function updatePlayback(choice) {
+    engine = choice;
+    if (choice === "compatibility" && source?.mediaInfo?.hdr) {
+      cancelPending();
+      if (preferences.quality === "source") preferences = { quality: "auto", bitrate: preferences.bitrate };
+      request(profileFor(preferences), preferences, "HDR playback is unavailable on this display");
+    } else paint();
+  }
+  return { enabled, reset, start, fallback, handle, settleLoading, updatePlayback,
     waiting: () => Boolean(loading?.retiredPlayer && loading.retiredPlayer === video.player),
     managed: () => enabled() && Boolean(current || pending),
     refresh: () => {

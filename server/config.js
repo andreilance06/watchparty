@@ -29,6 +29,7 @@ function createConfig(overrides = {}) {
     trustProxy: process.env.TRUST_PROXY === "loopback" ? "loopback" : false,
     publicOrigin: process.env.PUBLIC_ORIGIN || "",
     ffmpegPath: resolveFfmpegPath(),
+    ffprobePath: null,
     ...overrides
   };
   if (!Number.isInteger(config.maxEncoders) || config.maxEncoders < 1) throw new Error("maxEncoders must be a positive integer.");

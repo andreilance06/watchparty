@@ -150,6 +150,57 @@
   font-size: .75rem;
 }
 
+body > .reaction-feed {
+  gap: .5rem;
+  max-width: min(22rem, calc(100vw - max(1rem, env(safe-area-inset-left)) - max(1rem, env(safe-area-inset-right))));
+}
+body > .reaction-feed .reaction-item {
+  box-sizing: border-box;
+  padding: .8rem 1.1rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.video-shell > .reaction-feed {
+  position: absolute;
+  top: calc(var(--chat-viewport-top, 0px) + max(1rem, env(safe-area-inset-top)));
+  bottom: auto;
+  right: max(1rem, env(safe-area-inset-right));
+  width: 360px;
+  max-width: calc(100% - max(1rem, env(safe-area-inset-left)) - max(1rem, env(safe-area-inset-right)));
+  max-height: calc(var(--chat-viewport-height, 100dvh) - 7rem);
+  overflow: hidden;
+  gap: .6rem;
+}
+.video-shell > .reaction-feed .reaction-item {
+  box-sizing: border-box;
+  width: 100%;
+  padding: .85rem 1rem;
+  border-color: rgba(255, 255, 255, .15);
+  border-radius: .65rem;
+  background: rgba(30, 31, 34, .92);
+  color: #f2f3f5;
+  font-family: var(--font-readable);
+  font-size: 16px;
+  line-height: 1.4;
+  backdrop-filter: blur(12px);
+}
+.chat-notification strong {
+  display: block;
+  margin-bottom: .25rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-notification p {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  margin: 0;
+}
+
 .floating-reactions {
   position: fixed;
   z-index: 20;

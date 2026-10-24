@@ -1,4 +1,5 @@
 const { spawn } = require("child_process");
+const { inspectFfmpeg } = require("./ffmpeg");
 
 const CPU_ENCODER = {
   name: "libx264", label: "CPU fallback (libx264)", input: [],
@@ -11,7 +12,7 @@ function testEncoder(ffmpegPath, name) {
       "-hide_banner", "-loglevel", "error", "-f", "lavfi",
       "-i", "color=c=black:s=256x256:d=0.05", "-frames:v", "1",
       "-c:v", name, "-f", "null", "-"
-    ], { windowsHide: true });
+    ], { windowsHide: true, stdio: "ignore" });
     let settled = false;
     const finish = (works) => { if (!settled) { settled = true; clearTimeout(timer); resolve(works); } };
     const timer = setTimeout(() => { child.kill(); finish(false); }, 5000);
@@ -20,10 +21,8 @@ function testEncoder(ffmpegPath, name) {
   });
 }
 
-async function detectVideoEncoder(ffmpegPath) {
-  if (process.env.WATCHPARTY_ENCODER) {
-    return { name: process.env.WATCHPARTY_ENCODER, label: process.env.WATCHPARTY_ENCODER, input: [], args: [] };
-  }
+async function detectVideoEncoder(ffmpegPath, capabilities) {
+  capabilities ||= await inspectFfmpeg(ffmpegPath).catch(() => null);
   const candidates = [
     {
       name: "h264_nvenc", label: "NVIDIA NVENC (h264_nvenc + CUDA decode)",
@@ -45,7 +44,16 @@ async function detectVideoEncoder(ffmpegPath) {
       input: ["-hwaccel", "videotoolbox"], args: ["-q:v", "80"]
     }
   ];
-  for (const candidate of candidates) if (await testEncoder(ffmpegPath, candidate.name)) return candidate;
+  if (process.env.WATCHPARTY_ENCODER) {
+    if (process.env.WATCHPARTY_ENCODER === "libx264") return CPU_ENCODER;
+    const forced = candidates.find(candidate => candidate.name === process.env.WATCHPARTY_ENCODER) ||
+      { name: process.env.WATCHPARTY_ENCODER, label: process.env.WATCHPARTY_ENCODER, input: [], args: [] };
+    return { ...forced, capabilities };
+  }
+  for (const candidate of candidates) {
+    if (capabilities && !capabilities.encoders.has(candidate.name)) continue;
+    if (await testEncoder(ffmpegPath, candidate.name)) return { ...candidate, capabilities };
+  }
   return CPU_ENCODER;
 }
 

@@ -1,11 +1,20 @@
 import { canControl } from "../permissions.js";
+import { createPlaybackRateDisplay } from "./playback-rate-display.js";
 
 export function createPlaybackSync({ elements, state: session, send }) {
   const { video, syncStatus } = elements;
+  const rateDisplay = createPlaybackRateDisplay(video);
   let sequence = 0, commandSequence = 0, pendingSeek, queuedTransport, queuedRate;
   let appliedRate;
   let cleanup = () => {}, applying = false, settle = () => {};
   const surface = () => video.player?.getHLSVideoElement?.() || video.player?.getVideoElement?.() || video;
+
+  function status(phase, paused = session.latestHostPaused ?? surface().paused) {
+    const label = phase || (session.role === "host" ? "You control playback" : paused ? "Paused" : "Synchronized with host");
+    const showEncoder = session.activeEncoder && (session.role === "host" || session.playbackMode === "compatibility") &&
+      (!phase || !["Compatibility playback", "Direct playback"].includes(session.activeEncoder));
+    syncStatus.textContent = `${label}${showEncoder ? ` • ${session.activeEncoder}` : ""}`;
+  }
 
   function cancel() {
     sequence++;
@@ -43,6 +52,7 @@ export function createPlaybackSync({ elements, state: session, send }) {
   }
 
   function apply(state, sourceChanged) {
+    sourceChanged ||= Boolean(session.sourceSwitching);
     if (queuedTransport && canControl(session, queuedTransport)) state = { ...state, paused: queuedTransport === "pause" };
     if (Number.isFinite(queuedRate) && canControl(session, "rate")) state = { ...state, playbackRate: queuedRate };
     const mode = state.syncMode || "tick";
@@ -60,10 +70,33 @@ export function createPlaybackSync({ elements, state: session, send }) {
       listeners.push(() => target.removeEventListener(type, fn));
     };
     cleanup = () => listeners.splice(0).forEach(remove => remove());
-    let initiated = false, setting = false;
+    const player = video.player;
+    let initiated = false, setting = false, resuming = false, transportApplied = false;
+    const applyTransport = () => {
+      const active = surface();
+      if (state.paused) {
+        if (!active.paused) video.pause();
+      } else if (active.paused) {
+        resuming = true;
+        Promise.resolve(video.play()).catch(() => {
+          if (token === sequence) syncStatus.textContent = "Tap fullscreen once if your browser blocks playback";
+        }).finally(() => {
+          resuming = false;
+          if (token === sequence) finish();
+        });
+      }
+    };
     const finish = () => {
       const active = surface();
-      if (!applying || token !== sequence || setting || !initiated || active.seeking || active.readyState < 2) return;
+      if (!applying || token !== sequence || setting || resuming || !initiated || active !== native || video.player !== player ||
+          active.seeking || active.readyState < 2 || sourceChanged && (video.isLoading || video.readyState < 1 || video.isSeeking)) return;
+      // Movi's initial startat seek can finish after metadata/canplay. Resume
+      // only once its initialization and seek have settled, still suppressed.
+      if (sourceChanged && !transportApplied) {
+        transportApplied = true;
+        applyTransport();
+        if (resuming) return;
+      }
       cleanup();
       applying = false;
       settle = () => {};
@@ -74,6 +107,10 @@ export function createPlaybackSync({ elements, state: session, send }) {
     };
     const applyPlayback = () => {
       if (initiated || token !== sequence || state.mediaVersion !== session.mediaVersion) return;
+      // Native metadata can precede Movi's ready state. Its currentTime setter
+      // holds seeks while loading, so applying against native readiness alone
+      // can finish the switch before the restored position ever takes effect.
+      if (sourceChanged && (video.isLoading || video.readyState < 1)) return;
       initiated = true; setting = true;
       const active = surface();
       const difference = Number.isFinite(state.time) ? state.time - active.currentTime : 0;
@@ -85,16 +122,10 @@ export function createPlaybackSync({ elements, state: session, send }) {
         targetRate += Math.max(-0.05, Math.min(0.05, difference * 0.1));
       }
       appliedRate = targetRate;
-      if (Math.abs(video.playbackRate - targetRate) > 0.005) video.playbackRate = targetRate;
+      if (Math.abs(video.playbackRate - targetRate) > 0.005) rateDisplay.apply(targetRate);
       if (Number.isFinite(state.time) && Math.abs(difference) > threshold) video.currentTime = state.time;
-      const hostStatus = `You control playback${session.activeEncoder ? ` • ${session.activeEncoder}` : ""}`;
-      if (state.paused) {
-        if (!active.paused) video.pause();
-        syncStatus.textContent = session.role === "host" ? hostStatus : "Paused";
-      } else {
-        syncStatus.textContent = session.role === "host" ? hostStatus : "Synchronized with host";
-        if (active.paused) video.play().catch(() => { syncStatus.textContent = "Tap fullscreen once if your browser blocks playback"; });
-      }
+      status(undefined, state.paused);
+      if (!sourceChanged) applyTransport();
       setting = false;
       queueMicrotask(finish);
     };
@@ -102,6 +133,9 @@ export function createPlaybackSync({ elements, state: session, send }) {
     listen(native, "canplay", finish);
     listen(native, "loadeddata", finish);
     settle = () => {
+      // A real player may appear after an apply began against the host element.
+      // Let the controller reapply to that player instead of retaining suppression.
+      if (surface() !== native || video.player !== player) { cancel(); return; }
       if (!initiated && surface().readyState >= 1) applyPlayback();
       else finish();
     };
@@ -145,5 +179,5 @@ export function createPlaybackSync({ elements, state: session, send }) {
   // Drift correction must never become a viewer's shared speed command.
   function isAppliedRate() { return Number.isFinite(appliedRate) && Math.abs(video.playbackRate - appliedRate) <= 0.005; }
 
-  return { apply, accept, cancel, reject, isAppliedRate, update: () => settle(), isApplying: () => applying, broadcast: broadcastVideoState };
+  return { apply, accept, cancel, reject, status, isAppliedRate, update: () => settle(), isApplying: () => applying, broadcast: broadcastVideoState };
 }

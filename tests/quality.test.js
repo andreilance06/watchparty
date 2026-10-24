@@ -58,7 +58,7 @@ test('adaptation requires repeated evidence and sustained upgrade headroom', asy
   assert.equal(h.evaluate({now:42000,current:low,candidate:high}),true);
 });
 
-async function harness({ supported = true, observe = false } = {}) {
+async function harness({ supported = true, observe = false, role = 'viewer' } = {}) {
   const b = createBrowserDouble(); let clock=1000;
   let resources;
   if(observe)b.context.PerformanceObserver=class{constructor(callback){resources=callback;}observe(){}};
@@ -69,7 +69,7 @@ async function harness({ supported = true, observe = false } = {}) {
   const create = b.document.createElement;
   b.document.createElement = tag => { const node=create(tag); if(tag==='video')node.canPlayType=()=>supported?'probably':''; return node; };
   for(const cls of ['movi-quality-list','movi-settings-menu']) { const node=create('div'); node.className=cls; video.shadowRoot.appendChild(node); }
-  const state={role:'viewer',clientId:'viewer',mediaVersion:0}, sent=[], reports=[];
+  const state={role,clientId:role,mediaVersion:0}, sent=[], reports=[];
   const player=createPlayer({elements,state,send:m=>{sent.push(m);return true;},report:m=>reports.push(m),files:{setRole(){},chooseVideo(){},chooseCaptions(){}}});
   const snapshot={mediaVersion:1,playbackRevision:1,streamGeneration:0,hasVideo:true,paused:true,time:17,playbackRate:1.25,duration:200,
     originalUrl:'/media/original?v=1',compatibilityUrl:'/hls/master.m3u8?v=1&g=0',captions:[],
@@ -151,4 +151,88 @@ test('ready state from a retired player cannot complete a quality switch and rep
   h.change('720');await h.reply();
   h.b.runTimers(100);assert.equal(h.state.sourceSwitching,true,'retired readiness is ignored');
   h.b.runTimers(10000);assert.match(h.reports.at(-1),/could not start playback/);
+});
+
+// Model Movi's asynchronous player replacement and transport announcements,
+// rather than the already-ready video used by the simpler menu tests above.
+async function asynchronousPlayer(h) {
+  h.video.readyState = 4; h.b.runTimers(100); await flush();
+  let active, plays = 0;
+  const replace = (loading = true) => {
+    active = h.b.document.createElement('video');
+    Object.assign(active, { currentTime: Number(h.video.getAttribute('startat')), paused: true,
+      seeking: false, readyState: loading ? 1 : 4 });
+    h.video.player = { getHLSVideoElement: () => active };
+    // Capture this particular native element so retired events stay retired.
+    const native = active;
+    h.video.player.getHLSVideoElement = () => native;
+    h.video.isLoading = loading;
+    return native;
+  };
+  replace(false);
+  Object.defineProperties(h.video, {
+    paused: { get: () => active.paused },
+    currentTime: { get: () => active.currentTime, set: time => { active.currentTime = time; } },
+    readyState: { get: () => active.readyState }
+  });
+  h.video.play = async () => {
+    assert.equal(h.video.isLoading, false, 'resume waits for initialization');
+    assert.equal(active.seeking, false, 'resume waits for the replacement seek');
+    plays++;
+    h.video.dispatch('play'); active.paused = false;
+  };
+  h.video.pause = () => {
+    if (!active.paused) { h.video.dispatch('pause'); active.paused = true; }
+  };
+  const settle = async () => {
+    active.readyState = 4; active.seeking = false; h.video.isLoading = false;
+    h.b.runTimers(100); await flush();
+  };
+  return { replace, settle, current: () => active, plays: () => plays };
+}
+
+test('host quality and bitrate switches preserve unacknowledged local play/pause and the actual playhead', async () => {
+  const h = await harness({ role: 'host' }), native = await asynchronousPlayer(h);
+  await h.video.play(); native.current().currentTime = 32;
+  h.change('720');
+  assert.equal(h.video.paused, false, 'preparation keeps the current player running');
+  await h.reply();
+  assert.equal(h.video.getAttribute('startat'), '32', 'use the host clock instead of the old paused snapshot');
+  const retired = native.current(), playing = native.replace();
+  retired.dispatch('canplay'); h.b.runTimers(100); await flush();
+  assert.equal(h.video.paused, true, 'metadata alone cannot resume a loading player');
+  playing.readyState = 4; playing.seeking = true; h.b.runTimers(100); await flush();
+  assert.equal(h.state.suppressVideoEvents, true);
+  await native.settle();
+  assert.equal(h.video.paused, false);
+  assert.equal(h.video.playbackRate, 1.25);
+  assert.equal(h.state.sourceSwitching, false);
+  assert.deepEqual(h.sent.filter(m => m.type === 'video-state').map(m => m.syncMode), ['play']);
+
+  h.video.pause();
+  h.change(undefined, 1500000); await h.reply(); native.replace(); await native.settle();
+  assert.equal(h.video.paused, true, 'a paused quality switch remains paused');
+  await h.video.play(); native.current().currentTime = 44;
+  h.change('source'); native.replace(); await native.settle();
+  assert.equal(h.video.paused, false, 'returning to Original resumes too');
+  assert.equal(h.video.currentTime, 44);
+  assert.deepEqual(h.sent.filter(m => m.type === 'video-state').map(m => m.syncMode), ['play', 'pause', 'play']);
+});
+
+test('automatic viewer downgrade resumes and a newer room pause overrides replacement playback', async () => {
+  const h = await harness({ observe: true }), native = await asynchronousPlayer(h);
+  h.player.applySessionState({ ...h.snapshot, paused: false, syncMode: 'play' }); await flush();
+  native.current().buffered = { length: 1, start: () => 0, end: () => 100 };
+  h.resources([{name:'http://localhost/media/original?v=1',transferSize:100300,encodedBodySize:100000,responseStart:2000,responseEnd:2400}]);
+  h.advance(10000); h.b.runTimers(2000); h.advance(2000); h.b.runTimers(2000);
+  assert.equal(h.requests().at(-1).quality, '360');
+  assert.equal(h.video.paused, false);
+  await h.reply(); native.replace(); await native.settle();
+  assert.equal(h.video.paused, false);
+  h.change('720'); await h.reply(); native.replace();
+  h.player.applySessionState({ ...h.snapshot, paused: true, time: 48, syncMode: 'pause' });
+  await native.settle();
+  assert.equal(h.video.paused, true);
+  assert.equal(h.video.currentTime, 48);
+  assert.equal(h.sent.some(m => m.type === 'video-state'), false, 'replacement transport stays local');
 });

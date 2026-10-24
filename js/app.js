@@ -71,10 +71,10 @@ const connection = createConnection({
 });
 stopCurrentConnection = connection.dispose;
 initializeRoomControls(elements, { roomId, room: roomMetadata, onLeave: () => stopCurrentConnection() });
-const attention = createChatAttention({ elements });
+const party = createParty({ elements });
+const attention = createChatAttention({ elements, notifications: party });
 const chat = createChat({ elements, state, send: connection.send, attention });
 files = createHostFiles({ send: connection.send, report: chat.addSystemMessage });
-const party = createParty({ elements });
 const player = createPlayer({ elements, state, send: connection.send, report: chat.addSystemMessage, files, attention });
 const voting = createVoting({ elements, state, send: connection.send, report: chat.addSystemMessage });
 const participants = createParticipants({ elements, state, send: connection.send });
@@ -119,7 +119,7 @@ function handleMessage(message) {
       break;
     case "captions-updated": player.updateCaptions(message); break;
     case "compatibility-ready": player.applyCompatibility(message); break;
-    case "transcode-info": player.updateEncoder(message.encoder, message.renditionId); break;
+    case "transcode-info": player.updateEncoder(message); break;
     case "media-error": player.showMediaError(message.message); break;
     case "chat": chat.receive(message); break;
     case "name-updated":
