@@ -1,5 +1,6 @@
 import { createEmojiPicker } from "./emoji-picker.js";
 import { createMessageMenu } from "./message-menu.js";
+import { createClientId } from "./utils/client-id.js";
 
 const MAX_COMMENTS = 500;
 
@@ -135,7 +136,7 @@ export function createChat({ elements, state: session, send, attention }) {
   }
 
   function addChatMessage({ commentId, name, message, time, self, replyTo }) {
-    commentId ||= crypto.randomUUID();
+    commentId ||= createClientId();
     if (comments.has(commentId)) return;
     const article = document.createElement("article");
     article.className = `chat-message${self ? " self" : ""}`;
@@ -274,7 +275,7 @@ export function createChat({ elements, state: session, send, attention }) {
     event.preventDefault();
     const message = chatInput.value.trim();
     if (!message || pending) return;
-    const requestId = crypto.randomUUID();
+    const requestId = createClientId();
     pending = { requestId, draft: chatInput.value, replyTarget };
     if (send({ type: "chat", message, requestId, ...(replyTarget ? { replyToId: replyTarget.commentId } : {}) }) === false) {
       pending = null;

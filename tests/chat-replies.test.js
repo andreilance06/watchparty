@@ -1,6 +1,7 @@
 const { replyTo, openGlobalPicker } = require("./helpers/chat-actions");
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { randomFillSync } = require("node:crypto");
 const { createSession } = require("../server/state");
 const { createMessageHandler } = require("../server/messages");
 const { createBrowserDouble } = require("./helpers/browser");
@@ -38,8 +39,9 @@ test("replies use canonical snapshots, correlate errors, and expire with reactio
   assert.equal(sent.at(-1).code, "REPLY_UNAVAILABLE");
 });
 
-async function chatBrowser() {
+async function chatBrowser(overrides = {}) {
   const browser = createBrowserDouble();
+  Object.assign(browser.context, overrides);
   await browser.load("js/app.js");
   const socket = browser.sockets[0], el = id => browser.elements.get(id);
   socket.open();
@@ -49,6 +51,50 @@ async function chatBrowser() {
     return el("chatMessages").children.at(-1);
   };
   return { ...browser, socket, el, add };
+}
+
+for (const [environment, crypto] of [
+  ["getRandomValues only", { getRandomValues: bytes => randomFillSync(bytes) }],
+  ["no crypto API", undefined]
+]) {
+  test(`chat sends and replies without randomUUID (${environment})`, async () => {
+    const { socket, el, add } = await chatBrowser({ crypto });
+    const original = add("original");
+    const requestIds = new Set();
+    for (const replying of [false, true, false]) {
+      if (replying) replyTo(el, original);
+      el("chatInput").value = replying ? "  A reply  " : "  A message  ";
+      el("chatForm").dispatch("submit");
+      const request = socket.sent.at(-1);
+      assert.equal(request.type, "chat");
+      assert.equal(request.message, replying ? "A reply" : "A message");
+      assert.equal(request.replyToId, replying ? "original" : undefined);
+      assert.equal(typeof request.requestId, "string");
+      assert.ok(request.requestId.length > 0 && request.requestId.length <= 100);
+      assert.equal(requestIds.has(request.requestId), false);
+      requestIds.add(request.requestId);
+      assert.equal(el("chatInput").value, replying ? "  A reply  " : "  A message  ");
+      assert.equal(el("chatForm").getAttribute("aria-busy"), "true");
+      socket.receive({ ...request, commentId: `accepted-${requestIds.size}`, clientId: "self", name: "Me" });
+      assert.equal(el("chatInput").value, "");
+      assert.equal(el("chatForm").getAttribute("aria-busy"), null);
+      assert.equal(el("chatReplyPreview").hidden, true);
+      assert.equal(el("chatMessages").children.at(-1).querySelector("p").textContent, request.message);
+    }
+  });
+
+  test(`chat renders messages without comment IDs (${environment})`, async () => {
+    const { socket, el } = await chatBrowser({ crypto });
+    for (const message of ["First message", "Second message"]) {
+      socket.receive({ type: "chat", clientId: "other", name: "Friend", message });
+    }
+    const articles = el("chatMessages").querySelectorAll(".chat-message");
+    assert.equal(articles.length, 2);
+    assert.ok(articles[0].dataset.commentId);
+    assert.ok(articles[1].dataset.commentId);
+    assert.notEqual(articles[0].dataset.commentId, articles[1].dataset.commentId);
+    assert.equal(articles[1].querySelector("p").textContent, "Second message");
+  });
 }
 
 test("inline replies preserve drafts, replace targets, cancel, and clear only on accepted echo", async () => {
