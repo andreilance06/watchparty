@@ -4,13 +4,16 @@ const os = require("os");
 const crypto = require("crypto");
 const { createPlayback, sessionState } = require("../state");
 const { probeMedia } = require("./probe");
-const { writePlaylists } = require("./playlists");
+const { writePlaylists, segmentSchedule } = require("./playlists");
 const { removeTempDirectory } = require("./temp-files");
 const { createSegmentService } = require("./segments");
+const { createRenditionService } = require("./renditions");
+const { qualityOptions, BITRATES } = require("./quality");
 const { createSubtitleService } = require("./subtitles");
 
 function createMediaService({ state, config, encoderPromise, broadcast }) {
   const segments = createSegmentService({ state, config, encoderPromise, broadcast });
+  const renditions = createRenditionService({ state, config, encoderPromise, broadcast });
   const subtitlesService = createSubtitleService({ state, config });
   let probeController;
   let nextCaption = 0;
@@ -19,6 +22,7 @@ function createMediaService({ state, config, encoderPromise, broadcast }) {
   function stop() {
     probeController?.abort();
     segments.cancel();
+    renditions.stop();
     subtitlesService.stop();
   }
 
@@ -31,6 +35,7 @@ function createMediaService({ state, config, encoderPromise, broadcast }) {
     state.fileName = fileName;
     state.mediaDuration = 0;
     state.mediaInfo = null;
+    state.sourcePerformance = null;
     state.captionTracks = [];
     state.mediaReady = false;
     state.mediaProcessing = true;
@@ -61,6 +66,10 @@ function createMediaService({ state, config, encoderPromise, broadcast }) {
       state.selectedEncoder = "Direct playback";
       state.mediaDuration = probe.duration;
       state.mediaInfo = probe.info;
+      state.mediaInfo.sourceSize = sourceReader?.size || 0;
+      state.mediaInfo.bitrate = sourceReader?.size ? sourceReader.size * 8 / probe.duration : probe.info.bitrate || 0;
+      state.mediaInfo.qualityOptions = qualityOptions(state.mediaInfo);
+      state.mediaInfo.bitrateLimits = BITRATES;
       subtitlesService.setFonts(probe.fonts, version);
       const subtitles = [...probe.subtitles, ...externalCaptions].slice(0, 16).map(assignCaption);
       writePlaylists(state, config.segmentSeconds);
@@ -153,9 +162,16 @@ function createMediaService({ state, config, encoderPromise, broadcast }) {
     addCaptions,
     removeCaption,
     stop,
+    selectQuality: renditions.select,
+    commitQuality: renditions.commit,
+    touchQuality: renditions.touch,
+    releaseQuality: renditions.release,
+    rendition: renditions.get,
+    qualityDemand: renditions.demand,
+    segmentSeconds: () => segmentSchedule(state, config.segmentSeconds).seconds,
     ensureSegment: segments.ensure,
     cancelSegmentJobs: segments.cancel,
-    restartStream: segments.restart,
+    restartStream: (...args) => { segments.restart(...args); renditions.restart(); },
     waitForCaption: subtitlesService.wait,
     captionMetrics: subtitlesService.metrics,
     waitForFonts: subtitlesService.waitForFonts,

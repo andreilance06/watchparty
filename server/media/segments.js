@@ -10,11 +10,27 @@ const { segmentSchedule, streamDirectory, writePlaylists } = require("./playlist
 const { isWatchPartyTempDirectory } = require("./temp-files");
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-function compatibilityFilter(info = {}) {
+function compatibilityFilter(info = {}, profile) {
   const filters = [];
   if (info.hdr) filters.push("zscale=t=linear:npl=100", "format=gbrpf32le", "zscale=p=bt709", "tonemap=tonemap=hable:desat=0", "zscale=t=bt709:m=bt709:r=tv");
-  filters.push("scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2", "format=yuv420p");
+  filters.push(profile ? `scale=${profile.width}:${profile.height}` :
+    "scale=w='min(1920,iw)':h='min(1080,ih)':force_original_aspect_ratio=decrease:force_divisible_by=2", "format=yuv420p");
   return filters.join(",");
+}
+
+function renditionEncoderArgs(encoder, profile) {
+  if (!profile) return encoder.args;
+  // ICQ/CQP and VideoToolbox's quality mode can ignore a bandwidth budget.
+  // Select bitrate-based rate control for those encoders; x264 keeps CRF+VBV.
+  const qualityFlags = new Set(["-global_quality", "-q:v", "-qp_i", "-qp_p", "-qp_b"]);
+  if (encoder.name === "h264_amf") qualityFlags.add("-rc");
+  const args = [];
+  for (let index = 0; index < encoder.args.length; index++) {
+    if (qualityFlags.has(encoder.args[index])) index++;
+    else args.push(encoder.args[index]);
+  }
+  if (encoder.name === "h264_amf") args.push("-rc", "vbr_peak");
+  return args;
 }
 
 function createSegmentService({ state, config, encoderPromise, broadcast, spawnEncoder = spawn }) {
@@ -26,6 +42,7 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
     job.version === state.mediaVersion && job.generation === (state.streamGeneration || 0);
 
   function cancel() {
+    const retired = [...jobs].map(job => job.promise);
     cancelEpoch++;
     for (const job of jobs) {
       job.cancelled = true;
@@ -34,6 +51,7 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
       job.sink?.closeAllConnections();
     }
     jobs.clear();
+    return Promise.allSettled(retired);
   }
 
   function restart(recovery = false) {
@@ -47,7 +65,9 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
     writePlaylists(state, config.segmentSeconds);
     // Drain cancelled writes before reclaiming a retired generation. The
     // bootstrap fragment lives separately and remains available to native HLS.
-    if (isWatchPartyTempDirectory(parent) && path.dirname(directory) === parent && /^run_\d+$/.test(path.basename(directory))) {
+    const renditionDirectory = state.roomState && isWatchPartyTempDirectory(state.roomState.hlsDirectory) &&
+      path.dirname(parent) === state.roomState.hlsDirectory && /^r_\d+x\d+_\d+_\d+$/.test(path.basename(parent));
+    if ((isWatchPartyTempDirectory(parent) || renditionDirectory) && path.dirname(directory) === parent && /^run_\d+$/.test(path.basename(directory))) {
       Promise.allSettled(retired).then(() => fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }, () => {}));
     }
   }
@@ -65,6 +85,8 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
   }
 
   async function encode(job, encoder) {
+    const permit = config.encoderBudget?.acquire(job);
+    let encodedAt = Date.now(), permissionWait = 0;
     const token = crypto.randomBytes(24).toString("hex");
     const partials = new Set(), uploads = new Set();
     // HTTP supplies portable backpressure, retaining the live AAC codec while
@@ -87,7 +109,9 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
           const index = Number(match[1]);
           if (index < job.index || index >= job.end) throw new Error("Invalid encoder output.");
           req.pause();
+          const waitingAt = Date.now();
           await permission(index, { ...job, signal: controller.signal });
+          permissionWait += Date.now() - waitingAt;
           if (!valid(job)) throw new Error("Segment encoding was cancelled.");
           res.writeContinue();
           partial = `${filename(job.directory, index)}.partial`;
@@ -97,6 +121,8 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
           fs.renameSync(partial, filename(job.directory, index));
           partials.delete(partial);
           job.published++;
+          permit?.sample(Math.max(0, Date.now() - encodedAt - permissionWait) / (job.schedule.seconds * 1000));
+          encodedAt = Date.now(); permissionWait = 0;
           if (index === 0) fs.copyFileSync(filename(job.directory, index), path.join(state.hlsDirectory, "bootstrap.ts"));
           if (!job.announced) {
             job.announced = true;
@@ -151,8 +177,9 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
       const args = ["-hide_banner", "-loglevel", "warning", "-y", ...encoder.input,
         "-ss", start.toFixed(9), ...(state.mediaPath.startsWith("http:") ? ["-rw_timeout", "30000000"] : []),
         "-i", state.mediaPath, "-t", duration.toFixed(9), "-map", "0:v:0", "-map", "0:a:0?",
-        "-vf", `${compatibilityFilter(state.mediaInfo)},fps=${job.schedule.fps}`, "-c:v", encoder.name, ...encoder.args,
-        "-maxrate", "8000k", "-bufsize", "16000k", "-pix_fmt", "yuv420p", "-bf", "0",
+        "-vf", `${compatibilityFilter(state.mediaInfo, state.rendition)},fps=${job.schedule.fps}`, "-c:v", encoder.name, ...renditionEncoderArgs(encoder, state.rendition),
+        ...(state.rendition ? ["-b:v", String(state.rendition.bitrate)] : []),
+        "-maxrate", String(state.rendition?.bitrate || 8000000), "-bufsize", String((state.rendition?.bitrate || 8000000) * 2), "-pix_fmt", "yuv420p", "-bf", "0",
         "-r", String(job.schedule.fps), "-profile:v", "high", "-level:v", "4.1",
         "-g", String(job.schedule.frames), "-keyint_min", String(job.schedule.frames),
         "-force_key_frames", `expr:gte(n,n_forced*${job.schedule.frames})`, "-sc_threshold", "0",
@@ -183,6 +210,7 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
       sink.close(); sink.closeAllConnections();
       while (uploads.size) await Promise.allSettled([...uploads]);
       for (const file of partials) fs.rmSync(file, { force: true });
+      permit?.release();
     }
   }
 
@@ -201,6 +229,7 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
         try { await encode(job, encoder); return; }
         catch (error) {
           lastError = error;
+          if (error.code === "QUALITY_BUSY") throw error;
           if (!valid(job)) throw error;
           if (encoder.name !== "libx264") failedEncoders.add(encoder.name);
           if (job.published && recoveryFailures++ < 2) {
@@ -236,7 +265,9 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
     const job = [...jobs].find(j => valid(j) && j.index <= index && index < j.end) || start(bootstrap);
     while (!job.done) {
       if (signal?.aborted || !valid(job) || version !== state.mediaVersion) throw new Error("Segment encoding was cancelled.");
-      if (fs.existsSync(output)) return output;
+      // Release the brief bootstrap process's budget before the client requests
+      // its continuous run, especially when another rendition occupies a slot.
+      if (fs.existsSync(output) && !bootstrap) return output;
       await delay(25);
     }
     if (job.error) throw job.error;
@@ -244,7 +275,7 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
     return output;
   }
 
-  return { ensure, cancel, restart };
+  return { ensure, cancel, restart, running: () => [...jobs].some(job => !job.done) };
 }
 
 module.exports = { createSegmentService, compatibilityFilter };

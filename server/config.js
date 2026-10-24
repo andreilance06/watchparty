@@ -1,4 +1,5 @@
 const path = require("path");
+const { createEncoderBudget } = require("./media/encoder-budget");
 
 function resolveFfmpegPath() {
   if (process.env.FFMPEG_PATH) return process.env.FFMPEG_PATH;
@@ -14,6 +15,9 @@ function createConfig(overrides = {}) {
     publicDirectory: path.resolve(__dirname, ".."),
     segmentSeconds: 2,
     maxSegmentsAhead: 2,
+    maxEncoders: process.env.WATCHPARTY_MAX_ENCODERS === undefined ? 2 : Number(process.env.WATCHPARTY_MAX_ENCODERS),
+    renditionIdleMs: 10000,
+    renditionCacheBytes: 128 * 1024 * 1024,
     roomIdleMs: 30 * 60 * 1000,
     hostReconnectGraceMs: 15000,
     sourceReadTimeoutMs: 30000,
@@ -25,6 +29,8 @@ function createConfig(overrides = {}) {
     ffmpegPath: resolveFfmpegPath(),
     ...overrides
   };
+  if (!Number.isInteger(config.maxEncoders) || config.maxEncoders < 1) throw new Error("maxEncoders must be a positive integer.");
+  config.encoderBudget ||= createEncoderBudget(config.maxEncoders);
   if (!Number.isFinite(config.hostReconnectGraceMs) || config.hostReconnectGraceMs < 0) throw new Error("hostReconnectGraceMs must be a non-negative number.");
   if (config.publicOrigin) {
     const origin = new URL(config.publicOrigin);

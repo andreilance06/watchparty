@@ -102,6 +102,11 @@ function createHostSource({ room, bridge, config }) {
       if (job.done) continue;
       if (job.provider.ws?.readyState !== 1) { job.fail(new Error("File provider unavailable.")); continue; }
       source.pending.set(job.id, job);
+      if (!job.caption && job.fileId === source.videoId) {
+        const transfer = source.transfer ||= { active: 0, bytes: 0, started: performance.now() };
+        if (!transfer.active) transfer.started = performance.now();
+        transfer.active++; job.measured = true;
+      }
       source.preferCaptions = !job.caption;
       send(job.provider.ws, { type: job.ranges ? "source-read-batch" : "source-read", requestId: job.id, fileId: job.fileId,
         ...(job.ranges ? { ranges: job.ranges } : { offset: job.offset, length: job.length }) });
@@ -119,6 +124,21 @@ function createHostSource({ room, bridge, config }) {
       const finish = (error, bytes) => {
         if (job.done) return;
         job.done = true;
+        if (job.measured) {
+          const transfer = source.transfer;
+          transfer.active--;
+          if (!error) transfer.bytes += bytes.length;
+          const elapsed = performance.now() - transfer.started;
+          if (elapsed >= 250 || !transfer.active) {
+            if (elapsed >= 10 && transfer.bytes >= 32768 && !source.closed) {
+              const rate = transfer.bytes * 8000 / elapsed;
+              const previous = room.state.sourcePerformance;
+              room.state.sourcePerformance = { bps: previous ? previous.bps * 0.7 + rate * 0.3 : rate,
+                sampledAt: Date.now(), samples: (previous?.samples || 0) + 1 };
+            }
+            transfer.bytes = 0; transfer.started = performance.now();
+          }
+        }
         clearTimeout(job.timer);
         signal.removeEventListener("abort", abort);
         source.pending.delete(id);

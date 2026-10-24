@@ -83,7 +83,7 @@ const connection = createConnection({
   },
   onStatus: (connected, text) => {
     setConnectionStatus(elements, connected, text);
-    if (!connected) files?.disconnect();
+    if (!connected) { files?.disconnect(); player.disconnect(); }
     chat.setConnected(connected);
     participants.setConnected(connected);
     voting.setConnected(connected);
@@ -100,6 +100,7 @@ const participants = createParticipants({ elements, state, send: connection.send
 
 function handleMessage(message) {
   if (files.handleMessage(message)) return;
+  if (player.handleQuality(message)) return;
   switch (message.type) {
     case "role":
       state.clientId = message.clientId;
@@ -137,7 +138,7 @@ function handleMessage(message) {
       break;
     case "captions-updated": player.updateCaptions(message); break;
     case "compatibility-ready": player.applyCompatibility(message); break;
-    case "transcode-info": player.updateEncoder(message.encoder); break;
+    case "transcode-info": player.updateEncoder(message.encoder, message.renditionId); break;
     case "media-error": player.showMediaError(message.message); break;
     case "chat": chat.receive(message); break;
     case "name-updated":

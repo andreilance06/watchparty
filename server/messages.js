@@ -4,6 +4,7 @@ const { currentTime, sessionState } = require("./state");
 const { permissionKey, permissionsFor, promoteHost } = require("./permissions");
 const { participants: roomParticipants } = require("./participants");
 const { hostStatus } = require("./hosting");
+const { segmentSchedule } = require("./media/playlists");
 
 const MAX_VIDEO_SUGGESTIONS = 30;
 const MAX_COMMENTS = 500;
@@ -161,9 +162,34 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
           break;
         }
         const snapshot = sessionState(state);
+        let selected;
+        if (message.quality !== undefined) {
+          try { selected = media.selectQuality(ws.clientId, message.quality, message.bitrate ?? "auto", message.automatic === true); }
+          catch (error) {
+            send(ws, { type: "quality-error", requestId: message.requestId, mediaVersion: state.mediaVersion,
+              code: error.code || "QUALITY_INVALID", message: error.message }); break;
+          }
+        }
         send(ws, { type: "compatibility-ready", requestId: message.requestId, mediaVersion: state.mediaVersion,
           playbackRevision: state.playbackRevision, streamGeneration: state.streamGeneration,
-          url: snapshot.compatibilityUrl, time: snapshot.time, paused: snapshot.paused, playbackRate: snapshot.playbackRate });
+          url: snapshot.compatibilityUrl, time: snapshot.time, paused: snapshot.paused, playbackRate: snapshot.playbackRate,
+          ...selected, ...(selected ? { segmentSeconds: media.segmentSeconds?.() || segmentSchedule(state).seconds } : {}) });
+        break;
+      }
+      case "quality-selection":
+      case "quality-release":
+      case "quality-telemetry": {
+        if (!state.mediaReady || message.mediaVersion !== state.mediaVersion) break;
+        if (message.type === "quality-release") { media.releaseQuality(ws.clientId); break; }
+        if (message.type === "quality-selection") {
+          try { media.commitQuality(ws.clientId, message.renditionId); }
+          catch (error) { send(ws, { type: "quality-error", requestId: message.requestId, mediaVersion: state.mediaVersion, message: error.message }); }
+          break;
+        }
+        if (client.qualityTelemetryAt && Date.now() - client.qualityTelemetryAt < 1500) break;
+        client.qualityTelemetryAt = Date.now();
+        media.touchQuality(ws.clientId);
+        send(ws, { type: "quality-status", mediaVersion: state.mediaVersion, ...media.qualityDemand() });
         break;
       }
       case "join":

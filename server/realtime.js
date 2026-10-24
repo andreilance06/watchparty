@@ -66,6 +66,7 @@ function createRealtimeServer(server, { registry, config, movieSearch }) {
       if (member) member.name = client.name;
       const wasHost = ws.clientId === state.hostId;
       room.source.disconnectControl(ws);
+      media.releaseQuality(ws.clientId);
       state.clients.delete(ws.clientId);
       state.videoVotes.delete(ws.clientId);
       if (state.shuttingDown) return;

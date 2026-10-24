@@ -67,6 +67,69 @@ test('original-file ranges are exact, cached, generation checked, and independen
   assert.equal((await fetch(url)).status,404);
 });
 
+test('quality renditions are lazy, shared by settings, isolated across switches, and bounded by demand', async t => {
+  const source=fixture(t,{size:'1280x720',duration:'12'});if(!source)return;
+  const {app,base,host}=await application(t,{renditionIdleMs:20,renditionCacheBytes:1});
+  await serveHostFiles(host,base,{name:'source.mkv',bytes:source.bytes});
+  const ready=await host.next('session-state',m=>m.hasVideo);
+  const viewer=await connectPeer(base.replace('http','ws'),'Viewer');await viewer.next('session-state',m=>m.hasVideo);
+  const another=await connectPeer(base.replace('http','ws'),'Another viewer');await another.next('session-state',m=>m.hasVideo);
+  const originalPlayback={...app.state.playback};
+  assert.equal(ready.mediaInfo.sourceSize,source.bytes.length);
+  assert.ok(ready.mediaInfo.bitrate>0);
+  assert.deepEqual(ready.mediaInfo.qualityOptions.map(option=>option.quality),['720','480','360']);
+  assert.equal(app.config.encoderBudget.snapshot().active,0);
+  assert.equal(fs.readdirSync(app.state.hlsDirectory).some(name=>name.startsWith('r_')),false);
+  const select=async(peer,id,quality,bitrate)=>{
+    peer.send({type:'compatibility-request',mediaVersion:ready.mediaVersion,requestId:id,quality,bitrate});
+    return peer.next('compatibility-ready',m=>m.requestId===id);
+  };
+  const low=await select(viewer,'low','360',750000);
+  const shared=await select(another,'shared','360',750000);
+  assert.equal(low.url,shared.url);assert.equal(low.rendition.id,'640x360_750000');
+  assert.equal(app.config.encoderBudget.snapshot().active,0,'negotiation alone never starts encoding');
+  const master=await fetch(base+low.url).then(r=>r.text());
+  assert.match(master,/RESOLUTION=640x360/);assert.match(master,/BANDWIDTH=1036200/);
+  const playlist=await fetch(base+low.url.replace('master','video')).then(r=>r.text());
+  assert.match(playlist,/r=640x360_750000&rg=0/);
+  assert.equal(app.config.encoderBudget.snapshot().active,0,'listing playlists never encodes');
+  const segment=low.url.replace('master.m3u8','segment_000000.ts');
+  const [first,duplicate]=await Promise.all([fetch(base+segment).then(r=>r.arrayBuffer()),fetch(base+segment).then(r=>r.arrayBuffer())]);
+  assert.deepEqual(Buffer.from(first),Buffer.from(duplicate));
+  assert.equal(app.config.encoderBudget.snapshot().active,1);
+  const entry=app.media.rendition(low.rendition.id);
+  const probe=spawnSync(source.ffmpeg,['-hide_banner','-i',path.join(streamDirectory(entry.state),'segment_000000.ts')],{encoding:'utf8',windowsHide:true});
+  assert.match(probe.stderr,/640x360/);assert.match(probe.stderr,/Audio: aac/);
+  viewer.send({type:'quality-selection',mediaVersion:ready.mediaVersion,renditionId:low.rendition.id});
+  another.send({type:'quality-selection',mediaVersion:ready.mediaVersion,renditionId:low.rendition.id});
+  const high=await select(viewer,'high','720',3000000);
+  assert.equal((await fetch(base+high.url.replace('master.m3u8','segment_000000.ts'))).status,200);
+  assert.equal(app.config.encoderBudget.snapshot().active,2);
+  viewer.send({type:'quality-selection',mediaVersion:ready.mediaVersion,renditionId:high.rendition.id});
+  viewer.send({type:'compatibility-request',mediaVersion:ready.mediaVersion,requestId:'busy',quality:'480',bitrate:1500000});
+  assert.equal((await viewer.next('quality-error',m=>m.requestId==='busy')).code,'QUALITY_BUSY');
+  assert.equal((await fetch(base+segment)).status,200,'another viewer keeps the shared low rendition');
+  assert.deepEqual(app.state.playback,originalPlayback,'quality switches never mutate the room clock');
+  for(const [id,quality,bitrate] of [['invalid','2160',3000000],['invalid-rate','720',123]]){
+    viewer.send({type:'compatibility-request',mediaVersion:ready.mediaVersion,requestId:id,quality,bitrate});
+    assert.equal((await viewer.next('quality-error',m=>m.requestId===id)).code,'QUALITY_INVALID');
+  }
+  app.media.restartStream();
+  assert.equal((await fetch(base+segment)).status,404,'retired generation cannot serve cached fragments');
+  const replacement=await select(another,'after-seek','360',750000);
+  assert.notEqual(replacement.url,low.url);assert.match(replacement.url,/g=1/);
+  viewer.send({type:'quality-release',mediaVersion:ready.mediaVersion});
+  another.send({type:'quality-release',mediaVersion:ready.mediaVersion});
+  for(let i=0;i<150&&app.media.rendition(low.rendition.id);i++)await delay(20);
+  assert.equal(app.media.rendition(low.rendition.id),undefined,'idle cache is evicted within its byte budget');
+  assert.equal(app.config.encoderBudget.snapshot().active,0);
+  const recreated=await select(another,'recreated','360',750000);
+  assert.notEqual(recreated.url,replacement.url,'eviction never reuses an immutable browser-cache URL');
+  assert.notEqual(app.media.rendition(low.rendition.id).state.hlsDirectory,entry.state.hlsDirectory,'draining eviction cannot remove a recreated directory');
+  assert.equal((await fetch(base+replacement.url)).status,404);
+  assert.equal((await fetch(base+recreated.url)).status,200);
+});
+
 test('compatibility requests are local to a viewer and one run publishes bounded cached segments with continuous AAC audio', async t=>{
   const source=fixture(t); if(!source)return;
   const {app,base,host}=await application(t);

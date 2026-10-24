@@ -12,7 +12,7 @@ function parseMediaInfo(output, fileName = "") {
   const mime = ({ ".mp4": "video/mp4", ".m4v": "video/mp4", ".mov": "video/quicktime", ".3gp": "video/3gpp", ".3g2": "video/3gpp2", ".webm": "video/webm",
     ".ogv": "video/ogg", ".ogg": "video/ogg", ".ogm": "video/ogg",
     ".mkv": "video/x-matroska", ".avi": "video/x-msvideo", ".ts": "video/mp2t" })[extension] || "application/octet-stream";
-  return { mime, videoCodec: /Video:\s*(\w+)/.exec(videoLine)?.[1] || "",
+  return { mime, bitrate: Number(/bitrate:\s*(\d+) kb\/s/.exec(output)?.[1]) * 1000 || 0, videoCodec: /Video:\s*(\w+)/.exec(videoLine)?.[1] || "",
     audioCodec: /Audio:\s*(\w+)/.exec(audioLine)?.[1] || "", hasAudio: Boolean(audioLine),
     sampleRate: Number(/(\d+) Hz/.exec(audioLine)?.[1]) || 48000,
     channels,

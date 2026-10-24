@@ -4,13 +4,21 @@ const { currentTime } = require("../state");
 const { serveFile } = require("./files");
 const { segmentSchedule } = require("../media/playlists");
 
-function createHlsHandler({ state, config, media }) {
+function createHlsHandler({ state: rootState, config, media: rootMedia }) {
   async function serveHls(req, res, url) {
+    const renditionId = url.searchParams.get("r");
+    const entry = renditionId ? rootMedia.rendition?.(renditionId) : null;
+    if (renditionId && (!entry || entry.retired || Number(url.searchParams.get("g")) !== (rootState.streamGeneration || 0))) {
+      res.writeHead(404); res.end("Rendition is no longer available"); return;
+    }
+    const state = entry?.state || rootState;
+    const media = entry ? { ...rootMedia, ensureSegment: entry.service.ensure } : rootMedia;
     if (!state.hlsDirectory || !state.mediaReady || Number(url.searchParams.get("v")) !== state.mediaVersion) {
       res.writeHead(404); res.end("Stream is not ready"); return;
     }
     const relative = url.pathname.slice("/hls/".length);
-    const generation = url.searchParams.has("g") ? Number(url.searchParams.get("g")) : state.streamGeneration || 0;
+    const generationKey = entry ? "rg" : "g";
+    const generation = url.searchParams.has(generationKey) ? Number(url.searchParams.get(generationKey)) : state.streamGeneration || 0;
     if ((relative.endsWith(".m3u8") || relative.endsWith(".ts")) && generation !== (state.streamGeneration || 0)) {
       res.writeHead(404); res.end("Stream replaced"); return;
     }
@@ -18,6 +26,7 @@ function createHlsHandler({ state, config, media }) {
     if (!filePath.startsWith(`${path.resolve(state.hlsDirectory)}${path.sep}`)) { res.writeHead(403); res.end("Forbidden"); return; }
     const segmentMatch = /^segment_(\d{6})\.ts$/.exec(relative);
     const font = /^font_\d+\.(?:ttf|otf)$/.test(relative) && media.fontFiles().includes(relative);
+    if (entry && !segmentMatch && !/^(?:master|video)\.m3u8$/.test(relative)) { res.writeHead(404); res.end("Not found"); return; }
     if (!segmentMatch && !/^(?:master|video)\.m3u8$/.test(relative) && !/^captions_\d+\.ass$/.test(relative) && !font) {
       res.writeHead(404); res.end("Not found"); return;
     }
@@ -26,13 +35,19 @@ function createHlsHandler({ state, config, media }) {
     }
     try {
       if (segmentMatch) {
+        if (entry) {
+          entry.requests = (entry.requests || 0) + 1; entry.requestedAt = Date.now();
+          res.once("close", () => { entry.requests--; });
+        }
         const index = Number(segmentMatch[1]);
         if (index >= segmentSchedule(state, config.segmentSeconds).count) throw new Error("Invalid segment.");
         const controller = new AbortController();
         const abort = () => controller.abort();
         res.once("close", abort);
+        const readyAt = performance.now();
         try { filePath = await media.ensureSegment(index, controller.signal, generation); }
         finally { res.removeListener("close", abort); }
+        if (!res.destroyed) res.setHeader("Server-Timing", `media-wait;dur=${(performance.now() - readyAt).toFixed(1)}`);
       } else if (/^captions_\d+\.ass$/.test(relative)) {
         await media.waitForCaption(relative);
         const metrics = media.captionMetrics?.(relative);
