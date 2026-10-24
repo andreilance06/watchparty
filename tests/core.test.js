@@ -20,8 +20,30 @@ test("session clocks are isolated and bounded by the video duration", () => {
   first.mediaPath = "/example/movie.mkv";
   first.mediaReady = true;
   first.mediaVersion = 3;
-  assert.equal(sessionState(first, "join").mediaUrl, "/hls/master.m3u8?v=3&g=0");
+  assert.equal(sessionState(first, "join").mediaUrl, `/hls/master.m3u8?s=${first.sessionId}&v=3&g=0`);
   assert.equal(sessionState(second).hasVideo, false);
+});
+
+test("media preparation cannot serve a response after its session or video is replaced", async () => {
+  const { createHlsHandler } = require('../server/http/hls');
+  for (const file of ['segment_000000.ts', 'captions_0.ass', 'font_0.ttf']) {
+    for (const change of ['sessionId', 'mediaVersion']) {
+      const state = createSession();
+      Object.assign(state, { hlsDirectory: os.tmpdir(), mediaReady: true, mediaDuration: 4, mediaVersion: 1,
+        captionTracks: [{ url: '/hls/captions_0.ass' }] });
+      let release;
+      const pending = new Promise(resolve => { release = resolve; });
+      const media = { ensureSegment: () => pending, waitForCaption: () => pending, waitForFonts: () => pending,
+        fontFiles: () => ['font_0.ttf'] };
+      const response = { once() {}, removeListener() {}, setHeader() {}, writeHead(status) { this.status = status; }, end() {} };
+      const url = new URL(`/hls/${file}?s=${state.sessionId}&v=1&g=0`, 'http://localhost');
+      const task = createHlsHandler({ state, media, config: { segmentSeconds: 2 } })({ method: 'GET' }, response, url);
+      state[change] = change === 'sessionId' ? 'replacement-session' : 2;
+      release(path.join(os.tmpdir(), file));
+      await task;
+      assert.equal(response.status, 404, `${file}: replaced ${change}`);
+    }
+  }
 });
 
 test("display names stay unique after whitespace, case, and Unicode normalization", () => {

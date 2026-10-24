@@ -1,26 +1,9 @@
 const { check, safe, concat, u32, u64, MAX_ENTRIES, LIMIT } = require("./bytes");
+const { parseBoxes, child, descend } = require("./iso-boxes");
+const { inspectIso } = require("./iso-metadata");
 
-const masters = new Set(["moov", "trak", "mdia", "minf", "stbl", "edts", "mvex", "moof", "traf"]);
 function box(type, bytes) { return concat([u32(bytes.length + 8), Buffer.from(type), bytes]); }
 function full(type, bytes, flags = 0) { return box(type, concat([u32(flags), bytes])); }
-function parseBoxes(bytes, depth = 0) {
-  check(depth < 12);
-  const nodes = [];
-  for (let at = 0; at < bytes.length;) {
-    check(bytes.length - at >= 8 && nodes.length < MAX_ENTRIES);
-    let size = bytes.readUInt32BE(at), head = 8;
-    const type = bytes.toString("ascii", at + 4, at + 8);
-    if (size === 1) { check(bytes.length - at >= 16); size = safe(bytes.readBigUInt64BE(at + 8)); head = 16; }
-    if (!size) size = bytes.length - at;
-    check(size >= head && at + size <= bytes.length);
-    const data = bytes.subarray(at + head, at + size);
-    nodes.push({ type, data, raw: bytes.subarray(at, at + size), children: masters.has(type) ? parseBoxes(data, depth + 1) : [] });
-    at += size;
-  }
-  return nodes;
-}
-const child = (node, type) => node?.children.find(item => item.type === type);
-const descend = (node, ...types) => types.reduce(child, node);
 function table(node, width) {
   check(node && node.data.length >= 8);
   const count = node.data.readUInt32BE(4);
@@ -46,23 +29,10 @@ function runs(values) {
   return concat([u32(rows.length), ...rows.map(row => concat([u32(row.count), u32(row.value >>> 0)]))]);
 }
 
-async function isoCaptions(reader) {
-  let moov;
-  const fragments = [];
-  for (let at = 0, count = 0; at < reader.size;) {
-    check(++count <= MAX_ENTRIES);
-    const header = await reader.read(at, Math.min(16, reader.size - at));
-    check(header.length >= 8);
-    let size = header.readUInt32BE(0), head = 8;
-    const type = header.toString("ascii", 4, 8);
-    if (size === 1) { check(header.length === 16); size = safe(header.readBigUInt64BE(8)); head = 16; }
-    if (!size) size = reader.size - at;
-    check(size >= head && at + size <= reader.size);
-    if (type === "moov") moov = { type, children: parseBoxes(await reader.read(at + head, size - head)) };
-    if (type === "moof") fragments.push({ at, head, size });
-    at += size;
-  }
-  check(moov, "MP4/QuickTime track metadata is missing.");
+async function isoCaptions(reader, metadata) {
+  metadata ||= await inspectIso(reader);
+  check(metadata, "MP4/QuickTime track metadata is missing.");
+  const { moov } = metadata;
   const mvhd = child(moov, "mvhd");
   check(mvhd);
   const tracks = [];
@@ -101,7 +71,7 @@ async function isoCaptions(reader) {
       sizes = Array.from({ length: count }, (_, index) => bits === 4
         ? (stz2.data[12 + (index >> 1)] >> (index % 2 ? 0 : 4)) & 15
         : bits === 8 ? stz2.data[12 + index] : stz2.data.readUInt16BE(12 + index * 2));
-    } else { check(fragments.length); sizes = []; }
+    } else { check(metadata.fragmented); sizes = []; }
     if (!sizes.length) continue;
     const durations = expand(child(stbl, "stts"));
     const ctts = child(stbl, "ctts");
@@ -134,7 +104,7 @@ async function isoCaptions(reader) {
   let fragmentJob;
   function indexFragments() {
     if (!fragmentJob) fragmentJob = (async () => {
-      for (const fragment of fragments) {
+      for (const fragment of await metadata.fragments(reader)) {
         const nodes = parseBoxes(await reader.read(fragment.at + fragment.head, fragment.size - fragment.head));
         let previousEnd = fragment.at;
         for (const traf of nodes.filter(node => node.type === "traf")) {

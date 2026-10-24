@@ -247,3 +247,4 @@
   font-size: .68rem;
   line-height: 1.45;
 }
+.room-info-code.room-info-link { min-width: 0; font-size: .85rem; letter-spacing: normal; overflow-wrap: anywhere; }

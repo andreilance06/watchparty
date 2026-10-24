@@ -24,6 +24,8 @@ function createConfig(overrides = {}) {
     sourceChunkBytes: 256 * 1024,
     sourceMaxReads: 4,
     sourceCacheBytes: 16 * 1024 * 1024,
+    mediaPreparationBytes: 32 * 1024 * 1024,
+    mediaPreparationMs: 30000,
     trustProxy: process.env.TRUST_PROXY === "loopback" ? "loopback" : false,
     publicOrigin: process.env.PUBLIC_ORIGIN || "",
     ffmpegPath: resolveFfmpegPath(),

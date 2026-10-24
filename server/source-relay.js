@@ -13,19 +13,50 @@ function createSourceBridge(config) {
     const file = entry?.files.get(fileId);
     if (!file || !["GET", "HEAD"].includes(req.method)) { res.writeHead(404); res.end(); return; }
     await serveByteSource(req, res, { size: file.size, chunkBytes: config.sourceChunkBytes,
-      concurrency: config.sourceMaxReads, read: (offset, length, signal) => entry.read(fileId, offset, length, signal) });
+      concurrency: config.sourceMaxReads, read: async (offset, length, signal) => {
+        const controller = new AbortController();
+        const abort = () => controller.abort();
+        signal.addEventListener("abort", abort, { once: true });
+        entry.signal.addEventListener("abort", abort, { once: true });
+        if (signal.aborted || entry.signal.aborted) abort();
+        try { return await entry.read(fileId, offset, length, controller.signal); }
+        finally { signal.removeEventListener("abort", abort); entry.signal.removeEventListener("abort", abort); }
+      } });
   });
+  function register(entry) {
+    if (!origin) throw new Error("Source bridge is not listening.");
+    const token = crypto.randomBytes(32).toString("base64url"), controller = new AbortController(), leases = new Set();
+    entries.set(token, { ...entry, signal: controller.signal });
+    const close = () => {
+      entries.delete(token); controller.abort();
+      for (const lease of leases) lease.close();
+      leases.clear();
+    };
+    return {
+      url: fileId => `${origin}/${token}/${fileId}`, close,
+      lease(fileId, budget) {
+        const metrics = { bytes: 0, reads: 0 };
+        const child = register({ files: new Map([[fileId, entry.files.get(fileId)]]), read: (id, offset, length, signal) => {
+          budget.consume(length); metrics.bytes += length; metrics.reads++;
+          return entry.read(id, offset, length, signal);
+        } });
+        const abort = () => child.close();
+        budget.signal.addEventListener("abort", abort, { once: true });
+        if (budget.signal.aborted) abort();
+        const lease = { url: child.url(fileId), metrics, close() {
+          budget.signal.removeEventListener("abort", abort); child.close(); leases.delete(lease);
+        } };
+        leases.add(lease);
+        return lease;
+      }
+    };
+  }
   return {
     async listen() {
       await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
       origin = `http://127.0.0.1:${server.address().port}`;
     },
-    register(entry) {
-      if (!origin) throw new Error("Source bridge is not listening.");
-      const token = crypto.randomBytes(32).toString("base64url");
-      entries.set(token, entry);
-      return { url: (fileId) => `${origin}/${token}/${fileId}`, close: () => entries.delete(token) };
-    },
+    register,
     async close() {
       entries.clear();
       await new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); });
@@ -163,7 +194,7 @@ function createHostSource({ room, bridge, config }) {
 
   // Subtitle parsers skip media payloads using tiny header reads. Expanding
   // those requests to cache pages would pull the video through the relay again.
-  async function preciseReadMany(source, fileId, ranges, signal) {
+  async function preciseReadMany(source, fileId, ranges, signal, metrics = source.captionMetrics) {
     const file = source.files.get(fileId);
     if (!file || source.closed || signal.aborted || !Array.isArray(ranges) || ranges.length > 64) throw new Error("Invalid caption source range.");
     const misses = [], outputs = ranges.map(() => []);
@@ -177,7 +208,7 @@ function createHostSource({ room, bridge, config }) {
         const count = Math.min(config.sourceChunkBytes - at % config.sourceChunkBytes, offset + length - at);
         const cached = source.cache.get(`${fileId}:${page}`), slot = outputs[index].length;
         outputs[index].push(cached ? cached.subarray(at - page, at - page + count) : null);
-        if (cached) source.captionMetrics.cacheHitBytes += count;
+        if (cached) metrics.cacheHitBytes += count;
         else misses.push({ offset: at, length: count, index, slot });
         at += count;
       }
@@ -189,9 +220,9 @@ function createHostSource({ room, bridge, config }) {
         length += misses[at].length; batch.push(misses[at++]);
       }
       signal.throwIfAborted();
-      source.captionMetrics.ranges += batch.length; source.captionMetrics.bytes += length;
+      metrics.ranges += batch.length; metrics.bytes += length;
       if (provider.batchReads) {
-        source.captionMetrics.requests++;
+        metrics.requests++;
         const bytes = await read(source, fileId, 0, length, signal, true, batch.map(({ offset, length }) => ({ offset, length })));
         let start = 0;
         for (const piece of batch) { outputs[piece.index][piece.slot] = bytes.subarray(start, start + piece.length); start += piece.length; }
@@ -199,7 +230,7 @@ function createHostSource({ room, bridge, config }) {
         let next = 0;
         await Promise.all(Array.from({ length: Math.min(4, batch.length) }, async () => {
           while (next < batch.length) {
-            const piece = batch[next++]; source.captionMetrics.requests++;
+            const piece = batch[next++]; metrics.requests++;
             outputs[piece.index][piece.slot] = await read(source, fileId, piece.offset, piece.length, signal, true);
           }
         }));
@@ -252,7 +283,8 @@ function createHostSource({ room, bridge, config }) {
 
   async function serveOriginal(req, res, url) {
     const source = active;
-    if (!source || source.closed || !room.state.mediaReady || Number(url.searchParams.get("v")) !== room.state.mediaVersion) {
+    if (!source || source.closed || url.searchParams.get("s") !== room.state.sessionId ||
+        !room.state.mediaReady || Number(url.searchParams.get("v")) !== room.state.mediaVersion) {
       res.writeHead(404); res.end("Source is no longer available"); return;
     }
     const file = source.files.get(source.videoId);
@@ -291,6 +323,12 @@ function createHostSource({ room, bridge, config }) {
           room.media.select(source.bridge.url(video.id), video.name);
           Promise.resolve(room.media.prepare(source.bridge.url(video.id), source.captionIds.map((id) => descriptor(source, source.files.get(id))), {
             size: video.size, metrics: source.captionMetrics,
+            openLease: budget => source.bridge.lease(video.id, budget),
+            metadata: {
+              size: video.size, metrics: source.metadataMetrics,
+              read: async (offset, length, signal) => (await preciseReadMany(source, video.id, [{ offset, length }], signal, source.metadataMetrics))[0],
+              readMany: (ranges, signal) => preciseReadMany(source, video.id, ranges, signal, source.metadataMetrics)
+            },
             read: async (offset, length, signal) => (await preciseReadMany(source, video.id, [{ offset, length }], signal))[0],
             readMany: (ranges, signal) => preciseReadMany(source, video.id, ranges, signal)
           }))
@@ -347,6 +385,7 @@ function createHostSource({ room, bridge, config }) {
         active = { id: crypto.randomUUID(), token: crypto.randomBytes(32).toString("base64url"), owner: ws,
           files, videoId: video.id, captionIds: captions.map((file) => file.id), pending: new Map(), queue: [],
           cache: new Map(), reads: new Map(), nextRequest: 1, closed: false,
+          metadataMetrics: { requests: 0, ranges: 0, bytes: 0, cacheHitBytes: 0 },
           captionMetrics: { requests: 0, ranges: 0, bytes: 0, cacheHitBytes: 0 } };
         const source = active;
         source.providers = new Map([[source.id, source]]);

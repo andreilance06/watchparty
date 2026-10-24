@@ -8,7 +8,7 @@ const { resolveQuality } = require("./quality");
 function createRenditionService({ state, config, encoderPromise, broadcast }) {
   const entries = new Map(), viewers = new Map(), generations = new Map();
   let timer;
-  const url = entry => `${state.basePath || ""}/hls/master.m3u8?v=${state.mediaVersion}&g=${state.streamGeneration || 0}&r=${entry.profile.id}&rg=${entry.state.streamGeneration}`;
+  const url = entry => `${state.basePath || ""}/hls/master.m3u8?s=${state.sessionId}&v=${state.mediaVersion}&g=${state.streamGeneration || 0}&r=${entry.profile.id}&rg=${entry.state.streamGeneration}`;
   const sendReplacement = entry => {
     generations.set(entry.profile.id, entry.state.streamGeneration);
     broadcast({ type: "rendition-replaced", mediaVersion: state.mediaVersion, renditionId: entry.profile.id, url: url(entry) });

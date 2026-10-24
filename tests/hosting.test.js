@@ -99,7 +99,7 @@ async function fixture(t, config = {}) {
     return { ...result, cookie: [cookie, result.cookie].filter(Boolean).join("; ") };
   };
   const join = async (room, cookie, displayName) => {
-    const result = await api(`/rooms/${room.body.room.id}/api/join`, { accessCode: room.body.room.accessCode, displayName }, cookie);
+    const result = await api(`/rooms/${room.body.room.id}/api/join`, { roomId: room.body.room.id, displayName }, cookie);
     return { ...result, cookie: [cookie, result.cookie].filter(Boolean).join("; ") };
   };
   const assertOneHost = state => assert.equal([...state.clients.values()].filter(client => client.role === "host").length, 1);

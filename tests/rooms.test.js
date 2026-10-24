@@ -28,25 +28,26 @@ function rejectedSocket(url, headers = {}) {
   });
 }
 
-test("room admission validates codes/passwords and preserves scoped membership", async (t) => {
+test("room admission uses IDs/passwords and preserves scoped membership", async (t) => {
   const { app, base, api, connect } = await setup(t);
-  const created = await api("/api/rooms", { name: "  Friday   Films ", accessCode: " movie-night ", password: "my password", displayName: "Owner" });
+  const created = await api("/api/rooms", { name: "  Friday   Films ", password: "my password", displayName: "Owner" });
   assert.equal(created.status, 201);
   assert.equal(created.body.room.name, "Friday Films");
-  assert.equal(created.body.room.accessCode, "MOVIE-NIGHT");
+  assert.equal("accessCode" in created.body.room, false);
+  assert.equal(created.body.room.invitePath, `/?room=${created.body.room.id}`);
+  assert.equal(created.body.room.watchPath, `/watch?roomId=${created.body.room.id}`);
   assert.equal(created.body.room.passwordRequired, true);
   assert.equal(created.body.member.role, "host");
   assert.match(created.headers.get("set-cookie"), /HttpOnly; SameSite=Strict/);
   assert.match(created.headers.get("set-cookie"), new RegExp(`Path=/rooms/${created.body.room.id}/`));
   assert.doesNotMatch(JSON.stringify(created.body), /my password|passwordHash/);
-  assert.equal((await api("/api/rooms", { name: "Duplicate", accessCode: "MOVIE-NIGHT" })).status, 409);
-  assert.equal((await api("/api/rooms/join", { accessCode: "movie-night", password: "wrong" })).status, 401);
-  assert.equal((await api("/api/rooms/join", { accessCode: "movie-night" })).status, 401);
-  assert.equal((await api("/api/rooms/join", { accessCode: "missing-room" })).status, 404);
-  const viewer = await api("/api/rooms/join", { accessCode: "movie-night", password: "my password" });
+  assert.equal((await api("/api/rooms/join", { roomId: created.body.room.id, password: "wrong" })).status, 401);
+  assert.equal((await api("/api/rooms/join", { roomId: created.body.room.id })).status, 401);
+  assert.equal((await api("/api/rooms/join", { roomId: "missing-room" })).status, 404);
+  const viewer = await api("/api/rooms/join", { roomId: created.body.room.id, password: "my password" });
   assert.equal(viewer.status, 200);
   assert.equal(viewer.body.member.role, "viewer");
-  const reused = await api("/api/rooms/join", { accessCode: "movie-night" }, created.cookie);
+  const reused = await api("/api/rooms/join", { roomId: created.body.room.id }, created.cookie);
   assert.equal(reused.body.member.clientId, created.body.member.clientId);
   assert.equal(reused.body.member.role, "host");
   const privatePath = created.body.endpoints.session;
@@ -59,8 +60,9 @@ test("room admission validates codes/passwords and preserves scoped membership",
   assert.equal(creatorPeer.role.name, "Owner", "the initial room name is authoritative");
   creatorPeer.ws.close();
   const generated = await api("/api/rooms", { name: "Open room" });
-  assert.match(generated.body.room.accessCode, /^[A-Z2-9]{8}$/);
-  assert.equal((await api("/api/rooms/join", { accessCode: generated.body.room.accessCode })).status, 200);
+  assert.equal(generated.body.room.passwordRequired, false);
+  assert.equal((await api("/api/rooms/join", { roomId: generated.body.room.id })).status, 200);
+  assert.equal((await api("/api/rooms/join", {})).status, 400);
   const guestSession = await api("/api/rooms", { name: "Guest naming", displayName: "Guest-AUTO" });
   const guestPeer = await connect(guestSession, "Old saved name");
   assert.equal(guestPeer.role.name, "Guest-AUTO");
@@ -71,7 +73,7 @@ test("room endpoints reject bad inputs, cross-room credentials, and foreign orig
   const { base, api } = await setup(t);
   const first = await api("/api/rooms", { name: "One" });
   const second = await api("/api/rooms", { name: "Two" });
-  for (const body of [{}, { name: " " }, { name: "One", accessCode: "bad/code" }, { name: "One", password: {} }, { name: "One", displayName: {} }]) {
+  for (const body of [{}, { name: " " }, { name: "One", password: {} }, { name: "One", displayName: {} }]) {
     assert.equal((await api("/api/rooms", body)).status, 400);
   }
   assert.equal((await fetch(base + "/api/rooms", { method: "POST", body: "{" })).status, 400);
@@ -86,15 +88,48 @@ test("room endpoints reject bad inputs, cross-room credentials, and foreign orig
   assert.equal((await fetch(base + "/server/rooms.js")).status, 404);
   assert.equal((await fetch(base + "/.git/config")).status, 404);
   assert.equal((await fetch(base + "/rooms/default/hls/master.m3u8?v=1")).status, 404);
-  const races = await Promise.all([1, 2].map(() => api("/api/rooms", { name: "Racing", accessCode: "RACING", password: "secret" })));
-  assert.deepEqual(races.map((result) => result.status).sort(), [201, 409]);
+  const races = await Promise.all([1, 2].map(() => api("/api/rooms", { name: "Racing", password: "secret" })));
+  assert.deepEqual(races.map((result) => result.status), [201, 201]);
+  assert.notEqual(races[0].body.room.id, races[1].body.room.id);
+});
+
+test("the root serves a separate hub, player bookmarks redirect, and the directory lists rooms without granting admission", async t => {
+  const { app, base, api, connect } = await setup(t);
+  const created = await api("/api/rooms", { name: "Friday films", password: "a private password" });
+  const room = app.rooms.get(created.body.room.id);
+  const directory = await fetch(base + "/api/rooms");
+  assert.equal(directory.headers.get("cache-control"), "no-store");
+  const { rooms } = await directory.json();
+  assert.deepEqual(rooms.map(item => item.name), ["Default room", "Friday films"]);
+  assert.equal(rooms[0].watchPath, "/watch");
+  assert.equal(rooms[1].passwordRequired, true);
+  assert.equal(rooms[1].participantCount, 0);
+  assert.equal(rooms[1].thumbnailUrl, null);
+  assert.doesNotMatch(JSON.stringify(rooms), /a private password|passwordHash|salt|token|127\.0\.0\.1/);
+  assert.equal((await fetch(base + created.body.endpoints.session)).status, 401);
+  const host = await connect(created);
+  assert.equal((await (await fetch(base + "/api/rooms")).json()).rooms[1].participantCount, 1);
+  assert.equal(room.state.clients.size, 1);
+  const hub = await (await fetch(base)).text();
+  assert.match(hub, /src="\/js\/hub\.js"/);
+  assert.doesNotMatch(hub, /movi-player|js\/app\.js|access code/i);
+  const player = await (await fetch(base + created.body.room.watchPath)).text();
+  assert.match(player, /<movi-player/);
+  assert.doesNotMatch(player, /id="roomEntry"|id="roomGrid"|access code/i);
+  const old = await fetch(base + `/?roomId=${room.id}`, { redirect: "manual" });
+  assert.equal(old.status, 302);
+  assert.equal(old.headers.get("location"), created.body.room.watchPath);
+  assert.equal((await fetch(base + "/api/rooms/default/thumbnail?v=1&r=1")).status, 404);
+  assert.equal((await api(`/rooms/${room.id}/api/join`, { roomId: "another" })).status, 400);
+  assert.equal((await api("/api/rooms/join", { roomId: "default" })).body.room.watchPath, "/watch");
+  host.ws.close();
 });
 
 test("room creators retain hosting and all features stay inside their room", async (t) => {
   const { app, api, connect } = await setup(t);
   const one = await api("/api/rooms", { name: "One" });
   const two = await api("/api/rooms", { name: "Two" });
-  const viewerSession = await api("/api/rooms/join", { accessCode: one.body.room.accessCode });
+  const viewerSession = await api("/api/rooms/join", { roomId: one.body.room.id });
   const viewer = await connect(viewerSession, "Alex");
   assert.equal(viewer.role.role, "viewer", "A viewer arriving before the creator cannot become host");
   const host = await connect(one, "Host");
@@ -163,7 +198,7 @@ test("reconnect replacement, explicit leave, and empty-room expiry release membe
   assert.equal(app.rooms.has(abandoned.body.room.id), false);
 });
 
-test("two browser hosts stream independently and replacing/disconnecting one preserves the other", async (t) => {
+test("two browser hosts stream and publish real thumbnails independently, including source replacement and disconnect", async (t) => {
   const fs = require("node:fs"), path = require("node:path"), os = require("node:os");
   const { execFileSync } = require("node:child_process");
   const ffmpeg = require("ffmpeg-static");
@@ -181,6 +216,21 @@ test("two browser hosts stream independently and replacing/disconnecting one pre
   const relays = await Promise.all(hosts.map((host, index) => serveHostFiles(host, base, inputs[index], [], { headers: { Cookie: sessions[index].cookie } })));
   const states = await Promise.all(hosts.map((host) => host.next("session-state", (message) => message.hasVideo)));
   const rooms = sessions.map((session) => app.rooms.get(session.body.room.id));
+  await fetch(base + "/api/rooms"); // Starts asynchronous frame extraction through each browser's relay.
+  for (let i = 0; i < 250 && rooms.some(room => !room.media.thumbnail()); i++) await new Promise(resolve => setTimeout(resolve, 20));
+  const listedRooms = (await (await fetch(base + "/api/rooms")).json()).rooms;
+  const thumbnailUrls = sessions.map(session => listedRooms.find(room => room.id === session.body.room.id).thumbnailUrl);
+  for (const url of thumbnailUrls) {
+    assert.ok(url, "a real thumbnail was extracted");
+    const thumbnail = await fetch(base + url); // Hub images are public, even though original video bytes require admission.
+    assert.equal(thumbnail.status, 200);
+    assert.equal(thumbnail.headers.get("content-type"), "image/jpeg");
+    const image = Buffer.from(await thumbnail.arrayBuffer());
+    assert.deepEqual([...image.subarray(0, 2)], [255, 216]);
+    assert.ok(image.length < 256 * 1024);
+    assert.equal((await fetch(base + url, { method: "HEAD" })).status, 200);
+    assert.equal((await fetch(base + url.replace(/r=\d+/, "r=999999"))).status, 404);
+  }
   assert.notEqual(states[0].mediaUrl, states[1].mediaUrl);
   assert.notEqual(rooms[0].state.hlsDirectory, rooms[1].state.hlsDirectory);
   assert.equal(app.state.mediaPath, null);
@@ -204,6 +254,8 @@ test("two browser hosts stream independently and replacing/disconnecting one pre
   const replacement = await serveHostFiles(hosts[0], base, inputs[1], [], { headers: { Cookie: sessions[0].cookie } });
   const changed = await hosts[0].next("session-state", (message) => message.hasVideo && message.mediaUrl !== states[0].mediaUrl);
   assert.equal(changed.fileName, "blue.mkv");
+  assert.equal((await fetch(base + thumbnailUrls[0])).status, 404, "old-source thumbnails are invalidated immediately");
+  assert.equal((await fetch(base + thumbnailUrls[1])).status, 200);
   assert.ok(replacement.reads.length > 0);
   assert.equal((await fetch(base + states[0].mediaUrl, { headers: { Cookie: sessions[0].cookie } })).status, 404);
   const stillAvailable = await fetch(base + states[1].mediaUrl, { headers: { Cookie: sessions[1].cookie } });
@@ -213,6 +265,7 @@ test("two browser hosts stream independently and replacing/disconnecting one pre
   await once(hosts[0].ws, "close");
   for (let i = 0; i < 30 && (rooms[0].state.mediaPath || fs.existsSync(savedDirectory)); i++) await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(rooms[0].state.mediaPath, null);
+  assert.equal(rooms[0].media.thumbnail(), null);
   assert.equal(fs.existsSync(savedDirectory), false);
   assert.equal((await fetch(base + states[1].mediaUrl, { headers: { Cookie: sessions[1].cookie } })).status, 200);
 });

@@ -1,24 +1,34 @@
 # Room and browser-hosting API
 
-On the root page, the entry dialog lets visitors create a room, join by access code, or continue to the public default room. Invitation URLs containing `?room=CODE` open the Join form with the code prefilled.
+The root page is a room hub. The player is a separate page at `/watch?roomId=ID`, or `/watch` for the public default room. Old `/?roomId=ID` bookmarks redirect to the player. Invitation URLs use `/?room=ID` to select a room on the hub. There are no access codes.
+
+## Room directory and video previews
+
+`GET /api/rooms` returns `{ rooms: [...] }`. Each entry contains `id`, `name`, `passwordRequired`, `participantCount`, `fileName` (or null), `thumbnailUrl` (or null), `invitePath`, and `watchPath`. The permanent public default room and all existing user-created rooms are included. Empty rooms remain listed until their existing idle expiry; room discovery does not extend that deadline. Counts include connected browser tabs.
+
+Room names, filenames, and thumbnail images are public, including for protected rooms. Password hashes, membership credentials, original media URLs, and internal relay URLs are never included. Listing rooms does not grant membership or start a room WebSocket.
+
+The visible hub refreshes the directory every five seconds without overlapping requests. A directory request schedules background extraction of a real frame at the room's shared playback position, at most once every 30 seconds per source. Unchanged paused frames are reused. One FFmpeg worker is shared across all rooms, using a separate bounded relay lease with a 16 MiB read limit, ten-second timeout, and 256 KiB output limit. Extraction does not delay media readiness or directory responses.
+
+`GET` or `HEAD /api/rooms/:roomId/thumbnail?v=MEDIA_VERSION&r=REVISION` serves the latest 320x180 JPEG without requiring membership. Responses use `Cache-Control: no-store`. A superseded revision, replaced source, disconnected provider, missing frame, or expired room returns `404`. Failed refreshes retain the last image for the same source. Rooms, thumbnails, and jobs remain in memory; replacement, disconnect, expiry, and shutdown invalidate cached frames and cancel pending work.
 
 ## Creating and joining
 
-`POST /api/rooms` accepts a JSON object:
+`POST /api/rooms` accepts:
 
 ```json
-{ "name": "Friday films", "accessCode": "FRIDAY", "password": "optional secret", "displayName": "Alex" }
+{ "name": "Friday films", "password": "optional secret", "displayName": "Alex" }
 ```
 
-Only `name` is required. Names are 1–80 characters after whitespace normalization. Custom codes are 4–32 ASCII letters, digits, or hyphens, normalized to uppercase; an omitted/empty code generates eight random characters. Passwords are optional, at most 128 characters, and case/whitespace-sensitive. Display names use the existing 24-character room-local naming rules. Passwords are salted and hashed with scrypt in memory.
+Only `name` is required. Names are 1-80 characters after whitespace normalization; duplicate room names are allowed. Passwords are optional, at most 128 characters, and case/whitespace-sensitive. Display names use the existing 24-character room-local naming rules. Passwords are salted and hashed with scrypt in memory.
 
 Success returns `201`, a room-scoped HttpOnly/SameSite=Strict membership cookie, and:
 
 ```json
 {
   "room": {
-    "id": "room-uuid", "name": "Friday films", "accessCode": "FRIDAY",
-    "passwordRequired": true, "invitePath": "/?room=FRIDAY", "watchPath": "/?roomId=room-uuid"
+    "id": "room-uuid", "name": "Friday films", "passwordRequired": true,
+    "invitePath": "/?room=room-uuid", "watchPath": "/watch?roomId=room-uuid"
   },
   "member": { "clientId": "member-uuid", "role": "host" },
   "endpoints": {
@@ -28,29 +38,30 @@ Success returns `201`, a room-scoped HttpOnly/SameSite=Strict membership cookie,
 }
 ```
 
-`POST /api/rooms/join` accepts `{ "accessCode": "FRIDAY", "password": "optional secret", "displayName": "Sam" }`. It redirects with **307** into `/rooms/:roomId/api/join`, preserving the POST body. Browser fetch follows this automatically and attaches any existing cookie within that room's scope. The final response is `200` with the same response shape and a membership cookie. An existing membership is reused without resetting its host identity. Non-browser clients must follow the redirect and maintain a cookie jar.
+`POST /api/rooms/join` accepts `{ "roomId": "room-uuid", "password": "optional secret", "displayName": "Sam" }`. It redirects with **307** into `/rooms/:roomId/api/join`, preserving the POST body so browser fetch attaches any existing cookie within that room's scope. The final response is `200` with the same response shape and a membership cookie. Clients may also POST directly to the scoped endpoint, with the room ID supplied by its path. A body room ID, when supplied, must match the path.
 
-The entry form asks for a room name when creating, and an access code when joining. A display name is optional in either flow; when omitted, the client supplies its generated `Guest-XXXX` name. After creating a room, the interface shows the access code and invitation link before entering the room. Successful admission then navigates to the returned `room.watchPath`.
+Existing membership is reused without resetting host identity or requiring the password again. New members of protected rooms must supply the password; open rooms join without one. Non-browser clients must follow redirects and maintain a cookie jar. Joining `roomId: "default"` checks blocking and returns the public room's metadata directly, without a private membership cookie.
 
-For example, in the browser console on the WatchParty origin:
+The hub offers an optional display name, generates a guest name when blank, and opens the returned `room.watchPath` after successful creation or admission. Passwords never appear in invitation URLs. A protected invitation prompts for the password unless the browser already has valid membership; open invitations enter directly.
+
+Before creating or joining in a custom client, bootstrap persistent browser identity with `POST /api/viewer-identity` as described below. For example:
 
 ```js
+await fetch('/api/viewer-identity', { method: 'POST' });
 const response = await fetch('/api/rooms', {
   method: 'POST', headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ name: 'Friday films', accessCode: 'FRIDAY', password: 'secret' })
+  body: JSON.stringify({ name: 'Friday films', password: 'secret' })
 });
 const session = await response.json();
 if (!response.ok) throw new Error(session.error);
 location.href = session.room.watchPath;
 ```
 
-Viewers use `/api/rooms/join` with the code/password, then navigate to the returned watch path. The invitation URL carries only the access code; users still confirm Join and provide a password if required.
-
 `GET /rooms/:roomId/api/session` restores metadata and the current role. `POST /rooms/:roomId/api/leave` revokes the caller's membership and connections and expires the cookie. Requests to other rooms cannot reuse that membership. Cookies have room-specific paths and gain `Secure` over HTTPS. Browser mutations/upgrades require a matching Origin when one is supplied.
 
-The room name appears above the player panel while connected. Use **Invite** to view and copy the private-room access code; the public default room is labeled as having no access code. The private-room header's **Leave room / switch** button calls the leave endpoint and returns to the root room chooser. From the public room, **Choose or create a room** reopens the chooser without creating another public-room connection.
+The player shows the room name, an **Invite** control that copies the invitation link, and **Leave room**, which returns to the hub. Missing membership redirects to the hub's join flow; blocked browsers return with an explanatory message.
 
-Errors return `{ "error": "message" }`: `400` invalid input, `401` missing membership/incorrect password, `403` forbidden origin, `404` missing room/endpoint, `405` wrong method, `409` code collision, `413` body over 16 KiB, and `429` admission limits. The defaults permit 100 private rooms, 1,000 memberships per room, and 30 admission attempts per address per minute. No public room listing exists.
+Errors return `{ "error": "message" }`: `400` invalid input, `401` missing membership/incorrect password, `403` forbidden origin or blocked browser, `404` missing room/endpoint, `405` wrong method, `413` body over 16 KiB, and `429` admission limits. The defaults permit 100 user-created rooms, 1,000 memberships per room, and 30 admission attempts per address per minute. Directory and thumbnail GET requests do not consume the admission limit.
 
 ## Chat, replies, and reactions
 
@@ -141,11 +152,15 @@ The server requests `{ type: "source-read", requestId, fileId, offset, length }`
 
 Requests are at most 256 KiB, with four outstanding per room and a bounded queue. Honor browser `bufferedAmount` backpressure. Reads time out after 30 seconds. Unsolicited/expired request IDs cannot fulfill another request; corrupt lengths or invalid attachment close the connection. Source identity is bound to the data socket, so old sockets cannot contribute bytes to a replacement source.
 
-Only server-side FFmpeg receives the capability-protected loopback URL. Viewers receive a room-authenticated `/rooms/:roomId/media/original?v=:mediaVersion` URL supporting GET, HEAD, and single byte ranges (206/416), together with compatibility HLS/caption URLs. No host attachment token or internal URL is exposed. Original bytes use a bounded 16 MiB per-source memory cache with shared in-flight reads; generated segments, captions, and fonts are cached on disk. This is an on-demand relay, not a full-file upload; probing and playback may nevertheless read a large portion or all of the file. Embedded caption preparation uses selective reads that skip audio/video payloads.
+Only server-side FFmpeg receives the capability-protected loopback URL. Viewers receive a room-authenticated `/rooms/:roomId/media/original?v=:mediaVersion` URL supporting GET, HEAD, and single byte ranges (206/416), together with compatibility HLS/caption URLs. No host attachment token or internal URL is exposed. Original bytes use a bounded 16 MiB per-source memory cache with shared in-flight reads; generated segments, captions, and fonts are cached on disk. Preparation uses a shared 32 MiB read budget and a 30-second deadline; normal playback can eventually read the entire file. Embedded caption preparation uses selective reads that skip audio/video payloads.
 
 ## Playback selection and compatibility
 
 `session-state` adds `originalUrl`, `compatibilityUrl`, and `mediaInfo` (MIME type, video/audio codecs, audio presence/sample rate/channels, pixel format, dimensions, fps, bit depth, and HDR flag). `mediaUrl` remains the compatibility playlist URL for older clients. Readiness depends on basic metadata, not encoder detection or subtitle conversion. Initial caption descriptors may refer to tracks not yet extracted; GET of a selected caption starts its extraction. Selective discovery can subsequently publish additional tracks through `captions-updated` without replacing the source or changing existing selections. Unsupported bitmap tracks are omitted.
+
+ISO container inspection adds `mediaInfo.container: { family: "iso-bmff", fragmented, indexed }`. Fragmented/hybrid MP4 preparation derives the complete timeline from metadata and uses a validated MFRA index for FFmpeg probing, conversion, and seeks. Native-compatible sources remain eligible for native playback; fragmented sources that would select WASM use compatibility instead. Caption discovery shares the inspected track metadata, with fragment indexing deferred until extraction is needed.
+
+`mediaInfo.preparation` includes `indexMode` (`mfra`, `structural`, or `container`), `metadata: { requests, ranges, bytes, cacheHitBytes }`, `probe: { bytes, reads }`, aggregate budgeted `bytes`, and `elapsedMs`. Metadata metrics describe exact provider reads; probe metrics count bridge reads, including cached bytes. Caption metrics remain separate. Source replacement cancels inspection and revokes probe leases. Unindexed compatibility startup also uses the preparation limits until its first segment is published. Exhaustion reports `MEDIA_PREPARATION_LIMIT` with remuxing guidance and stops encoder retries; no partial timeline is published.
 
 Embedded caption jobs use an internal exact-range reader over the authenticated file relay. Container adapters read metadata and selected subtitle payloads while skipping audio/video payloads; these reads do not expand to the original-stream cache's 256 KiB pages. Small local subtitle-only inputs are normalized to ASS by FFmpeg. Indexes, pending jobs, completed captions, and fonts are shared per source. The original video URL is never an input to caption conversion, and unsupported extraction never falls back to scanning the video. A failed caption GET returns HTTP 503 with an explanation and an external-caption suggestion; playback remains available.
 

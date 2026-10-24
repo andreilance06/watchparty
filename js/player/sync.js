@@ -15,6 +15,14 @@ export function createPlaybackSync({ elements, state: session, send }) {
   }
 
   function accept(state) {
+    if (state.sessionId && state.sessionId !== session.sessionId) {
+      cancel();
+      pendingSeek = queuedTransport = queuedRate = null;
+      appliedRate = undefined;
+      session.sessionId = state.sessionId;
+      session.mediaVersion = undefined;
+      session.playbackRevision = undefined;
+    }
     if (Number.isFinite(state.mediaVersion) && Number.isFinite(session.mediaVersion) && state.mediaVersion < session.mediaVersion) return false;
     if (state.mediaVersion !== session.mediaVersion) pendingSeek = queuedTransport = queuedRate = null;
     if (state.mediaVersion === session.mediaVersion &&

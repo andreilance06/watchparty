@@ -10,8 +10,13 @@ const { createSegmentService } = require("./segments");
 const { createRenditionService } = require("./renditions");
 const { qualityOptions, BITRATES } = require("./quality");
 const { createSubtitleService } = require("./subtitles");
+const { inspectIso, isoTimeline } = require("./containers/iso-metadata");
+const { checkedReader } = require("./containers/bytes");
+const { createPreparationBudget } = require("./preparation-budget");
+const { createThumbnails, createThumbnailQueue } = require("./thumbnails");
 
-function createMediaService({ state, config, encoderPromise, broadcast }) {
+function createMediaService({ state, config, encoderPromise, broadcast, thumbnails = createThumbnailQueue() }) {
+  const preview = createThumbnails({ state, config, queue: thumbnails });
   const segments = createSegmentService({ state, config, encoderPromise, broadcast });
   const renditions = createRenditionService({ state, config, encoderPromise, broadcast });
   const subtitlesService = createSubtitleService({ state, config });
@@ -20,6 +25,7 @@ function createMediaService({ state, config, encoderPromise, broadcast }) {
   let captionQueue = Promise.resolve();
 
   function stop() {
+    preview.reset();
     probeController?.abort();
     segments.cancel();
     renditions.stop();
@@ -27,6 +33,7 @@ function createMediaService({ state, config, encoderPromise, broadcast }) {
   }
 
   function select(sourcePath, fileName = path.basename(sourcePath)) {
+    preview.reset();
     state.mediaPath = sourcePath;
     state.mediaVersion += 1;
     state.playbackRevision += 1;
@@ -35,6 +42,8 @@ function createMediaService({ state, config, encoderPromise, broadcast }) {
     state.fileName = fileName;
     state.mediaDuration = 0;
     state.mediaInfo = null;
+    state.mediaInputArgs = [];
+    state.openMediaLease = null;
     state.sourcePerformance = null;
     state.captionTracks = [];
     state.mediaReady = false;
@@ -59,13 +68,32 @@ function createMediaService({ state, config, encoderPromise, broadcast }) {
     state.hlsDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "watchparty-hls-"));
     if (oldDirectory) removeTempDirectory(oldDirectory);
     const version = state.mediaVersion;
-    subtitlesService.setSource(sourceReader);
+    const started = performance.now(), budget = createPreparationBudget(config, controller.signal);
+    let probeLease;
     try {
-      const probe = await probeMedia(sourcePath, config.ffmpegPath, controller.signal, state.fileName);
+      let metadata, timeline;
+      if (sourceReader) {
+        const input = sourceReader.metadata || sourceReader;
+        const reader = checkedReader({ ...input, read(offset, length, signal) {
+          budget.consume(length);
+          return input.read(offset, length, signal);
+        } }, budget.signal);
+        metadata = await inspectIso(reader);
+        if (metadata?.fragmented) timeline = await isoTimeline(metadata, reader);
+      }
+      subtitlesService.setSource(sourceReader ? { ...sourceReader, isoMetadata: () => metadata } : null);
+      probeLease = sourceReader?.openLease?.(budget);
+      const probe = await probeMedia(probeLease?.url || sourcePath, config.ffmpegPath, budget.signal, state.fileName, { inputArgs: timeline?.inputArgs });
+      if (timeline) probe.duration = timeline.durationEnd - Math.min(0, probe.start);
       if (version !== state.mediaVersion || !state.mediaPath || !state.hlsDirectory) return;
       state.selectedEncoder = "Direct playback";
       state.mediaDuration = probe.duration;
       state.mediaInfo = probe.info;
+      state.mediaInputArgs = timeline?.inputArgs || [];
+      state.openMediaLease = sourceReader?.openLease || null;
+      if (metadata) state.mediaInfo.container = { family: "iso-bmff", fragmented: metadata.fragmented, indexed: Boolean(timeline?.indexed) };
+      state.mediaInfo.preparation = { indexMode: timeline ? timeline.indexed ? "mfra" : "structural" : "container", metadata: { ...(sourceReader?.metadata?.metrics || {}) },
+        probe: { ...(probeLease?.metrics || {}) }, bytes: budget.metrics.bytes, elapsedMs: performance.now() - started };
       state.mediaInfo.sourceSize = sourceReader?.size || 0;
       state.mediaInfo.bitrate = sourceReader?.size ? sourceReader.size * 8 / probe.duration : probe.info.bitrate || 0;
       state.mediaInfo.qualityOptions = qualityOptions(state.mediaInfo);
@@ -94,8 +122,8 @@ function createMediaService({ state, config, encoderPromise, broadcast }) {
     } catch (error) {
       if (version !== state.mediaVersion) return;
       state.mediaProcessing = false;
-      broadcast({ type: "media-error", message: "The selected video could not be prepared. Check that the host's file is available and supported by FFmpeg." });
-    }
+      broadcast({ type: "media-error", ...(budget.error ? { code: budget.error.code } : {}), message: budget.error?.message || "The selected video could not be prepared. Check that the host's file is available and supported by FFmpeg." });
+    } finally { probeLease?.close(); budget.finish(); }
   }
 
   function reset() {
@@ -109,6 +137,8 @@ function createMediaService({ state, config, encoderPromise, broadcast }) {
     state.mediaProcessing = false;
     state.mediaDuration = 0;
     state.mediaInfo = null;
+    state.mediaInputArgs = [];
+    state.openMediaLease = null;
     state.captionTracks = [];
     state.playback = createPlayback();
     stop();
@@ -156,6 +186,8 @@ function createMediaService({ state, config, encoderPromise, broadcast }) {
   }
 
   return {
+    refreshThumbnail: preview.refresh,
+    thumbnail: preview.get,
     select,
     prepare: prepareMedia,
     reset,

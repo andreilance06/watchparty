@@ -74,7 +74,7 @@ test("private-room blocks reject old memberships and new admission until unblock
   const created = await f.api("/api/rooms", { name: "Private moderation", password: "secret" });
   const host = await f.connect("Host", created.cookie, created.body.endpoints.websocket);
   const identity = (await f.api("/api/viewer-identity")).cookie;
-  const body = { accessCode: created.body.room.accessCode, password: "secret" };
+  const body = { roomId: created.body.room.id, password: "secret" };
   let membership = await f.api("/api/rooms/join", body, identity);
   const cookie = `${membership.cookie}; ${identity}`;
   const viewer = await f.connect("Viewer", cookie, membership.body.endpoints.websocket);
@@ -256,10 +256,10 @@ test("blocked browsers stop reconnecting and return to room selection", async ()
   const b = createBrowserDouble(); await b.load("js/app.js"); const socket = b.sockets[0]; socket.open();
   socket.receive({ type: "role", role: "viewer", clientId: "viewer" });
   socket.receive({ type: "room-blocked" }); b.runTimers(1500); await flush();
-  assert.equal(b.sockets.length, 1); assert.equal(b.elements.get("roomEntry").hidden, false);
-  assert.match(b.elements.get("roomEntryStatus").textContent, /blocked/);
+  assert.equal(b.sockets.length, 1); assert.equal(b.context.location.href, "/?blocked=1");
+
   const fresh = createBrowserDouble();
   fresh.context.fetch = async url => url === "/api/session" ? { ok: false, json: async () => ({ code: "ROOM_BLOCKED" }) } : { ok: true };
   await fresh.load("js/app.js"); assert.equal(fresh.sockets.length, 0);
-  assert.match(fresh.elements.get("roomEntryStatus").textContent, /blocked/);
+  assert.equal(fresh.context.location.href, "/?blocked=1");
 });

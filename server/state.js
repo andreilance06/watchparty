@@ -1,4 +1,5 @@
 const path = require("path");
+const { randomUUID } = require("node:crypto");
 
 function createPlayback() {
   return { paused: true, time: 0, rate: 1, updatedAt: Date.now() };
@@ -6,6 +7,7 @@ function createPlayback() {
 
 function createSession() {
   return {
+    sessionId: randomUUID(),
     clients: new Map(),
     viewerPermissions: new Map(),
     blockedParticipants: new Map(),
@@ -26,6 +28,8 @@ function createSession() {
     compatibilityStartIndex: 0,
     mediaDuration: 0,
     mediaInfo: null,
+    mediaInputArgs: [],
+    openMediaLease: null,
     mediaReady: false,
     mediaProcessing: false,
     captionTracks: [],
@@ -52,16 +56,16 @@ function currentTime(state) {
 
 function sessionState(state, syncMode = "tick") {
   const compatibilityUrl = state.mediaPath && state.mediaReady
-    ? `${state.basePath || ""}/hls/master.m3u8?v=${state.mediaVersion}&g=${state.streamGeneration || 0}` : null;
+    ? `${state.basePath || ""}/hls/master.m3u8?s=${state.sessionId}&v=${state.mediaVersion}&g=${state.streamGeneration || 0}` : null;
   return {
-    type: "session-state", hasVideo: Boolean(state.mediaPath && state.mediaReady),
+    type: "session-state", sessionId: state.sessionId, hasVideo: Boolean(state.mediaPath && state.mediaReady),
     sourceId: state.sourceId, sourceOwnerId: state.sourceOwnerId,
     processing: state.mediaProcessing, mediaVersion: state.mediaVersion,
     mediaUrl: compatibilityUrl,
     playbackRevision: state.playbackRevision,
     streamGeneration: state.streamGeneration,
     captions: state.captionTracks,
-    originalUrl: state.mediaPath && state.mediaReady ? `${state.basePath || ""}/media/original?v=${state.mediaVersion}` : null,
+    originalUrl: state.mediaPath && state.mediaReady ? `${state.basePath || ""}/media/original?s=${state.sessionId}&v=${state.mediaVersion}` : null,
     compatibilityUrl,
     mediaInfo: state.mediaInfo,
     fileName: state.mediaPath ? state.fileName || path.basename(state.mediaPath) : null,

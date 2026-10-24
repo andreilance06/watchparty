@@ -20,12 +20,13 @@ export function createPlayer({ elements, state: session, send, report, files, at
   let switchStarted = 0, lastProgress = 0, lastTime = -1, metrics = {}, selectionStarted = 0;
   let requestSequence = 0, requestTimer, recoveryTimer, recovery, recoveryUsed = false, terminalError = false;
   let watchingPlayback = false;
+  let loadingSource, openingVideo = false;
   const surface = () => video.player?.getHLSVideoElement?.() || video.player?.getVideoElement?.() || video;
   const readyState = () => surface().readyState;
   const quality = createAdaptiveQuality({ video, session, send, report, surface, fail: failPlayback,
     switchSource(engine) {
       terminalError = false; cancelRecovery(); advanceSnapshot();
-      setVideoSource(latest.originalUrl, latest.mediaInfo?.mime || "application/octet-stream", engine === "native" ? "native wasm" : "wasm native");
+      setVideoSource(latest.originalUrl, latest.mediaInfo?.mime || "application/octet-stream", originalEngine(engine));
     },
     switchRendition(message, recover) {
       terminalError = false; cancelRecovery(); advanceSnapshot();
@@ -36,6 +37,12 @@ export function createPlayer({ elements, state: session, send, report, files, at
       } else setVideoSource(message.url, "application/vnd.apple.mpegurl", "hlsjs native");
     }
   });
+  function originalEngine(choice) {
+    if (choice !== "native") return "wasm native";
+    // A native failure must reach our compatibility handler, not start Movi's
+    // implicit WASM fallback and scan a fragmented recording in the browser.
+    return latest?.mediaInfo?.container?.fragmented ? "native" : "native wasm";
+  }
   function advanceSnapshot() {
     if (!latest) return;
     latest = { ...latest, time: Math.min(latest.duration || Infinity,
@@ -70,7 +77,9 @@ export function createPlayer({ elements, state: session, send, report, files, at
 
   // Source changes are asynchronous in Movi. Never use the retired player's
   // readyState or errors to complete/fail its replacement.
-  const awaitingReplacement = () => Boolean(recovery?.phase === "loading" && recovery.player && recovery.player === video.player) || quality.waiting();
+  const awaitingReplacement = () => Boolean(recovery?.phase === "loading" && recovery.player && recovery.player === video.player) || quality.waiting() ||
+    Boolean(loadingSource && (loadingSource.generation !== generation || loadingSource.url !== session.activeMediaUrl ||
+      loadingSource.player && loadingSource.player === video.player || typeof video.setFile === "function" && !video.player));
 
   function reloadCompatibility(url) {
     const sameSource = session.activeMediaUrl === url;
@@ -100,10 +109,20 @@ export function createPlayer({ elements, state: session, send, report, files, at
     session.sourceSwitching = true;
     session.suppressVideoEvents = true;
     video.pause();
-    video.removeAttribute("src");
+    const previousPlayer = video.player;
     video.querySelectorAll("source[data-watchparty-source]").forEach((source) => source.remove());
-    if (!url) return;
+    if (!url) {
+      loadingSource = null;
+      session.activeMediaUrl = "";
+      // Empty source children do not unload Movi. Its public setter retires
+      // decoders, native audio, and pending source requests immediately.
+      video.src = "";
+      video.style.visibility = "hidden";
+      return;
+    }
+    video.removeAttribute("src");
     session.activeMediaUrl = url;
+    loadingSource = { generation, url, player: previousPlayer };
     mode = engine === "hlsjs native" ? "compatibility" : engine.split(" ")[0];
     session.playbackMode = mode;
     metrics.playbackMode = mode;
@@ -117,7 +136,7 @@ export function createPlayer({ elements, state: session, send, report, files, at
     syncStatus.textContent = mode === "compatibility" ? "Preparing compatible playback…" : "Opening video…";
     // Real players load asynchronously. Already-ready DOM doubles also exercise
     // the synchronous sync path without waiting for a browser metadata event.
-    if (!video.player && video.readyState >= 1) sync.apply(latest, true);
+    if (!video.player && !awaitingReplacement() && video.readyState >= 1) sync.apply(latest, true);
   }
 
   function showNoVideo(status = "Waiting for host") {
@@ -190,11 +209,12 @@ export function createPlayer({ elements, state: session, send, report, files, at
     updateSharingStatus();
     const compatibilityChanged = latest && mode === "compatibility" &&
       state.compatibilityUrl && state.compatibilityUrl !== latest.compatibilityUrl;
-    const key = `${state.mediaVersion ?? ""}:${state.originalUrl || state.mediaUrl || ""}`;
+    const key = `${state.sessionId || ""}:${state.mediaVersion ?? ""}:${state.originalUrl || state.mediaUrl || ""}`;
     session.mediaVersion = state.mediaVersion;
     session.latestHostPaused = Boolean(state.paused);
     subtitles.setAvailability({ hasVideo: Boolean(state.hasVideo && !state.processing), canAdd: session.role === "host" });
     if (state.processing) {
+      openingVideo = true;
       quality.reset(null);
       cancelRecovery(); terminalError = false; recoveryUsed = false;
       generation++; latest = null; sourceKey = "";
@@ -215,13 +235,18 @@ export function createPlayer({ elements, state: session, send, report, files, at
     }
     latest = state; latestAt = performance.now();
     fileName.textContent = state.fileName || "Selected video";
-    videoPlaceholder.hidden = true; viewerControls.hidden = true;
+    viewerControls.hidden = true;
     if (key !== sourceKey) {
       cancelRecovery(); terminalError = false; recoveryUsed = false;
       sourceKey = key; generation++; mode = "";
       quality.reset(state);
       const token = generation;
-      metrics = { selectionStarted: selectionStarted || performance.now() };
+      metrics = { selectionStarted: selectionStarted || performance.now(), preparation: state.mediaInfo?.preparation };
+      openingVideo = true;
+      setVideoSource(null);
+      videoPlaceholder.hidden = false;
+      placeholderTitle.textContent = "Opening video…";
+      placeholderText.textContent = "Preparing the selected video.";
       session.sourceSwitching = true; session.activeEncoder = "Direct playback";
       subtitles.setTracks(state.captions, { reset: true, key });
       // Legacy sessions and non-browser tests can still supply HLS alone.
@@ -230,7 +255,7 @@ export function createPlayer({ elements, state: session, send, report, files, at
         if (token !== generation || !latest || terminalError) return;
         if (quality.enabled()) quality.start(choice);
         else if (choice === "compatibility") requestCompatibility("device capabilities");
-        else setVideoSource(latest.originalUrl, latest.mediaInfo?.mime || "application/octet-stream", choice === "native" ? "native wasm" : "wasm native");
+        else setVideoSource(latest.originalUrl, latest.mediaInfo?.mime || "application/octet-stream", originalEngine(choice));
       });
     } else {
       if (state.captions) subtitles.setTracks(state.captions);
@@ -345,7 +370,15 @@ export function createPlayer({ elements, state: session, send, report, files, at
     lastProgress = performance.now();
   }
   function progress() {
+    if (!latest || !session.activeMediaUrl || terminalError || pendingCompatibility || awaitingReplacement()) return;
     lastProgress = performance.now();
+    if (readyState() >= 2) loadingSource = null;
+    if (readyState() >= 2 && openingVideo) {
+      openingVideo = false;
+      selectionStarted = 0;
+      video.style.visibility = "";
+      videoPlaceholder.hidden = true;
+    }
     if (readyState() >= 2 && !metrics.firstPictureMs) {
       metrics.firstPictureMs = performance.now() - metrics.selectionStarted;
       video.watchpartyMetrics = metrics;

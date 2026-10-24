@@ -13,7 +13,7 @@ function createCaptionSource(source, signal) {
     if (!catalog) catalog = (async () => {
       const signature = await reader.read(0, Math.min(16, reader.size));
       if (signature.readUInt32BE(0) === 0x1a45dfa3) return matroskaCaptions(reader);
-      if (["ftyp", "moov", "mdat", "free", "wide", "skip"].includes(signature.toString("ascii", 4, 8))) return isoCaptions(reader);
+      if (["ftyp", "moov", "mdat", "free", "wide", "skip", "moof", "styp"].includes(signature.toString("ascii", 4, 8))) return isoCaptions(reader, await source.isoMetadata?.());
       if (signature.toString("ascii", 0, 4) === "RIFF" && signature.toString("ascii", 8, 12) === "AVI ") return aviCaptions(reader);
       if (signature.toString("ascii", 0, 4) === "OggS") return oggCaptions(reader);
       throw unsupported();

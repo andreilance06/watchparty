@@ -15,7 +15,7 @@ function streamDirectory(state) {
 
 function writePlaylists(state, targetSeconds) {
   const { seconds, count } = segmentSchedule(state, targetSeconds);
-  const query = `v=${state.mediaVersion}&g=${state.roomState?.streamGeneration ?? state.streamGeneration ?? 0}` +
+  const query = `s=${state.sessionId}&v=${state.mediaVersion}&g=${state.roomState?.streamGeneration ?? state.streamGeneration ?? 0}` +
     (state.rendition ? `&r=${state.rendition.id}&rg=${state.streamGeneration || 0}` : "");
   const video = ["#EXTM3U", "#EXT-X-VERSION:6", `#EXT-X-TARGETDURATION:${Math.ceil(seconds)}`,
     "#EXT-X-PLAYLIST-TYPE:VOD", "#EXT-X-MEDIA-SEQUENCE:0", "#EXT-X-INDEPENDENT-SEGMENTS"];

@@ -5,6 +5,18 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
 const webCodecsInfo = { mime: 'video/x-matroska', videoCodec: 'h264', bitDepth: 8, pixelFormat: 'yuv420p',
  width: 1920, height: 1080, fps: 30, hasAudio: false };
 
+test('fragmented MP4 bypasses WASM while native-compatible MP4 keeps native playback', async () => {
+ const b = createBrowserDouble({ assessPlayback: () => { throw new Error('must not start WASM assessment'); } });
+ const create = b.document.createElement;
+ b.document.createElement = tag => { const element = create(tag); if (tag === 'video') element.canPlayType = () => 'probably'; return element; };
+ const { choosePlayback } = await b.load('js/player/playback.js');
+ const info = { ...webCodecsInfo, mime: 'video/mp4', videoCodec: 'hevc', hasAudio: true, audioCodec: 'opus',
+  container: { family: 'iso-bmff', fragmented: true } };
+ assert.equal(await choosePlayback(info), 'compatibility');
+ assert.equal(await choosePlayback({ ...info, videoCodec: 'h264', audioCodec: 'aac' }), 'native');
+ assert.equal(await choosePlayback({ ...info, videoCodec: 'h264', hasAudio: false }), 'native');
+});
+
 async function playbackHarness({ mode = 'compatibility', paused = true, role = 'host' } = {}) {
  const b = createBrowserDouble(); let now = 1000;
  b.context.performance = { now: () => now };
@@ -29,6 +41,16 @@ async function playbackHarness({ mode = 'compatibility', paused = true, role = '
   advance: ms => { now += ms; }, source: () => video.children.find(child => child.tagName === 'source') };
 }
 
+test('native fragmented MP4 failure reaches compatibility without an implicit WASM scan', async () => {
+ const h = await playbackHarness({ mode: 'native' });
+ h.player.applySessionState({ ...h.snapshot, mediaVersion: 2, originalUrl: '/media/original?v=2',
+  mediaInfo: { ...h.snapshot.mediaInfo, container: { family: 'iso-bmff', fragmented: true } } });
+ await flush(); h.b.runTimers(100); await flush();
+ assert.equal(h.video.getAttribute('engine'), 'native');
+ h.video.dispatch('error', { detail: { message: 'Native decode failed' } });
+ assert.equal(h.requests().length, 1);
+});
+
 test('long pauses and foreground return give active playback a fresh five-second stall window', async () => {
  for (const role of ['host', 'viewer']) {
   const h = await playbackHarness({ mode: 'native', role });
@@ -47,6 +69,72 @@ test('long pauses and foreground return give active playback a fresh five-second
   h.advance(4999); h.b.runTimers(1000); assert.equal(h.requests().length, 0);
   h.advance(1); h.b.runTimers(1000);
   assert.equal(h.requests().length, 1, 'a genuine active stall still falls back');
+ }
+});
+
+test('file replacement retires playback immediately and ignores ready state from the old player', async () => {
+ for (const paused of [false, true]) {
+  const h = await playbackHarness({ mode: 'native', paused });
+  const oldSurface = h.b.document.createElement('video');
+  Object.assign(oldSurface, { readyState: 4, paused, currentTime: 17 });
+  const oldPlayer = { getVideoElement: () => oldSurface };
+  h.video.player = oldPlayer;
+  let retired = 0;
+  h.video.setFile = () => {};
+  Object.defineProperty(h.video, 'src', { set(value) {
+   assert.equal(value, ''); retired++; oldSurface.paused = true; h.video.player = null;
+  } });
+  h.player.applySessionState({ ...h.snapshot, mediaVersion: 2, processing: true });
+  assert.equal(retired, 1); assert.equal(oldSurface.paused, true);
+  assert.equal(h.elements.videoPlaceholder.hidden, false); assert.equal(h.video.style.visibility, 'hidden');
+  h.player.applySessionState({ ...h.snapshot, mediaVersion: 2, originalUrl: '/media/original?v=2' }); await flush();
+  // The wrapper can still report HAVE_ENOUGH_DATA while a new decoder is absent.
+  h.video.dispatch('loadeddata'); h.video.dispatch('canplay'); h.b.runTimers(100);
+  assert.equal(h.elements.videoPlaceholder.hidden, false);
+  assert.equal(h.state.sourceSwitching, true); assert.equal(h.video.paused, true);
+  const replacement = h.b.document.createElement('video');
+  Object.assign(replacement, { readyState: 0, paused: true, currentTime: 0 });
+  h.video.player = { getVideoElement: () => replacement };
+  h.b.runTimers(100); assert.equal(h.elements.videoPlaceholder.hidden, false);
+  replacement.readyState = 2; h.b.runTimers(100); await flush();
+  assert.equal(h.elements.videoPlaceholder.hidden, true); assert.equal(h.video.style.visibility, '');
+  assert.equal(h.video.paused, paused);
+  assert.equal(h.sent.filter(message => message.type === 'video-state').length, 0);
+ }
+});
+
+test('new session identities accept reset counters while stale revisions within that session stay rejected', async () => {
+ const h = await playbackHarness({ mode: 'native' });
+ h.player.applySessionState({ ...h.snapshot, sessionId: 'before-restart', mediaVersion: 9, playbackRevision: 20 }); await flush();
+ const restarted = { ...h.snapshot, sessionId: 'after-restart', mediaVersion: 1, playbackRevision: 1,
+  originalUrl: '/media/original?s=after-restart&v=1' };
+ h.player.applySessionState(restarted); await flush();
+ assert.equal(h.source().src, restarted.originalUrl);
+ assert.equal(h.state.mediaVersion, 1); assert.equal(h.state.playbackRevision, 1);
+ h.player.applySessionState({ ...restarted, mediaVersion: 0, originalUrl: '/stale' });
+ h.player.applySessionState({ ...restarted, playbackRevision: 0, originalUrl: '/stale' }); await flush();
+ assert.equal(h.source().src, restarted.originalUrl);
+});
+
+test('rapid file changes cannot reveal an older file whose capability check finishes last', async () => {
+ const assessments = [];
+ const b = createBrowserDouble({ assessPlayback: () => new Promise(resolve => assessments.push(resolve)) });
+ b.context.isSecureContext = true; b.context.VideoDecoder = {};
+ await b.load('js/app.js'); const socket = b.sockets[0], video = b.elements.get('video'); socket.open();
+ video.readyState = 4;
+ const snapshot = { type: 'session-state', hasVideo: true, paused: true, time: 0, playbackRate: 1,
+  mediaInfo: webCodecsInfo, captions: [] };
+ for (const mediaVersion of [1, 2, 3]) {
+  socket.receive({ ...snapshot, mediaVersion, originalUrl: `/media/original?v=${mediaVersion}` }); await flush();
+ }
+ assessments[2]({ playable: true, smooth: true, video: { decoder: 'hardware' } }); await flush(); b.runTimers(100);
+ const source = video.children.find(child => child.tagName === 'source');
+ assert.equal(source.src, '/media/original?v=3');
+ assert.equal(b.elements.get('videoPlaceholder').hidden, true);
+ for (const resolve of [assessments[1], assessments[0]]) {
+  resolve({ playable: true, smooth: true, video: { decoder: 'hardware' } }); await flush(); b.runTimers(100);
+  assert.equal(video.children.find(child => child.tagName === 'source'), source);
+  assert.equal(video.style.visibility, '');
  }
 });
 
@@ -269,7 +357,7 @@ test('late WebCodecs selection cannot replace a newer native source or revive a 
  b.runTimers(500);await flush();
  assert.equal(socket.sent.filter(m=>m.type==='compatibility-request').length,1);
  resolveAssessment({playable:true,smooth:true,video:{decoder:'hardware'}});await flush();
- assert.equal(video.children.find(c=>c.tagName==='source').src,'/media/original?v=2');
+ assert.equal(video.children.find(c=>c.tagName==='source')?.src,undefined,'the previous video stays retired while compatibility is negotiated');
  assert.equal(socket.sent.filter(m=>m.type==='compatibility-request').length,1);
 });
 

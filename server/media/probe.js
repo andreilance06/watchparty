@@ -48,9 +48,10 @@ function parseSubtitleStreams(output, sourcePath) {
   return subtitles;
 }
 
-function probeMedia(sourcePath, ffmpegPath, signal, fileName) {
+function probeMedia(sourcePath, ffmpegPath, signal, fileName, options = {}) {
   return new Promise((resolve, reject) => {
-    execFile(ffmpegPath, ["-hide_banner", ...(sourcePath.startsWith("http:") ? ["-rw_timeout", "30000000"] : []), "-i", sourcePath], { windowsHide: true, maxBuffer: 4 * 1024 * 1024, signal }, (error, _stdout, stderr) => {
+    execFile(ffmpegPath, ["-hide_banner", ...(sourcePath.startsWith("http:") ? ["-rw_timeout", "30000000"] : []), ...(options.inputArgs || []), "-i", sourcePath], { windowsHide: true, maxBuffer: 4 * 1024 * 1024, signal }, (error, _stdout, stderr) => {
+      if (signal.aborted) { reject(signal.reason || error); return; }
       const output = String(stderr || "");
       const duration = parseDuration(output);
       if (!duration) { reject(new Error(error?.message || "Could not determine the video duration.")); return; }
@@ -60,7 +61,7 @@ function probeMedia(sourcePath, ffmpegPath, signal, fileName) {
         const attachment = /Stream #0:(\d+).*Attachment:\s*(ttf|otf)/.exec(line);
         if (attachment && fonts.length < 16) fonts.push({ map: attachment[1], extension: attachment[2] });
       }
-      resolve({ duration, subtitles, fonts, info: parseMediaInfo(output, fileName) });
+      resolve({ duration, start: Number(/start:\s*(-?[\d.]+)/.exec(output)?.[1]) || 0, subtitles, fonts, info: parseMediaInfo(output, fileName) });
     });
   });
 }

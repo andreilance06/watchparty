@@ -205,7 +205,7 @@ test("private-room suggestion removal survives browser session loss and explicit
   };
   const browser = (await api("/api/viewer-identity")).cookie;
   const room = await api("/api/rooms", { name: "Poll ownership" });
-  const join = () => api(`/rooms/${room.body.room.id}/api/join`, { accessCode: room.body.room.accessCode }, browser);
+  const join = () => api(`/rooms/${room.body.room.id}/api/join`, { roomId: room.body.room.id }, browser);
   const connect = async (membership, name, identity = browser) => {
     const peer = await connectPeer(base.replace("http", "ws") + room.body.endpoints.websocket, name, { headers: { Cookie: [identity, membership.cookie].filter(Boolean).join("; ") } });
     t.after(() => peer.ws.terminate()); return peer;

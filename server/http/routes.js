@@ -43,6 +43,17 @@ function createRequestHandler({ registry, config, movieSearch }) {
     try {
       const url = new URL(req.url, "http://localhost");
       if (req.method === "POST" && !validOrigin(req, config)) throw failure(403, "Request origin is not allowed.");
+      if (url.pathname === "/api/rooms" && req.method === "GET") {
+        json(res, 200, { rooms: registry.list() }); return;
+      }
+      const thumbnailMatch = /^\/api\/rooms\/([^/]+)\/thumbnail$/.exec(url.pathname);
+      if (thumbnailMatch) {
+        if (!["GET", "HEAD"].includes(req.method)) { res.setHeader("Allow", "GET, HEAD"); throw failure(405, "Use GET or HEAD for this endpoint."); }
+        const thumbnail = registry.get(thumbnailMatch[1])?.media.thumbnail();
+        if (!thumbnail || url.searchParams.get("v") !== String(thumbnail.version) || url.searchParams.get("r") !== String(thumbnail.revision)) throw failure(404, "Thumbnail unavailable.");
+        res.writeHead(200, { "Content-Type": "image/jpeg", "Content-Length": thumbnail.data.length, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
+        res.end(req.method === "HEAD" ? undefined : thumbnail.data); return;
+      }
       if (url.pathname === "/api/viewer-identity") {
         if (req.method !== "POST") { res.setHeader("Allow", "POST"); throw failure(405, "Use POST for this endpoint."); }
         registry.browserIdentity(req, res);
@@ -67,9 +78,13 @@ function createRequestHandler({ registry, config, movieSearch }) {
         const body = await readJson(req);
         const creating = url.pathname === "/api/rooms";
         if (!creating) {
-          if (typeof body.accessCode !== "string" || !body.accessCode.trim()) throw failure(400, "An access code is required.");
-          const target = registry.findByCode(body.accessCode);
+          if (typeof body.roomId !== "string" || !body.roomId.trim()) throw failure(400, "A room ID is required.");
+          const target = registry.get(body.roomId);
           if (!target) { admit(req); throw failure(404, "Room not found."); }
+          if (target.id === "default") {
+            admit(req); registry.assertAdmission(req, target);
+            json(res, 200, registry.describe(target)); return;
+          }
           // Redirect into the cookie's room scope before checking existing membership.
           res.writeHead(307, { Location: `/rooms/${target.id}/api/join`, "Cache-Control": "no-store" }); res.end(); return;
         }
@@ -124,6 +139,14 @@ function createRequestHandler({ registry, config, movieSearch }) {
       }
       if (match || url.pathname.startsWith("/api/")) throw failure(404, "Endpoint not found.");
       if (!["GET", "HEAD"].includes(req.method)) { res.setHeader("Allow", "GET, HEAD, POST"); throw failure(405, "Method not allowed."); }
+      if (["/", "/index.html"].includes(url.pathname) && url.searchParams.has("roomId")) {
+        res.writeHead(302, { Location: `/watch?roomId=${encodeURIComponent(url.searchParams.get("roomId"))}`, "Cache-Control": "no-store" });
+        res.end(); return;
+      }
+      if (url.pathname === "/watch") {
+        const watchUrl = new URL(url); watchUrl.pathname = "/watch.html";
+        serveStatic(req, res, watchUrl, config.publicDirectory); return;
+      }
       if (url.pathname !== "/" && !/^\/(?:index\.html|(?:js|css|vendor|images|assets)\/)/.test(url.pathname)) throw failure(404, "Not found.");
       serveStatic(req, res, url, config.publicDirectory);
     } catch (error) {

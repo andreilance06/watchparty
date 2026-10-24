@@ -44,6 +44,15 @@ test('original-file ranges are exact, cached, generation checked, and independen
   assert.equal(ready.captions.length, 1);
   assert.equal(fs.readdirSync(app.state.hlsDirectory).some(f=>f.endsWith('.ass')), false);
   const url = base + ready.originalUrl;
+  for (const target of [ready.originalUrl, ready.compatibilityUrl, ready.captions[0].url,
+    ready.compatibilityUrl.replace('master.m3u8', 'segment_000000.ts')]) {
+    assert.equal(new URL(target, base).searchParams.get('s'), ready.sessionId);
+    for (const identity of [null, 'previous-server-session']) {
+      const stale = new URL(target, base);
+      if (identity) stale.searchParams.set('s', identity); else stale.searchParams.delete('s');
+      assert.equal((await fetch(stale)).status, 404, 'obsolete cache identities cannot serve media');
+    }
+  }
   const head = await fetch(url,{method:'HEAD'});
   assert.equal(head.status,200);
   assert.equal(Number(head.headers.get('content-length')),source.bytes.length);
@@ -91,6 +100,10 @@ test('quality renditions are lazy, shared by settings, isolated across switches,
   const master=await fetch(base+low.url).then(r=>r.text());
   assert.match(master,/RESOLUTION=640x360/);assert.match(master,/BANDWIDTH=1036200/);
   const playlist=await fetch(base+low.url.replace('master','video')).then(r=>r.text());
+  for (const reference of [...master.split('\n'), ...playlist.split('\n')].filter(line => line && !line.startsWith('#'))) {
+    assert.equal(new URL(reference, base).searchParams.get('s'), ready.sessionId);
+  }
+  assert.equal((await fetch(base + low.url.replace(`s=${ready.sessionId}`, 's=previous-session'))).status, 404);
   assert.match(playlist,/r=640x360_750000&rg=0/);
   assert.equal(app.config.encoderBudget.snapshot().active,0,'listing playlists never encodes');
   const segment=low.url.replace('master.m3u8','segment_000000.ts');
@@ -128,6 +141,32 @@ test('quality renditions are lazy, shared by settings, isolated across switches,
   assert.notEqual(app.media.rendition(low.rendition.id).state.hlsDirectory,entry.state.hlsDirectory,'draining eviction cannot remove a recreated directory');
   assert.equal((await fetch(base+replacement.url)).status,404);
   assert.equal((await fetch(base+recreated.url)).status,200);
+});
+
+test('restarting on the same address never reuses cached media URLs even when versions repeat', async t => {
+  const first = fixture(t, { duration: '2' }); if (!first) return;
+  const second = fixture(t, { duration: '3' }); if (!second) return;
+  const before = await application(t);
+  await serveHostFiles(before.host, before.base, { name: 'before.mkv', bytes: first.bytes });
+  const old = await before.host.next('session-state', message => message.hasVideo);
+  const oldFragment = old.compatibilityUrl.replace('master.m3u8', 'segment_000000.ts');
+  const cached = await fetch(before.base + oldFragment);
+  assert.equal(cached.status, 200); assert.match(cached.headers.get('cache-control'), /immutable/);
+  await cached.arrayBuffer();
+  const port = before.app.server.address().port;
+  await before.app.close();
+  const after = await application(t, { port });
+  await serveHostFiles(after.host, after.base, { name: 'after.mkv', bytes: second.bytes });
+  const current = await after.host.next('session-state', message => message.hasVideo);
+  assert.equal(after.base, before.base); assert.equal(current.mediaVersion, old.mediaVersion);
+  assert.notEqual(current.sessionId, old.sessionId);
+  assert.notEqual(current.originalUrl, old.originalUrl); assert.notEqual(current.compatibilityUrl, old.compatibilityUrl);
+  assert.equal((await fetch(after.base + old.originalUrl)).status, 404);
+  assert.equal((await fetch(after.base + oldFragment)).status, 404);
+  const original = await fetch(after.base + current.originalUrl);
+  assert.deepEqual(Buffer.from(await original.arrayBuffer()), second.bytes);
+  const fragment = await fetch(after.base + current.compatibilityUrl.replace('master.m3u8', 'segment_000000.ts'));
+  assert.equal(fragment.status, 200); await fragment.arrayBuffer();
 });
 
 test('compatibility requests are local to a viewer and one run publishes bounded cached segments with continuous AAC audio', async t=>{
@@ -210,6 +249,10 @@ test('embedded font attachments are published lazily with styled captions', asyn
   const caption=await fetch(base+ready.captions[0].url);assert.equal(caption.status,200);assert.match(await caption.text(),/Styled caption/);
   const font=await fetch(base+ready.captions[0].fonts[0]);assert.equal(font.status,200);
   assert.deepEqual(Buffer.from(await font.arrayBuffer()),fs.readFileSync(path.join(__dirname,'../vendor/jassub/default.woff2')));
+  const fontUrl = new URL(ready.captions[0].fonts[0], base);
+  assert.equal(fontUrl.searchParams.get('s'), ready.sessionId);
+  fontUrl.searchParams.delete('s'); assert.equal((await fetch(fontUrl)).status, 404);
+  fontUrl.searchParams.set('s', 'previous-session'); assert.equal((await fetch(fontUrl)).status, 404);
 });
 
 test('a paused HLS seek can request its preceding fragment and cancelled waits do not launch encoders',async t=>{

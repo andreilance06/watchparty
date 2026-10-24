@@ -45,8 +45,9 @@ test('subtitle names and dispositions come from their own stream metadata', () =
 });
 
 test('caption descriptors preserve stream metadata and external filenames without altering language codes', () => {
-  const state = { hlsDirectory: '/tmp/captions', basePath: '/rooms/test' };
+  const state = { sessionId: 'session-test', hlsDirectory: '/tmp/captions', basePath: '/rooms/test' };
   const service = createSubtitleService({ state, config: {} });
+  service.setFonts([{ extension: 'ttf' }], 4);
   const embedded = service.register({ id: 'one', fileName: 'captions_0.ass', title: 'Signs', label: 'Signs',
     lang: 'eng', default: true, forced: true, codec: 'ass' }, 4);
   assert.equal(embedded.title, 'Signs');
@@ -58,5 +59,6 @@ test('caption descriptors preserve stream metadata and external filenames withou
   assert.equal(external.lang, 'und');
   assert.equal(external.default, false);
   assert.equal(external.forced, false);
-  assert.equal(external.url, '/rooms/test/hls/captions_1.ass?v=4');
+  assert.equal(external.url, '/rooms/test/hls/captions_1.ass?s=session-test&v=4');
+  assert.deepEqual(external.fonts, ['/rooms/test/hls/font_0.ttf?s=session-test&v=4']);
 });

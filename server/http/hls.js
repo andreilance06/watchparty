@@ -6,6 +6,9 @@ const { segmentSchedule } = require("../media/playlists");
 
 function createHlsHandler({ state: rootState, config, media: rootMedia }) {
   async function serveHls(req, res, url) {
+    if (url.searchParams.get("s") !== rootState.sessionId) {
+      res.writeHead(404); res.end("Session is no longer available"); return;
+    }
     const renditionId = url.searchParams.get("r");
     const entry = renditionId ? rootMedia.rendition?.(renditionId) : null;
     if (renditionId && (!entry || entry.retired || Number(url.searchParams.get("g")) !== (rootState.streamGeneration || 0))) {
@@ -59,7 +62,8 @@ function createHlsHandler({ state: rootState, config, media: rootMedia }) {
         await media.waitForFonts();
       }
       if (res.destroyed) return;
-      if (Number(url.searchParams.get("v")) !== state.mediaVersion || !state.mediaReady ||
+      if (url.searchParams.get("s") !== rootState.sessionId || Number(url.searchParams.get("v")) !== rootState.mediaVersion ||
+          Number(url.searchParams.get("v")) !== state.mediaVersion || !rootState.mediaReady || !state.mediaReady ||
           (segmentMatch && generation !== (state.streamGeneration || 0))) { res.writeHead(404); res.end("Stream replaced"); return; }
       if (relative === "video.m3u8") {
         // Late joins and local decoder handoffs should request the shared

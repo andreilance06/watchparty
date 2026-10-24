@@ -7,6 +7,7 @@ const { createHostSource } = require("./source-relay");
 const { sanitizeDisplayName } = require("./names");
 const { createModeration } = require("./moderation");
 const { createHosting } = require("./hosting");
+const { createThumbnailQueue } = require("./media/thumbnails");
 const scrypt = promisify(crypto.scrypt);
 
 function failure(status, message) { return Object.assign(new Error(message), { status }); }
@@ -25,7 +26,8 @@ function validOrigin(req, config = {}) {
 }
 
 function createRoomRegistry({ config, encoderPromise, bridge }) {
-  const rooms = new Map(), codes = new Map();
+  const rooms = new Map();
+  const thumbnails = createThumbnailQueue();
   const identitySecret = crypto.randomBytes(32);
   let closing = false;
 
@@ -52,18 +54,17 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
     room.expiryTimer.unref?.();
   }
 
-  function build({ id = crypto.randomUUID(), name, accessCode = null, passwordHash = null, salt = null }) {
+  function build({ id = crypto.randomUUID(), name, passwordHash = null, salt = null }) {
     if (closing) throw failure(503, "The server is shutting down.");
     const state = createSession();
     state.basePath = id === "default" ? "" : `/rooms/${id}`;
     const transport = createTransport(state.clients);
-    const media = createMediaService({ state, config, encoderPromise, broadcast: transport.broadcast });
-    const room = { id, name, accessCode, passwordHash, salt, state, transport, media, members: new Map(), activeResponses: new Map() };
+    const media = createMediaService({ state, config, encoderPromise, broadcast: transport.broadcast, thumbnails });
+    const room = { id, name, passwordHash, salt, state, transport, media, members: new Map(), activeResponses: new Map() };
     room.source = createHostSource({ room, bridge, config });
     room.hosting = createHosting(room, { config, scheduleExpiry });
     room.moderation = createModeration(room, scheduleExpiry);
     rooms.set(id, room);
-    if (accessCode) codes.set(accessCode, room);
     scheduleExpiry(room);
     return room;
   }
@@ -71,7 +72,6 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
   function destroy(room) {
     if (rooms.get(room.id) !== room) return;
     rooms.delete(room.id);
-    if (room.accessCode) codes.delete(room.accessCode);
     clearTimeout(room.expiryTimer);
     room.state.shuttingDown = true;
     room.hosting.cancel();
@@ -129,8 +129,8 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
   function describe(room, member) {
     const prefix = room.state.basePath;
     return {
-      room: { id: room.id, name: room.name, accessCode: room.accessCode, passwordRequired: Boolean(room.passwordHash),
-        invitePath: `/?room=${encodeURIComponent(room.accessCode)}`, watchPath: `/?roomId=${room.id}` },
+      room: { id: room.id, name: room.name, passwordRequired: Boolean(room.passwordHash),
+        invitePath: `/?room=${encodeURIComponent(room.id)}`, watchPath: room.id === "default" ? "/watch" : `/watch?roomId=${room.id}` },
       member: member ? { clientId: member.id, role: room.state.hostId === member.id ? "host" : "viewer" } : null,
       endpoints: { session: `${prefix}/api/session`, leave: `${prefix}/api/leave`, websocket: `${prefix}/ws`, source: `${prefix}/source` }
     };
@@ -141,22 +141,10 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
     const name = typeof body.name === "string" ? body.name.replace(/\s+/g, " ").trim() : "";
     if (!name || name.length > 80) throw failure(400, "Enter a room name of at most 80 characters.");
     if (body.password != null && (typeof body.password !== "string" || body.password.length > 128)) throw failure(400, "Password must be at most 128 characters.");
-    let accessCode;
-    if (body.accessCode != null && body.accessCode !== "") {
-      if (typeof body.accessCode !== "string") throw failure(400, "Invalid access code.");
-      accessCode = body.accessCode.trim().toUpperCase();
-      if (!/^[A-Z0-9-]{4,32}$/.test(accessCode)) throw failure(400, "Access codes must be 4–32 letters, digits, or hyphens.");
-    } else {
-      const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-      do { accessCode = Array.from({ length: 8 }, () => alphabet[crypto.randomInt(alphabet.length)]).join(""); } while (codes.has(accessCode));
-    }
-    if (codes.has(accessCode)) throw failure(409, "That access code is already in use.");
     const salt = body.password ? crypto.randomBytes(16) : null;
     const passwordHash = salt ? await scrypt(body.password, salt, 64) : null;
-    // Hashing yields: check uniqueness again before committing the room.
-    if (codes.has(accessCode)) throw failure(409, "That access code is already in use.");
     if (rooms.size >= 101) throw failure(429, "The server has reached its room limit.");
-    const room = build({ name, accessCode, salt, passwordHash });
+    const room = build({ name, salt, passwordHash });
     const member = membership(room, body.displayName, identity);
     room.state.hostId = member.id;
     room.state.creatorMemberId = member.id;
@@ -165,9 +153,9 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
   }
 
   async function join(req, body, expectedRoom) {
-    if (typeof body.accessCode !== "string") throw failure(400, "An access code is required.");
-    const room = codes.get(body.accessCode.trim().toUpperCase());
-    if (!room || (expectedRoom && room !== expectedRoom)) throw failure(404, "Room not found.");
+    const room = expectedRoom || (typeof body.roomId === "string" ? rooms.get(body.roomId) : null);
+    if (expectedRoom && body.roomId != null && body.roomId !== expectedRoom.id) throw failure(400, "Room ID does not match this room.");
+    if (!room) throw failure(404, "Room not found.");
     assertAdmission(req, room);
     const existing = authenticate(req, room);
     if (existing) return { room, member: existing };
@@ -183,7 +171,12 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
 
   const defaultRoom = build({ id: "default", name: "Default room" });
   return { rooms, defaultRoom, create, join, authenticate, setCookie, describe, scheduleExpiry, browserIdentity, assertAdmission, trackResponse,
-    findByCode: (code) => typeof code === "string" ? codes.get(code.trim().toUpperCase()) : null,
+    list: () => [...rooms.values()].map(room => {
+      room.media.refreshThumbnail();
+      const thumbnail = room.media.thumbnail();
+      return { ...describe(room).room, participantCount: room.state.clients.size,
+        fileName: room.state.fileName, thumbnailUrl: thumbnail ? `/api/rooms/${room.id}/thumbnail?v=${thumbnail.version}&r=${thumbnail.revision}` : null };
+    }),
     get: (id) => rooms.get(id), close: () => { closing = true; for (const room of [...rooms.values()]) destroy(room); } };
 }
 

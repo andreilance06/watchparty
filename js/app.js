@@ -8,40 +8,17 @@ import { createPlayer } from "./player/controller.js";
 import { createVoting } from "./voting.js";
 import { initializeTheme } from "./theme.js";
 import { createHostFiles } from "./host-files.js";
-import { initializeRoomEntry } from "./room-entry.js";
+import { initializeRoomControls } from "./room-controls.js";
 import { createParticipants } from "./participants.js";
 
 const elements = getElements();
 initializeTheme(elements.themeToggle, undefined, document.documentElement, elements.video);
 const state = createClientState();
 let stopCurrentConnection = () => {};
-const roomEntryPending = initializeRoomEntry(elements, {
-  guestName: state.guestName,
-  onLeave: () => stopCurrentConnection()
-});
 const roomId = new URLSearchParams(location.search || "").get("roomId");
-const blockedText = "You are blocked from this room until a host unblocks you.";
-let admissionBlocked = false, publicConnectionStarted = false;
-let socketPath = "/";
-if (roomId) {
-  try {
-    const response = await fetch(`/rooms/${encodeURIComponent(roomId)}/api/session`);
-    if (!response.ok) {
-      const result = await response.json();
-      if (result.code === "ROOM_BLOCKED") location.href = "/?blocked=1";
-      throw new Error(result.error || "Join this room before opening its watch page.");
-    }
-    const session = await response.json();
-    socketPath = session.endpoints.websocket;
-    elements.roomInfoName.textContent = session.room.name;
-    elements.roomInfoCode.textContent = session.room.accessCode || "No access code (public room)";
-    elements.copyCurrentRoomCode.hidden = !session.room.accessCode;
-    elements.roomInfo.hidden = false;
-  } catch (error) {
-    setConnectionStatus(elements, false, error.message);
-    throw error;
-  }
-}
+let admissionBlocked = false;
+let socketPath = "/ws";
+let roomMetadata = { name: "Default room", invitePath: "/?room=default" };
 try {
   const response = await fetch("/api/viewer-identity", { method: "POST" }).catch(() => {
     throw new Error("Could not establish viewer identity. Check your connection to the server, then reload.");
@@ -55,13 +32,16 @@ try {
       : "Reload to reconnect.";
     throw new Error(`Could not establish viewer identity (HTTP ${response.status}).${detail ? ` ${detail}` : ""} ${guidance}`);
   }
-  if (!roomId) {
-    const admission = await fetch("/api/session");
-    if (!admission.ok) {
-      const result = await admission.json();
-      if (result.code === "ROOM_BLOCKED") admissionBlocked = true;
-      else throw new Error(result.error || "Could not connect to the room.");
-    }
+  const admission = await fetch(roomId ? `/rooms/${encodeURIComponent(roomId)}/api/session` : "/api/session");
+  if (!admission.ok) {
+    const result = await admission.json();
+    admissionBlocked = true;
+    location.href = result.code === "ROOM_BLOCKED" ? "/?blocked=1" : roomId ? `/?room=${encodeURIComponent(roomId)}` : "/";
+    setConnectionStatus(elements, false, result.error || "Join this room from the hub.");
+  } else {
+    const session = await admission.json();
+    roomMetadata = session.room || roomMetadata;
+    socketPath = session.endpoints?.websocket || socketPath;
   }
 } catch (error) {
   setConnectionStatus(elements, false, error.message);
@@ -90,6 +70,7 @@ const connection = createConnection({
   }
 });
 stopCurrentConnection = connection.dispose;
+initializeRoomControls(elements, { roomId, room: roomMetadata, onLeave: () => stopCurrentConnection() });
 const attention = createChatAttention({ elements });
 const chat = createChat({ elements, state, send: connection.send, attention });
 files = createHostFiles({ send: connection.send, report: chat.addSystemMessage });
@@ -157,15 +138,11 @@ function handleMessage(message) {
 }
 
 function showBlocked() {
-  admissionBlocked = true; publicConnectionStarted = false;
+  admissionBlocked = true;
   connection.dispose(); files.disconnect(); participants.setConnected(false);
   player.showNoVideo("Blocked from room");
   setConnectionStatus(elements, false, "Blocked from room");
-  if (roomId) { location.href = "/?blocked=1"; return; }
-  elements.roomEntry.hidden = false; elements.roomEntryChoices.hidden = false;
-  elements.createRoomForm.hidden = true; elements.joinRoomForm.hidden = true; elements.roomEntrySuccess.hidden = true;
-  elements.initialDisplayNameField.hidden = false; elements.continuePublicRoom.hidden = false;
-  elements.roomEntryStatus.textContent = blockedText;
+  location.href = "/?blocked=1";
 }
 
 function applyParticipantPermissions(participants = []) {
@@ -173,22 +150,4 @@ function applyParticipantPermissions(participants = []) {
   if (current?.permissions) player.applyPermissions(current.permissions);
 }
 
-if (roomEntryPending) {
-  if (admissionBlocked || new URLSearchParams(location.search || "").has("blocked")) elements.roomEntryStatus.textContent = blockedText;
-  elements.continuePublicRoom.addEventListener("click", () => {
-    if (publicConnectionStarted) return;
-    if (admissionBlocked) {
-      elements.roomEntry.hidden = false;
-      fetch("/api/session").then(response => {
-        if (!response.ok) { elements.roomEntryStatus.textContent = blockedText; return; }
-        admissionBlocked = false; publicConnectionStarted = true; elements.roomEntry.hidden = true;
-        connection.resume();
-      }).catch(() => { elements.roomEntryStatus.textContent = "Could not reconnect. Try again."; });
-      return;
-    }
-    publicConnectionStarted = true;
-    connection.connect();
-  });
-} else {
-  connection.connect();
-}
+if (!admissionBlocked) connection.connect();

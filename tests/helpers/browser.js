@@ -87,12 +87,14 @@ class ElementDouble extends EventTargetDouble {
   setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; }
   focus() { this.focused = true; let root = this; while (root.parentNode) root = root.parentNode; root.activeElement = this; }
   click() { this.dispatch("click"); }
+  showModal() { this.open = true; }
+  close() { this.open = false; this.dispatch("close"); }
 }
 
-function createBrowserDouble({ storageFailure, rendererReady, autoContinuePublic = true,
+function createBrowserDouble({ storageFailure, rendererReady,
   assessPlayback = async () => ({ playable: true, smooth: true, video: { decoder: "hardware" } }) } = {}) {
   const elements = new Map();
-  const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  const html = fs.readFileSync(path.join(root, "watch.html"), "utf8");
   for (const match of html.matchAll(/id="([^"]+)"/g)) {
     const element = new ElementDouble(); element.id = match[1]; element.connected = true;
     elements.set(match[1], element);
@@ -229,7 +231,6 @@ function createBrowserDouble({ storageFailure, rendererReady, autoContinuePublic
     const module = getModule(path.join(root, relative));
     await module.link((specifier, referring) => getModule(path.resolve(path.dirname(referring.identifier), specifier)));
     await module.evaluate();
-    if (relative === "js/app.js" && autoContinuePublic) elements.get("continuePublicRoom").dispatch("click");
     return module.namespace;
   }
   function runTimers(delay) {
@@ -246,4 +247,4 @@ function createBrowserDouble({ storageFailure, rendererReady, autoContinuePublic
 const captionItems = video => [...video.shadowRoot.querySelector('.movi-subtitle-track-list').children].filter(row => row.dataset.roomCaptionKey);
 const selectedCaption = video => captionItems(video).find(row => row.getAttribute('aria-checked') === 'true')?.dataset.roomCaptionId || 'off';
 const pickCaption = (video, id) => captionItems(video).find(row => id === 'off' ? row.dataset.roomCaptionKey === 'off' : row.dataset.roomCaptionId === id).click();
-module.exports = { createBrowserDouble, captionItems, selectedCaption, pickCaption };
+module.exports = { createBrowserDouble, captionItems, selectedCaption, pickCaption, EventTargetDouble, ElementDouble };

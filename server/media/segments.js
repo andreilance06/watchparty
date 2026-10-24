@@ -8,6 +8,7 @@ const { encoderAttempts, CPU_ENCODER } = require("../encoders");
 const { currentTime, sessionState } = require("../state");
 const { segmentSchedule, streamDirectory, writePlaylists } = require("./playlists");
 const { isWatchPartyTempDirectory } = require("./temp-files");
+const { createPreparationBudget } = require("./preparation-budget");
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function compatibilityFilter(info = {}, profile) {
@@ -46,6 +47,8 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
     cancelEpoch++;
     for (const job of jobs) {
       job.cancelled = true;
+      job.preparationBudget?.cancel();
+      job.inputLease?.close();
       job.process?.kill();
       job.sink?.close();
       job.sink?.closeAllConnections();
@@ -121,6 +124,7 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
           fs.renameSync(partial, filename(job.directory, index));
           partials.delete(partial);
           job.published++;
+          job.preparationBudget?.finish();
           permit?.sample(Math.max(0, Date.now() - encodedAt - permissionWait) / (job.schedule.seconds * 1000));
           encodedAt = Date.now(); permissionWait = 0;
           if (index === 0) fs.copyFileSync(filename(job.directory, index), path.join(state.hlsDirectory, "bootstrap.ts"));
@@ -174,9 +178,14 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
       const output = `http://encoder@127.0.0.1:${sink.address().port}/${token}`;
       const start = job.index * job.schedule.seconds;
       const duration = Math.min(state.mediaDuration, job.end * job.schedule.seconds) - start;
+      if (state.mediaInfo?.container?.fragmented && !state.mediaInfo.container.indexed && !job.preparationBudget) {
+        job.preparationBudget = createPreparationBudget(config);
+      }
+      if (job.preparationBudget) job.inputLease = state.openMediaLease?.(job.preparationBudget);
+      const input = job.inputLease?.url || state.mediaPath;
       const args = ["-hide_banner", "-loglevel", "warning", "-y", ...encoder.input,
-        "-ss", start.toFixed(9), ...(state.mediaPath.startsWith("http:") ? ["-rw_timeout", "30000000"] : []),
-        "-i", state.mediaPath, "-t", duration.toFixed(9), "-map", "0:v:0", "-map", "0:a:0?",
+        "-ss", start.toFixed(9), ...(input.startsWith("http:") ? ["-rw_timeout", "30000000"] : []), ...(state.mediaInputArgs || []),
+        "-i", input, "-t", duration.toFixed(9), "-map", "0:v:0", "-map", "0:a:0?",
         "-vf", `${compatibilityFilter(state.mediaInfo, state.rendition)},fps=${job.schedule.fps}`, "-c:v", encoder.name, ...renditionEncoderArgs(encoder, state.rendition),
         ...(state.rendition ? ["-b:v", String(state.rendition.bitrate)] : []),
         "-maxrate", String(state.rendition?.bitrate || 8000000), "-bufsize", String((state.rendition?.bitrate || 8000000) * 2), "-pix_fmt", "yuv420p", "-bf", "0",
@@ -192,11 +201,16 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
       await new Promise((resolve, reject) => {
         let stderr = "";
         job.process = spawnEncoder(config.ffmpegPath, args, { windowsHide: true });
+        const abort = () => job.process?.kill();
+        job.preparationBudget?.signal.addEventListener("abort", abort, { once: true });
+        if (job.preparationBudget?.signal.aborted) abort();
         job.process.stderr.on("data", chunk => { stderr = `${stderr}${chunk}`.slice(-4000); });
         job.process.once("error", reject);
         job.process.once("close", code => {
+          job.preparationBudget?.signal.removeEventListener("abort", abort);
           job.process = null;
           if (!valid(job)) reject(new Error("Segment encoding was cancelled."));
+          else if (job.preparationBudget?.error) reject(job.preparationBudget.error);
           else if (job.outputError) reject(job.outputError);
           else if (code === 0) resolve();
           else reject(new Error(stderr.trim() || `${encoder.name} failed.`));
@@ -207,6 +221,7 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
       while (uploads.size) await Promise.all([...uploads]);
       if (job.outputError) throw job.outputError;
     } finally {
+      job.inputLease?.close(); job.inputLease = null;
       sink.close(); sink.closeAllConnections();
       while (uploads.size) await Promise.allSettled([...uploads]);
       for (const file of partials) fs.rmSync(file, { force: true });
@@ -230,6 +245,7 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
         catch (error) {
           lastError = error;
           if (error.code === "QUALITY_BUSY") throw error;
+          if (error.code === "MEDIA_PREPARATION_LIMIT") break;
           if (!valid(job)) throw error;
           if (encoder.name !== "libx264") failedEncoders.add(encoder.name);
           if (job.published && recoveryFailures++ < 2) {
@@ -241,10 +257,11 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
           job.outputError = null;
         }
       }
-      if (valid(job)) broadcast({ type: "media-error", message: "Compatibility encoding failed. Check the server encoder or choose another video." });
+      if (valid(job)) broadcast({ type: "media-error", ...(lastError?.code === "MEDIA_PREPARATION_LIMIT" ? { code: lastError.code } : {}),
+        message: lastError?.code === "MEDIA_PREPARATION_LIMIT" ? lastError.message : "Compatibility encoding failed. Check the server encoder or choose another video." });
       throw lastError || new Error("No compatible encoder is available.");
     })();
-    job.promise.then(() => { job.done = true; }, error => { job.done = true; job.error = error; });
+    job.promise.then(() => { job.done = true; job.preparationBudget?.finish(); }, error => { job.done = true; job.error = error; job.preparationBudget?.finish(); });
     return job;
   }
 

@@ -14,7 +14,7 @@ Its objectives are to keep playback synchronized, make group interaction availab
 
 | Feature | What users can do |
 | --- | --- |
-| Watch rooms | Create a private room, optionally protect it with a password, and invite others with a link or access code. A public room is also available. |
+| Room hub | Browse all rooms, see the current video filename and a preview refreshed every 30 seconds, create a room with an optional password, or join the public room. Invite others with a link. |
 | Shared playback | Watch a video supplied by the host's browser, with synchronized playback and automatic compatibility streaming when needed. |
 | Captions | Add SRT, VTT, ASS, or SSA subtitles and choose a caption track independently. |
 | Chat and reactions | Send messages and quoted replies, insert emojis, react to comments, and send floating emoji reactions, including in fullscreen. |
@@ -70,12 +70,12 @@ For another device on the same network, open one of the LAN addresses printed by
 
 ## Your first watch party
 
-1. Optionally enter a display name on the welcome screen. Choose **Create a room**, enter a room name, and optionally set an access code and password. Select **Create room**, then **Enter room**. You can also choose **Continue to the public room**.
-2. In a private room, use **Invite** to copy the access code. Share the invitation link shown after creation, or have viewers open the same server, choose **Join a room**, and enter the code and password if required. For viewers on another device, use the server's reachable LAN or HTTPS address rather than `localhost`.
+1. Open the room hub at `/` and optionally enter a display name. Select **Create room**, enter a room name and optional password, then create it to open the separate player page. You can also select **Join room** on any listed room, including the public default room.
+2. Use **Invite** in the player to copy an invitation link. Viewers can follow the link or select your room on the hub; protected rooms prompt for their password. No access code is needed. For viewers on another device, use the server's reachable LAN or HTTPS address rather than `localhost`.
 3. As host, select **Choose Video** and choose one video, optionally with subtitle files. Keep the browser page that supplies the video open throughout the session. Other participants join the room to watch.
 4. Type in the chatroom and select **Send**. Right-click a message (long-press on touch) to reply or choose a reaction. The single emoji button at the bottom opens Message emoji and Global reaction tabs; the latter sends floating reactions to the room.
 5. As host, select **Start poll**. Enter a movie title and select **Find movie**; choose a matching result with **Suggest & vote**, or suggest the title without a poster. Suggesting a title automatically casts your vote. Participants can vote for another suggestion, and the host selects **Finish poll** to post the result in chat. A poll chooses what to watch next; the host still selects the actual video file.
-6. Select a participant's name to inspect playback permissions. Hosts can change permissions or transfer hosting. Use **Leave room / switch** when you want to leave a private room.
+6. Select a participant's name to inspect playback permissions. Hosts can change permissions or transfer hosting. Use **Leave room** to return to the hub.
 
 ## Screenshots
 
@@ -83,7 +83,7 @@ These screenshots show the running application with local demonstration data. Th
 
 ### Room selection
 
-Create a new room, join by access code, or continue to the public room.
+The hub lists all rooms with video previews and optional password protection. This screenshot predates the separate hub and shows the former entry dialog.
 
 ![WatchParty welcome screen with create-room, join-room, display-name, and public-room controls](docs/screenshots/room-selection.png)
 
@@ -113,7 +113,7 @@ The contribution summary follows the recorded work in the repository. Examples i
 
 The host selects one video and optional SRT, VTT, ASS, or SSA files. Keep that browser page open: its File objects answer bounded byte requests, with no initial full-file upload. Transferring host keeps that browser as the video provider while the new host controls the room. Refreshing, disconnecting, or blocking the provider ends the current video; the host can choose a replacement from their device.
 
-The root page opens a Create Room / Join Room dialog, with an optional initial display name. Creating a room shows its access code and invitation link; leaving the name blank generates a guest name. In a room, the room name appears above the player panel; use **Invite** to view or copy the private-room access code. Visitors can continue to the public default room, reopen room selection there, or leave/switch from a private room using the header control. See the [room API](docs/rooms.md).
+The root page is a room hub, separate from the player at `/watch?roomId=ID` (or `/watch` for the public default room). Room cards show connected participant counts, password requirements, the selected filename, and a real video frame. While the hub is visible, the directory refreshes every five seconds and requests updated previews at most once every 30 seconds per room. Unchanged paused frames are reused; unavailable previews show a placeholder. Names, filenames, and thumbnails are visible to everyone, including for password-protected rooms; video playback still requires admission. Creating or joining opens the player directly. **Invite** copies a room link, and **Leave room** returns to the hub. See the [room API](docs/rooms.md).
 
 Unexpected host disconnects reserve hosting for 15 seconds so a refresh or brief interruption can reconnect. Other participants see a reconnecting notice; if the host does not return in time, the next connected participant takes over. Explicit room leaving and host transfers take effect immediately. A private room's creator reclaims the sole host role whenever they reconnect, including after leaving and rejoining with the same verified browser identity; any replacement host becomes a viewer. Other hosts cannot block the creator. The public default room has no permanent creator. These identities and rooms last until room expiry or server restart, and localhost and the public domain use separate cookies.
 
@@ -121,6 +121,7 @@ The host starts movie polls from the chatroom. An active poll stays pinned above
 
 ## Playback
 
+- Choosing another file immediately stops the previous video and audio and shows an opening notice until the selected video is ready. Media URLs are unique to each room session, preventing cached video fragments from an earlier server run from appearing after a restart.
 - **Settings → Quality** offers Auto, Source / Original, and up to 1080p, 720p, 480p, and 360p, plus an independent bitrate limit (Auto, 8, 5, 3, 1.5, or 0.75 Mbps). Smaller sources expose their own size for compatibility playback. Choices are local to each participant, including the host, and remain in the current tab until reload. Source preserves original bytes and disables bitrate overrides; unsupported originals are unavailable.
 - Auto is the default. It uses device support, measured media-transfer throughput, buffer health, the video provider's observed upload performance, and current server encoding/CPU pressure. Browser connection information is only an initial hint. Auto budgets 70% of measured viewer throughput, requires repeated evidence before downgrading, waits 30 seconds before upgrading, and spaces switches by at least ten seconds. Adaptation pauses during seeks, pauses, switching, and background inactivity. Default video limits are 5 Mbps at 1080p, 3 Mbps at 720p, 1.5 Mbps at 480p, and 0.75 Mbps at 360p; Auto quality with an explicit limit may use lower default bitrates within that ceiling.
 - Manual resolution and bitrate choices remain fixed. A buffering notice offers a return to Auto. Bitrate limits are encoder budgets, not guaranteed download speeds or exact constant bitrates; audio and protocol overhead are additional. Changing quality preserves the shared time, pause state, speed, and captions.
@@ -128,6 +129,8 @@ The host starts movie polls from the chatroom. An active poll stays pinned above
 - The server permits two concurrent compatibility encoder processes across all rooms by default. Set `WATCHPARTY_MAX_ENCODERS` to a positive integer to change this limit. At capacity, Auto can reuse an eligible active rendition; an unavailable manual selection shows a local busy notice and retains current playback. Necessary HLS bootstrap fragments are also subject to this limit.
 - Server transcoding still reads the original from its browser provider. Lower output quality helps viewer downloads, but cannot fix a provider upload too slow to supply that original. A local notice identifies sustained provider starvation; no separate speed-test upload or browser-side transcoding is performed.
 - Each device independently chooses original-file playback or compatibility streaming. Supported MP4/WebM sources use native decoding; other suitable sources use Movi's WASM demuxer and WebCodecs. Original-file playback preserves source resolution.
+- Fragmented and hybrid MP4s use their validated tail fragment index for server probing, compatibility encoding, and seeking. The full timeline comes from track and final-fragment timing, including when the initial header reports zero duration. Native-compatible MP4s still use native playback; fragmented MP4s that would require Movi's sequential WASM demuxer use compatibility streaming instead. Caption discovery reuses the track metadata and does not walk every fragment when there are no subtitles.
+- Preparation has a shared 32 MiB read budget and a 30-second deadline. Missing or invalid indexes use metadata-only structural inspection within those limits; unindexed compatibility startup has the same limits until its first segment is published. Exceeding a limit stops the work and asks for a seekable remux rather than retrying the scan with another encoder. Normal playback after startup follows the existing bounded segment window.
 - WebCodecs selection requires a secure context, smooth browser video decoding, and supported audio at the source's actual channel count and sample rate. Silent videos need only `VideoDecoder`. Video and audio checks share a 500 ms deadline; timeouts and standalone WASM video decoding use compatibility streaming.
 - Native capability checks include audio as well as video. Unusual audio, unsupported devices, demanding decoding, runtime decoder errors, and sustained stalls use server compatibility streaming. A source with no audio is handled separately from an audio decoding failure.
 - Compatibility output uses H.264, 8-bit YUV420, and stereo 48 kHz AAC, capped at 30 fps. It fits within 1920×1080, preserves aspect ratio, and never upscales. HDR sources are tone mapped to SDR.
@@ -190,6 +193,8 @@ Chat retains the latest 500 comments per browser; the server retains message tex
 The performance targets are a first playable frame within **3 seconds** of selection and an uncached seek within **2 seconds**, with capable hardware, indexed files, and enough network throughput. These are measured targets, not guarantees for arbitrary codecs, slow uploads, long GOPs, unindexed containers, or CPU-only 4K conversion.
 
 In DevTools, inspect `document.getElementById('video').watchpartyMetrics` for `playbackMode` (`native`, `wasm`, or `compatibility`), first-picture, seek, and fallback timings and `fallbackReason`. Here `wasm` identifies Movi's WASM demuxer with WebCodecs video decoding. First-picture timing includes source preparation after registration; the file-picker interaction is excluded. Measure cold page/asset loading separately. Browser autoplay denial must not be classified as codec failure.
+
+Its `preparation` snapshot separates metadata-provider requests, ranges, bytes, and cache hits from FFmpeg bridge reads and elapsed preparation time. `indexMode` is `mfra`, `structural`, or `container`. Bridge byte counts include bytes served from cache, so they can exceed actual provider transfers; caption counters remain separate. The session's `mediaInfo.container` identifies ISO files with `family: "iso-bmff"`, `fragmented`, and `indexed` flags.
 
 `document.getElementById('video').watchpartyQualityMetrics` exposes the local preferences, actual rendition, measured viewer throughput, provider throughput, application-wide encoder demand, pending selection, adaptation reason, and warnings. Measurements come from real uncached relay transfers and media downloads; deliberate encoder/paused-production waits are excluded from viewer transfer timing. Connection estimates are observations, not an Internet speed-test guarantee.
 

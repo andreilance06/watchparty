@@ -15,13 +15,9 @@ export function getElements(root = document) {
     "suggestionResults", "suggestionStatus",
     "chatPanel", "votePanel", "pollDetails", "pollToggle", "startPollButton", "finishPollButton",
     "hostReconnectStatus",
-    "roomEntry", "roomEntryChoices", "createRoomChoice", "joinRoomChoice", "initialDisplayName", "initialDisplayNameField",
-    "createRoomForm", "createRoomName", "createRoomCode", "createRoomPassword", "createRoomBack",
-    "joinRoomForm", "joinRoomCode", "joinRoomPassword", "joinRoomBack", "continuePublicRoom",
-    "roomEntryStatus", "roomEntrySuccess", "createdRoomCode", "copyRoomCode", "roomInviteLink",
-    "enterCreatedRoom", "roomActionButton", "roomActionStatus",
-    "roomInfo", "roomInfoToggle", "roomInfoName", "roomInfoDetails", "roomInfoCode",
-    "copyCurrentRoomCode", "roomInfoStatus"
+    "roomActionButton", "roomActionStatus",
+    "roomInfo", "roomInfoToggle", "roomInfoName", "roomInfoDetails", "roomInfoLink",
+    "copyCurrentRoomLink", "roomInfoStatus"
   ];
   const elements = Object.fromEntries(ids.map((id) => [id, root.querySelector(`#${id}`)]));
   elements.placeholderTitle = elements.videoPlaceholder.querySelector("strong");

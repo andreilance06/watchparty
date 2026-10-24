@@ -213,14 +213,14 @@ test("private room grants survive explicit leave/rejoin without granting admissi
   const created = await f.api("/api/rooms", { name: "Permissions", password: "secret" });
   const host = await f.connect(created.body.endpoints.websocket, created.cookie, "Host");
   const identity = (await f.api("/api/viewer-identity")).cookie;
-  const joinBody = { accessCode: created.body.room.accessCode, password: "secret" };
+  const joinBody = { roomId: created.body.room.id, password: "secret" };
   let membership = await f.api("/api/rooms/join", joinBody);
   let viewer = await f.connect(membership.body.endpoints.websocket, `${membership.cookie}; ${identity}`);
   await f.grant(host, viewer);
   const left = once(viewer.ws, "close");
   await f.api(membership.body.endpoints.leave, {}, `${membership.cookie}; ${identity}`); await left;
   assert.equal((await fetch(f.base + membership.body.endpoints.session, { headers: { Cookie: `${membership.cookie}; ${identity}` } })).status, 401);
-  assert.equal((await f.api("/api/rooms/join", { accessCode: joinBody.accessCode }, identity)).response.status, 401);
+  assert.equal((await f.api("/api/rooms/join", { roomId: joinBody.roomId }, identity)).response.status, 401);
   membership = await f.api("/api/rooms/join", joinBody, identity);
   viewer = await f.connect(membership.body.endpoints.websocket, `${membership.cookie}; ${identity}`);
   assert.deepEqual(viewer.role.permissions, all);
@@ -388,9 +388,9 @@ test("HLS user seeks respect permissions while internal recovery stays local", a
   const b = createBrowserDouble(); await b.load("js/app.js");
   const socket = b.sockets[0], video = b.elements.get("video"), native = b.document.createElement("video"), seeks = [];
   Object.assign(native, { currentTime: 10, paused: true, readyState: 4, playbackRate: 1 });
-  video.player = { getHLSVideoElement: () => native, seek(time) { seeks.push(time); native.currentTime = time; } };
   socket.open(); socket.receive({ type: "role", role: "viewer", clientId: "viewer", permissions: DEFAULT_PERMISSIONS });
   socket.receive({ type: "session-state", hasVideo: true, mediaVersion: 1, mediaUrl: "/stream", time: 10, paused: true, playbackRate: 1, duration: 100 });
+  video.player = { getHLSVideoElement: () => native, seek(time) { seeks.push(time); native.currentTime = time; } };
   video.dispatch("loadedmetadata"); await flush();
   video.player.seek(40);
   assert.deepEqual(seeks, []);

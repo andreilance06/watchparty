@@ -11,6 +11,9 @@ export async function choosePlayback(info) {
     (info.mime === "video/webm" && ["vp8", "vp9", "av1"].includes(info.videoCodec)));
   const nativeAudio = !info.hasAudio || (info.mime === "video/mp4" ? ["aac", "mp3"].includes(info.audioCodec) : ["opus", "vorbis"].includes(info.audioCodec));
   if (nativeVideo && nativeAudio && native.canPlayType?.(info.mime)) return "native";
+  // Movi's WASM demuxer scans fragmented MP4s sequentially. The server can
+  // use their seek index without pulling the recording through the browser.
+  if (info.container?.family === "iso-bmff" && info.container.fragmented) return "compatibility";
   if (!globalThis.isSecureContext || !globalThis.VideoDecoder) return "compatibility";
   const codec = audioCodecs[info.audioCodec];
   // Silent sources do not need an audio decoder. Unusual audio stays on the

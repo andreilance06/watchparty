@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="A simple browser-based watch party with synchronized video and chat.">
+  <title>WatchParty</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="brand">
+      <img class="brand-mark" src="/assets/images/logo/logo_watchparty.png" alt="">
+      <div>
+        <h1>WatchParty</h1>
+        <p>Watch together. Chat together.</p>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch to light mode" title="Switch to light mode">
+        <svg class="theme-icon icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/>
+        </svg>
+        <svg class="theme-icon icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M20.4 15.2A8.5 8.5 0 0 1 8.8 3.6 8.5 8.5 0 1 0 20.4 15.2Z"/>
+        </svg>
+      </button>
+      <button id="roomActionButton" class="room-action-button" type="button">Leave room</button>
+      <span id="roomActionStatus" class="room-action-status" role="status" aria-live="polite"></span>
+      <div class="connection" aria-live="polite">
+        <span id="statusDot" class="status-dot"></span>
+        <span id="connectionStatus">Connecting...</span>
+      </div>
+    </div>
+  </header>
+
+  <div id="floatingReactions" class="floating-reactions" aria-hidden="true"></div>
+  <div id="reactionFeed" class="reaction-feed" role="log" aria-live="polite" aria-label="Recent reactions"></div>
+  <div id="messageMenu" class="message-menu" role="menu" aria-label="Message actions" hidden></div>
+
+  <main class="watch-layout">
+    <section id="roomInfo" class="room-info" hidden aria-label="Current room">
+      <div class="room-info-bar">
+        <div class="room-info-current">
+          <p class="room-info-label">CURRENT ROOM</p>
+          <p id="roomInfoName" class="room-info-name"></p>
+        </div>
+        <button id="roomInfoToggle" class="room-info-invite" type="button" aria-expanded="false" aria-controls="roomInfoDetails">
+          Invite
+          <svg class="room-info-chevron" viewBox="0 0 20 20" aria-hidden="true">
+            <path d="m5 7.5 5 5 5-5" />
+          </svg>
+        </button>
+      </div>
+      <div id="roomInfoDetails" class="room-info-details" hidden>
+        <p class="room-info-label">INVITATION LINK</p>
+        <div class="room-info-code-row">
+          <output id="roomInfoLink" class="room-info-code room-info-link"></output>
+          <button id="copyCurrentRoomLink" class="room-info-copy" type="button">Copy</button>
+        </div>
+        <p id="roomInfoStatus" class="room-info-status" role="status" aria-live="polite"></p>
+      </div>
+    </section>
+    <section class="player-panel" aria-labelledby="player-title">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">WATCH TOGETHER</p>
+          <h2 id="player-title">Now Playing</h2>
+        </div>
+        <span id="roleBadge" class="role-badge">Viewer</span>
+      </div>
+
+      <div id="videoShell" class="video-shell">
+        <movi-player
+          id="video"
+          playsinline
+          preload="auto"
+          engine="native wasm"
+          wasmurl="/vendor/movi.wasm"
+          smoothwarning
+          theme="dark"
+          themecolor="#7c5cff"
+          objectfit="contain"
+          titlemode="fullscreen">
+          Your browser does not support the WatchParty player.
+        </movi-player>
+        <div id="videoPlaceholder" class="video-placeholder">
+          <span class="placeholder-icon" aria-hidden="true">▶</span>
+          <strong>Waiting for the host</strong>
+          <span>The host will choose a video file and start the watch party.</span>
+        </div>
+        <div id="viewerControls" class="viewer-controls" hidden>
+          <button id="fullscreenButton" class="fullscreen-button" type="button" aria-label="Enter fullscreen" title="Fullscreen">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/>
+            </svg>
+          </button>
+        </div>
+        <button id="fullscreenChatToggle" class="fullscreen-chat-toggle" type="button" aria-controls="fullscreenChat" aria-expanded="true" hidden>
+          <span id="fullscreenChatLabel">Hide chat</span>
+          <span id="fullscreenChatUnread" class="fullscreen-chat-unread" aria-hidden="true" hidden></span>
+        </button>
+        <section id="fullscreenChat" class="fullscreen-chat" aria-label="Fullscreen chat" hidden></section>
+      </div>
+
+      <div class="player-info">
+        <div>
+          <p class="eyebrow">CURRENT VIDEO</p>
+          <h3 id="fileName">No video selected</h3>
+        </div>
+        <div class="player-local-controls">
+          <p id="syncStatus" class="sync-status">Waiting for host</p>
+        </div>
+      </div>
+
+      <div id="hostControls" class="host-controls" hidden>
+        <button id="chooseVideoButton" class="file-button" type="button">
+          <span aria-hidden="true">＋</span>
+          Choose Video
+        </button>
+        <p class="control-help">Choose one video and optional subtitle files from this device. Keep this page open while sharing.</p>
+      </div>
+
+
+    </section>
+
+    <aside id="chatPanel" class="chat-panel" aria-labelledby="chat-title">
+      <div class="chat-heading">
+        <div>
+          <p class="eyebrow">LIVE</p>
+          <h2 id="chat-title">Chatroom</h2>
+        </div>
+        <div class="chat-heading-actions">
+          <span id="viewerCount" class="viewer-count">0 online</span>
+          <button id="startPollButton" class="start-poll-button" type="button" hidden>Start poll</button>
+          <form id="nameForm" class="name-form" autocomplete="off">
+            <label class="sr-only" for="displayNameInput">Display name</label>
+            <input id="displayNameInput" name="displayName" type="text" maxlength="24" placeholder="Display name" aria-label="Display name" required>
+            <button type="submit">Save</button>
+          </form>
+        </div>
+      </div>
+
+      <section class="participant-section" aria-labelledby="participants-title">
+        <h3 id="participants-title">Participants</h3>
+        <ul id="participantList" class="participant-list" aria-live="polite"></ul>
+      </section>
+      <div id="participantDropdown" class="participant-dropdown" hidden role="dialog" aria-labelledby="participantDropdownTitle">
+        <div id="participantDetails"></div>
+        <p id="participantStatus" role="status" aria-live="polite"></p>
+      </div>
+      <p id="fileSharingStatus" class="control-help" hidden>You are sharing the current video. Keep this page open while others watch.</p>
+
+      <div class="chat-body">
+        <p id="hostReconnectStatus" class="host-reconnect-status" role="status" hidden></p>
+        <section id="votePanel" class="vote-panel" hidden aria-labelledby="vote-title">
+          <div class="vote-heading">
+            <div>
+              <p class="eyebrow">UP NEXT</p>
+              <h2 id="vote-title">Movie poll</h2>
+            </div>
+            <button id="pollToggle" class="poll-toggle" type="button" aria-expanded="false" aria-controls="pollDetails">Expand poll</button>
+            <button id="finishPollButton" class="finish-poll-button" type="button" hidden>Finish poll</button>
+            <span id="voteStatus" class="vote-status" aria-live="polite">0 votes cast</span>
+          </div>
+          <p id="voteLeader" class="vote-leader" aria-live="polite">No suggestions yet.</p>
+          <div id="pollDetails" class="poll-details" hidden>
+            <form id="suggestionForm" class="suggestion-form" autocomplete="off">
+              <label class="sr-only" for="suggestionInput">Suggest a video title</label>
+              <input id="suggestionInput" name="title" type="text" maxlength="80" placeholder="Search for a movie..." required>
+              <button type="submit">Find movie</button>
+            </form>
+            <p id="suggestionStatus" class="suggestion-status" role="status" aria-live="polite"></p>
+            <div id="suggestionResults" class="suggestion-results" aria-label="Movie search results"></div>
+            <div id="voteOptions" class="vote-options" aria-live="polite" aria-label="Next-video options">
+              <p class="vote-empty">Suggest a title to start voting.</p>
+            </div>
+          </div>
+        </section>
+
+        <div id="chatConversation" class="chat-conversation">
+          <div id="chatMessages" class="chat-messages" role="log" aria-live="polite" aria-label="Chat messages">
+            <div class="system-message">Welcome to WatchParty.</div>
+          </div>
+          <button id="chatJumpLatest" class="chat-jump-latest" type="button" hidden>&darr; Latest messages</button>
+
+          <form id="chatForm" class="chat-form" autocomplete="off">
+            <div id="chatReplyPreview" class="chat-reply-preview" hidden>
+              <div class="chat-reply-summary"><strong id="chatReplyName"></strong><span id="chatReplyText"></span></div>
+              <button id="chatReplyCancel" type="button" aria-label="Cancel reply">&times;</button>
+            </div>
+            <p id="chatSendStatus" class="chat-send-status" role="status" hidden></p>
+            <div class="chat-compose-row">
+              <label class="sr-only" for="chatInput">Message</label>
+              <input id="chatInput" name="message" type="text" maxlength="300" placeholder="Say something..." required>
+              <button id="chatEmojiButton" class="chat-emoji-button" type="button" aria-label="Emojis and global reactions" aria-expanded="false" aria-controls="emojiPicker">😊</button>
+              <button type="submit" aria-label="Send message">Send</button>
+            </div>
+            <div id="emojiPicker" class="emoji-picker" role="dialog" aria-label="Choose an emoji" hidden>
+              <div id="emojiPickerTabs" class="emoji-picker-tabs" role="tablist" aria-label="Emoji action" hidden>
+                <button id="emojiMessageTab" type="button" role="tab" aria-selected="true" aria-controls="emojiPickerGrid">Message emoji</button>
+                <button id="emojiGlobalTab" type="button" role="tab" aria-selected="false" aria-controls="emojiPickerGrid" tabindex="-1">Global reaction</button>
+              </div>
+              <p id="emojiPickerHint" class="emoji-picker-hint"></p>
+              <label class="sr-only" for="emojiSearch">Search emojis</label>
+              <input id="emojiSearch" class="emoji-search" type="search" placeholder="Search emojis..." autocomplete="off">
+              <div id="emojiPickerGrid" class="emoji-picker-grid" aria-label="Emoji choices"></div>
+              <p id="emojiPickerEmpty" class="emoji-picker-empty" hidden>No matching emojis.</p>
+            </div>
+          </form>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="site-footer">
+    <span>WatchParty</span>
+    <span>•</span>
+    <span id="networkHint">Browser-hosted video · Shared playback</span>
+  </footer>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

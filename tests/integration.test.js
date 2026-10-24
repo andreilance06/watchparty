@@ -23,17 +23,17 @@ test("HTTP modules, chat names, host-only file sharing, and host handoff work to
   assert.equal(viewer.role.nameRejected, "alex");
   assert.notEqual(viewer.role.name, "alex");
 
-  const html = await (await fetch(base)).text();
+  const html = await (await fetch(base + "/watch")).text();
   const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
   assert.equal(new Set(ids).size, ids.length, "HTML IDs must be unique");
   assert.equal((html.match(/class="vote-panel"/g) || []).length, 1);
-  const modules = ["js/app.js", "js/chat.js", "js/emoji-picker.js", "js/party.js", "js/voting.js", "js/room-entry.js", "js/theme.js", "js/connection.js", "js/player/controller.js", "js/player/sync.js", "js/player/fullscreen.js", "js/player/subtitles.js"];
+  const modules = ["js/app.js", "js/chat.js", "js/emoji-picker.js", "js/party.js", "js/voting.js", "js/room-controls.js", "js/hub.js", "js/theme.js", "js/connection.js", "js/player/controller.js", "js/player/sync.js", "js/player/fullscreen.js", "js/player/subtitles.js"];
   for (const file of modules) {
     const response = await fetch(`${base}/${file}`);
     assert.equal(response.status, 200, file);
     assert.match(response.headers.get("content-type"), /javascript/);
   }
-  for (const file of ["base", "layout", "player", "chat", "voting", "room-entry", "responsive"]) {
+  for (const file of ["base", "layout", "player", "chat", "voting", "hub", "responsive"]) {
     const response = await fetch(`${base}/css/${file}.css`, { method: "HEAD" });
     assert.equal(response.status, 200, file);
     assert.match(response.headers.get("content-type"), /text\/css/);
@@ -183,13 +183,13 @@ test("captions remain separate, seeks encode the requested segment, and segments
     assert.equal(caption.status, 200);
     assert.match(await caption.text(), /\[Events\]/);
   }
-  const first = await fetch(`${base}/hls/segment_000000.ts?v=1`);
+  const first = await fetch(base + ready.mediaUrl.replace('master.m3u8', 'segment_000000.ts'));
   assert.equal(first.status, 200);
   assert.ok((await first.arrayBuffer()).byteLength > 188);
 
   host.send({ type: "video-state", syncMode: "seek", paused: true, time: 8, playbackRate: 1 });
-  await viewer.next("session-state", (message) => message.syncMode === "seek");
-  const middleUrl = `${base}/hls/segment_000004.ts?v=1`;
+  const seekState = await viewer.next("session-state", (message) => message.syncMode === "seek");
+  const middleUrl = base + seekState.mediaUrl.replace('master.m3u8', 'segment_000004.ts');
   const middle = await fetch(middleUrl);
   assert.equal(middle.status, 200);
   const middleBytes = Buffer.from(await middle.arrayBuffer());
