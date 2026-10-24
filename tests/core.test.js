@@ -248,11 +248,11 @@ test("comment reactions validate emoji, replace selections, and expire with reta
   }
   for (const emoji of ["❤️", "👍🏽", "👨‍👩‍👧‍👦", "🇵🇭", "1️⃣"]) {
     react(emoji);
-    assert.deepEqual(broadcasts.at(-1).reactions, [{ clientId: "host", name: "Host", emoji }]);
+    assert.deepEqual(sent.at(-1).reactions, [{ clientId: "host", name: "Host", emoji }]);
     assert.equal(state.commentReactions.get(commentId).size, 1);
   }
   react(null);
-  assert.deepEqual(broadcasts.at(-1).reactions, []);
+  assert.deepEqual(sent.at(-1).reactions, []);
   for (const id of [null, "invalid", "00000000-0000-4000-8000-000000000000"]) {
     react("❤️", id);
     assert.equal(sent.at(-1).type, "error");
@@ -263,5 +263,5 @@ test("comment reactions validate emoji, replace selections, and expire with reta
   react("❤️");
   assert.equal(sent.at(-1).type, "error");
   react("❤️", broadcasts.at(-1).commentId);
-  assert.equal(broadcasts.at(-1).type, "comment-reaction");
+  assert.equal(sent.at(-1).type, "comment-reaction");
 });

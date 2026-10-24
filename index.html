@@ -36,6 +36,8 @@
   </header>
 
   <div id="floatingReactions" class="floating-reactions" aria-hidden="true"></div>
+  <div id="reactionFeed" class="reaction-feed" role="log" aria-live="polite" aria-label="Recent reactions"></div>
+  <div id="messageMenu" class="message-menu" role="menu" aria-label="Message actions" hidden></div>
 
   <section id="roomEntry" class="room-entry" role="dialog" aria-modal="true" aria-labelledby="roomEntryTitle">
     <div class="room-entry-card">
@@ -155,6 +157,11 @@
             </svg>
           </button>
         </div>
+        <button id="fullscreenChatToggle" class="fullscreen-chat-toggle" type="button" aria-controls="fullscreenChat" aria-expanded="true" hidden>
+          <span id="fullscreenChatLabel">Hide chat</span>
+          <span id="fullscreenChatUnread" class="fullscreen-chat-unread" aria-hidden="true" hidden></span>
+        </button>
+        <section id="fullscreenChat" class="fullscreen-chat" aria-label="Fullscreen chat" hidden></section>
       </div>
 
       <div class="player-info">
@@ -205,17 +212,6 @@
       </div>
       <p id="fileSharingStatus" class="control-help" hidden>You are sharing the current video. Keep this page open while others watch.</p>
 
-      <section class="reaction-section" aria-label="Send an emoji reaction">
-        <div id="reactionFeed" class="reaction-feed" role="log" aria-live="polite" aria-label="Recent reactions"></div>
-        <div class="reaction-buttons">
-          <button id="reactLove" type="button" aria-label="React with heart">❤️</button>
-          <button id="reactLaugh" type="button" aria-label="React with laughter">😂</button>
-          <button id="reactWow" type="button" aria-label="React with surprise">😮</button>
-          <button id="reactClap" type="button" aria-label="React with applause">👏</button>
-          <button id="reactSad" type="button" aria-label="React with sadness">😢</button>
-        </div>
-      </section>
-
       <div class="chat-body">
         <p id="hostReconnectStatus" class="host-reconnect-status" role="status" hidden></p>
         <section id="votePanel" class="vote-panel" hidden aria-labelledby="vote-title">
@@ -243,23 +239,38 @@
           </div>
         </section>
 
-        <div id="chatMessages" class="chat-messages" role="log" aria-live="polite" aria-label="Chat messages">
-          <div class="system-message">Welcome to WatchParty.</div>
+        <div id="chatConversation" class="chat-conversation">
+          <div id="chatMessages" class="chat-messages" role="log" aria-live="polite" aria-label="Chat messages">
+            <div class="system-message">Welcome to WatchParty.</div>
+          </div>
+          <button id="chatJumpLatest" class="chat-jump-latest" type="button" hidden>&darr; Latest messages</button>
+
+          <form id="chatForm" class="chat-form" autocomplete="off">
+            <div id="chatReplyPreview" class="chat-reply-preview" hidden>
+              <div class="chat-reply-summary"><strong id="chatReplyName"></strong><span id="chatReplyText"></span></div>
+              <button id="chatReplyCancel" type="button" aria-label="Cancel reply">&times;</button>
+            </div>
+            <p id="chatSendStatus" class="chat-send-status" role="status" hidden></p>
+            <div class="chat-compose-row">
+              <label class="sr-only" for="chatInput">Message</label>
+              <input id="chatInput" name="message" type="text" maxlength="300" placeholder="Say something..." required>
+              <button id="chatEmojiButton" class="chat-emoji-button" type="button" aria-label="Emojis and global reactions" aria-expanded="false" aria-controls="emojiPicker">😊</button>
+              <button type="submit" aria-label="Send message">Send</button>
+            </div>
+            <div id="emojiPicker" class="emoji-picker" role="dialog" aria-label="Choose an emoji" hidden>
+              <div id="emojiPickerTabs" class="emoji-picker-tabs" role="tablist" aria-label="Emoji action" hidden>
+                <button id="emojiMessageTab" type="button" role="tab" aria-selected="true" aria-controls="emojiPickerGrid">Message emoji</button>
+                <button id="emojiGlobalTab" type="button" role="tab" aria-selected="false" aria-controls="emojiPickerGrid" tabindex="-1">Global reaction</button>
+              </div>
+              <p id="emojiPickerHint" class="emoji-picker-hint"></p>
+              <label class="sr-only" for="emojiSearch">Search emojis</label>
+              <input id="emojiSearch" class="emoji-search" type="search" placeholder="Search emojis..." autocomplete="off">
+              <div id="emojiPickerGrid" class="emoji-picker-grid" aria-label="Emoji choices"></div>
+              <p id="emojiPickerEmpty" class="emoji-picker-empty" hidden>No matching emojis.</p>
+            </div>
+          </form>
         </div>
       </div>
-
-      <form id="chatForm" class="chat-form" autocomplete="off">
-        <label class="sr-only" for="chatInput">Message</label>
-        <input id="chatInput" name="message" type="text" maxlength="300" placeholder="Say something..." required>
-        <button id="chatEmojiButton" class="chat-emoji-button" type="button" aria-label="Choose an emoji" aria-expanded="false" aria-controls="emojiPicker">😊</button>
-        <button type="submit" aria-label="Send message">Send</button>
-        <div id="emojiPicker" class="emoji-picker" role="dialog" aria-label="Choose an emoji" hidden>
-          <label class="sr-only" for="emojiSearch">Search emojis</label>
-          <input id="emojiSearch" class="emoji-search" type="search" placeholder="Search emojis..." autocomplete="off">
-          <div id="emojiPickerGrid" class="emoji-picker-grid" aria-label="Emoji choices"></div>
-          <p id="emojiPickerEmpty" class="emoji-picker-empty" hidden>No matching emojis.</p>
-        </div>
-      </form>
     </aside>
   </main>
 

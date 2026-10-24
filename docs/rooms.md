@@ -52,6 +52,16 @@ The room name appears above the player panel while connected. Use **Invite** to 
 
 Errors return `{ "error": "message" }`: `400` invalid input, `401` missing membership/incorrect password, `403` forbidden origin, `404` missing room/endpoint, `405` wrong method, `409` code collision, `413` body over 16 KiB, and `429` admission limits. The defaults permit 100 private rooms, 1,000 memberships per room, and 30 admission attempts per address per minute. No public room listing exists.
 
+## Chat, replies, and reactions
+
+Room chat accepts `{ "type": "chat", "message": "Hello" }`, with an optional `requestId` (up to 100 characters) and `replyToId` referencing a retained comment in that room. Messages are trimmed and limited to 300 characters. Accepted messages broadcast `type`, `commentId`, `clientId`, `name`, `message`, `time`, and the supplied request identifier. Ordinary requests without the new fields remain supported.
+
+A reply additionally broadcasts a server-generated `replyTo: { commentId, name, message }` snapshot of its immediate parent. Client-supplied quote text and names are ignored. Unknown, malformed, expired, and foreign-room targets return `{ type: "error", action: "chat", code: "REPLY_UNAVAILABLE", requestId, message }` to the sender without posting the message. The browser keeps its draft and reply selection until acceptance or cancellation.
+
+The server retains text, original author names, and reaction targets for the latest 500 comments per room, pruning them together. There is no chat history replay or disk persistence. A reply's quoted snapshot remains readable in clients even after its original message leaves their local history.
+
+Global reactions use `{ "type": "reaction", "emoji": "..." }`; message reactions use `{ "type": "comment-reaction", "commentId": "...", "emoji": "..." }`, with `null` to remove the sender's message reaction. Both accept one validated emoji grapheme. The single composer picker has Message emoji and Global reaction tabs using the same searchable catalog. Message reactions are also available through the message context menu. Each message permits one reaction per verified browser identity, with the existing connection-ID fallback for clients without one. Selecting a different emoji replaces the previous reaction, including across tabs or reconnects. Reaction snapshots keep the existing `reactions: [{ clientId, name, emoji }]` list and add recipient-specific `myReaction` (an emoji or `null`). Raw browser identities are never sent. Counts and highlights follow these authoritative snapshots. All broadcasts stay within the admitted room.
+
 ## Movie suggestions and posters
 
 `GET /api/movies/search?q=Arrival` searches Wikipedia through its keyless MediaWiki Action API. Queries are normalized, limited to 80 characters, and cached in memory for ten minutes. The API returns up to eight article matches with a title, short description, article URL, and optional Wikimedia thumbnail URL. Requests use the existing admission rate limit.

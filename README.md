@@ -17,7 +17,7 @@ Its objectives are to keep playback synchronized, make group interaction availab
 | Watch rooms | Create a private room, optionally protect it with a password, and invite others with a link or access code. A public room is also available. |
 | Shared playback | Watch a video supplied by the host's browser, with synchronized playback and automatic compatibility streaming when needed. |
 | Captions | Add SRT, VTT, ASS, or SSA subtitles and choose a caption track independently. |
-| Chat and reactions | Send messages, insert emojis, react to comments, and send floating emoji reactions. |
+| Chat and reactions | Send messages and quoted replies, insert emojis, react to comments, and send floating emoji reactions, including in fullscreen. |
 | Movie polls | Start a poll as host, suggest titles with optional Wikipedia metadata, vote, and post the result when the host finishes the poll. |
 | Participants and moderation | See connected participants; hosts can manage playback permissions, transfer hosting, and block or unblock viewers. |
 | Responsive interface | Use desktop or mobile layouts and switch between light and dark themes. |
@@ -73,7 +73,7 @@ For another device on the same network, open one of the LAN addresses printed by
 1. Optionally enter a display name on the welcome screen. Choose **Create a room**, enter a room name, and optionally set an access code and password. Select **Create room**, then **Enter room**. You can also choose **Continue to the public room**.
 2. In a private room, use **Invite** to copy the access code. Share the invitation link shown after creation, or have viewers open the same server, choose **Join a room**, and enter the code and password if required. For viewers on another device, use the server's reachable LAN or HTTPS address rather than `localhost`.
 3. As host, select **Choose Video** and choose one video, optionally with subtitle files. Keep the browser page that supplies the video open throughout the session. Other participants join the room to watch.
-4. Type in the chatroom and select **Send**. Use the emoji button to insert an emoji, the plus button beneath a message to react, or the reaction buttons above the messages to send floating reactions.
+4. Type in the chatroom and select **Send**. Right-click a message (long-press on touch) to reply or choose a reaction. The single emoji button at the bottom opens Message emoji and Global reaction tabs; the latter sends floating reactions to the room.
 5. As host, select **Start poll**. Enter a movie title and select **Find movie**; choose a matching result with **Suggest & vote**, or suggest the title without a poster. Suggesting a title automatically casts your vote. Participants can vote for another suggestion, and the host selects **Finish poll** to post the result in chat. A poll chooses what to watch next; the host still selects the actual video file.
 6. Select a participant's name to inspect playback permissions. Hosts can change permissions or transfer hosting. Use **Leave room / switch** when you want to leave a private room.
 
@@ -89,7 +89,7 @@ Create a new room, join by access code, or continue to the public room.
 
 ### Desktop room
 
-The desktop layout places the video panel beside the participant list, reactions, movie poll, and chat.
+The desktop layout places the video panel beside the participant list, movie poll, and chat. The screenshots below predate the message context menu and tabbed emoji picker.
 
 ![Desktop WatchParty room showing the video panel, host participant, Arrival poll with one vote, and a welcome chat message](docs/screenshots/desktop-room.png)
 
@@ -167,9 +167,17 @@ Permissions are checked on the server and remembered for the same browser profil
 
 ## Chat and reactions
 
-Use the emoji button in chat to insert at the cursor, or the plus button below a comment to react. Selecting your current reaction removes it; selecting another replaces it. Reaction counts and names are shared within the room. The picker closes on selection, Escape, an outside click, or another click on its button.
+Use the single emoji button in chat to open the searchable picker. Its Message emoji tab inserts at the cursor; its Global reaction tab sends a floating reaction to everyone in the room without changing your draft. The picker defaults to Message emoji each time it opens. There is no separate reaction panel. Brief sender/emoji notices also announce global reactions, including with reduced motion enabled.
 
-Chat retains the latest 500 comments per browser; the server retains reaction targets for the latest 500 room comments. There is no chat history replay or persistence. Floating reactions are capped at 30 and respect reduced-motion preferences. Next-video suggestions and voting remain shared within the room.
+Messages use rounded incoming/outgoing bubbles with timestamps and compact reaction pills. Right-click a message, long-press it on touch, or focus it and press Shift+F10/Menu to open its action menu. Choose a quick reaction, or click the downward-chevron icon to expand more emoji rows beneath the quick reactions inside the same menu. Click the chevron again to collapse the rows. The expanded section scrolls independently and stays open after selecting reactions. Escape collapses the rows first; press it again to close the menu. Each new message menu starts collapsed. Each person has one reaction per message: choosing another replaces the previous one. Existing reaction-count pills remain clickable: clicking another person's reaction adds yours, and clicking your highlighted reaction removes it. Counts and highlighted ownership follow the server and stay synchronized across tabs and reconnections using the existing browser identity. Different browsers or cleared cookies have separate identities. The bottom emoji picker stays open after selections, preserving its tab, search, and scroll position. Consecutive message emojis insert in order at the cursor. Close the picker with Escape, an outside click, or another click on its opener button; fullscreen changes also dismiss it. Message action menus dismiss on an outside click, chat scrolling, fullscreen changes, or removal of their target message.
+
+Choose Reply from a message's action menu to show its author and text above the composer. Cancel with the preview's close button, or choose another message without losing your draft. Replies appear in the regular chat stream with a quoted preview; selecting the quote scrolls to and highlights the original when it is still available locally. Quotes remain readable if the original is absent. A failed send keeps the draft and reply target; an expired target asks you to cancel the reply or select another message.
+
+Fullscreen shows the same chat and composer in a compact overlay, with a Show/Hide Chat control. Your shown/hidden preference is remembered across fullscreen transitions until you reload the page. The control fades with the video controls and briefly reappears for four seconds with an unread count when new messages arrive. Unread messages clear when the window is focused and the newest messages are visible; opening chat while scrolled upward keeps them unread. Messages, replies, the message action menu, the tabbed emoji picker, and floating reactions work there. Hiding chat still allows incoming floating reactions and brief sender notices. Drafts and scroll position are preserved on entry/exit. Supported fullscreen APIs use the video shell; other browsers use the existing page fullscreen fallback. Native video Picture-in-Picture does not include chat.
+
+New messages from other participants play a quiet notification when chat is hidden or the window is unfocused, including outside fullscreen. Sounds become available after your first interaction with the page and are limited to once per second during bursts. Browser audio restrictions may prevent playback; missed sounds are not replayed later. Your own messages, system notices, and emoji reactions do not trigger notifications.
+
+Chat retains the latest 500 comments per browser; the server retains message text and reaction targets for the latest 500 room comments to validate quoted replies. There is no chat history replay or persistence. Floating reactions are capped at 30 and respect reduced-motion preferences. Next-video suggestions and voting remain shared within the room.
 
 ## Performance and verification
 

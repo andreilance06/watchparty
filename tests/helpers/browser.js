@@ -8,7 +8,7 @@ class EventTargetDouble {
   constructor() { this.listeners = new Map(); }
   addEventListener(type, fn, options = {}) {
     const list = this.listeners.get(type) || [];
-    list.push({ fn, once: options.once }); this.listeners.set(type, list);
+    list.push({ fn, once: options.once, capture: options === true || options.capture }); this.listeners.set(type, list);
   }
   removeEventListener(type, fn) {
     this.listeners.set(type, (this.listeners.get(type) || []).filter((item) => item.fn !== fn));
@@ -17,7 +17,7 @@ class EventTargetDouble {
   dispatch(type, properties = {}) {
     const event = { type, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; },
       stopPropagation() { this.propagationStopped = true; }, ...properties };
-    for (const item of [...(this.listeners.get(type) || [])]) {
+    for (const item of [...(this.listeners.get(type) || [])].sort((a, b) => Number(Boolean(b.capture)) - Number(Boolean(a.capture)))) {
       if (item.once) this.removeEventListener(type, item.fn);
       item.fn(event);
     }
@@ -83,6 +83,7 @@ class ElementDouble extends EventTargetDouble {
   getBoundingClientRect() {
     return { top: 0, left: 0, right: this.clientWidth, bottom: this.clientHeight, width: this.clientWidth, height: this.clientHeight };
   }
+  scrollIntoView(options) { this.scrolledIntoView = options; }
   setSelectionRange(start, end) { this.selectionStart = start; this.selectionEnd = end; }
   focus() { this.focused = true; let root = this; while (root.parentNode) root = root.parentNode; root.activeElement = this; }
   click() { this.dispatch("click"); }
@@ -100,11 +101,23 @@ function createBrowserDouble({ storageFailure, rendererReady, autoContinuePublic
   document.documentElement = new ElementDouble("html");
   document.querySelector = (selector) => elements.get(selector.slice(1));
   document.createElement = (tag) => new ElementDouble(tag);
+  document.createElementNS = (_, tag) => new ElementDouble(tag);
   document.body = new ElementDouble("body"); document.body.connected = true;
   document.hidden = false;
   const placeholder = elements.get("videoPlaceholder");
   placeholder.specialChildren = { strong: new ElementDouble("strong"), "span:last-child": new ElementDouble("span") };
   const shell = elements.get("videoShell"); shell.appendChild(placeholder);
+  document.body.appendChild(shell);
+  for (const id of ["fullscreenChat", "fullscreenChatToggle"]) shell.appendChild(elements.get(id));
+  for (const id of ["fullscreenChatLabel", "fullscreenChatUnread"]) elements.get("fullscreenChatToggle").appendChild(elements.get(id));
+  const chatPanel = elements.get("chatPanel"), conversation = elements.get("chatConversation");
+  document.body.appendChild(chatPanel);
+  chatPanel.appendChild(conversation);
+  for (const id of ["chatMessages", "chatJumpLatest", "chatForm"]) conversation.appendChild(elements.get(id));
+  for (const id of ["chatInput", "chatReplyPreview", "chatSendStatus", "chatEmojiButton", "emojiPicker"]) elements.get("chatForm").appendChild(elements.get(id));
+  for (const id of ["emojiPickerTabs", "emojiPickerHint", "emojiSearch", "emojiPickerGrid", "emojiPickerEmpty"]) elements.get("emojiPicker").appendChild(elements.get(id));
+  for (const id of ["emojiMessageTab", "emojiGlobalTab"]) elements.get("emojiPickerTabs").appendChild(elements.get(id));
+  for (const id of ["floatingReactions", "reactionFeed", "messageMenu"]) document.body.appendChild(elements.get(id));
   shell.requestFullscreen = async () => { document.fullscreenElement = shell; document.dispatch("fullscreenchange"); };
   document.exitFullscreen = async () => { document.fullscreenElement = null; document.dispatch("fullscreenchange"); };
   const video = elements.get("video");

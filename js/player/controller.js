@@ -7,14 +7,14 @@ import { createFullscreen } from "./fullscreen.js";
 import { createPlaybackSync } from "./sync.js";
 import { canControl, DEFAULT_PERMISSIONS } from "../permissions.js";
 
-export function createPlayer({ elements, state: session, send, report, files }) {
+export function createPlayer({ elements, state: session, send, report, files, attention }) {
   const { video, videoPlaceholder, placeholderTitle, placeholderText, viewerControls,
     chooseVideoButton, hostControls, roleBadge, fileName, syncStatus } = elements;
   const subtitles = createSubtitles({ elements, report, onAddCaptions: files.chooseCaptions });
   const sync = createPlaybackSync({ elements, state: session, send });
   const mediaEvents = createMediaEventBridge(video);
   const compatibilityBuffer = createCompatibilityBuffer(video);
-  createFullscreen({ elements, getHostPaused: () => session.latestHostPaused, afterResize: subtitles.refreshLayout });
+  createFullscreen({ elements, getHostPaused: () => session.latestHostPaused, afterResize: subtitles.refreshLayout, attention });
   let latest, latestAt = 0, sourceKey = "", generation = 0, mode = "", pendingCompatibility;
   let switchStarted = 0, lastProgress = 0, lastTime = -1, metrics = {}, selectionStarted = 0;
   let requestSequence = 0, requestTimer, recoveryTimer, recovery, recoveryUsed = false, terminalError = false;

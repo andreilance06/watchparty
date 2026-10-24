@@ -34,6 +34,7 @@ function createSession() {
     videoSuggestions: [],
     videoVotes: new Map(),
     commentReactions: new Map(),
+    comments: new Map(),
     nextSuggestionId: 1,
     hlsDirectory: null,
     selectedEncoder: "Detecting hardware",

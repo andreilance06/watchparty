@@ -104,6 +104,13 @@ test("room creators retain hosting and all features stay inside their room", asy
   host.send({ type: "chat", message: "Private to room one" });
   const comment = await viewer.next("chat");
   assert.equal(comment.message, "Private to room one");
+  viewer.send({ type: "chat", message: "A reply in room one", replyToId: comment.commentId, requestId: "room-reply" });
+  const reply = await host.next("chat", message => message.requestId === "room-reply");
+  assert.deepEqual(reply.replyTo, { commentId: comment.commentId, name: "Host", message: comment.message });
+  otherHost.send({ type: "chat", message: "Foreign reply", replyToId: comment.commentId, requestId: "foreign" });
+  const replyError = await otherHost.next("error", message => message.action === "chat");
+  assert.equal(replyError.code, "REPLY_UNAVAILABLE");
+  assert.equal(replyError.requestId, "foreign");
   otherHost.send({ type: "comment-reaction", commentId: comment.commentId, emoji: "❤️" });
   assert.match((await otherHost.next("error")).message, /comment reaction/);
   viewer.send({ type: "comment-reaction", commentId: comment.commentId, emoji: "❤️" });

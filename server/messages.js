@@ -99,17 +99,19 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
     updatePartyState();
   }
 
-  function commentReactionMessage(commentId, reactions = state.commentReactions.get(commentId) || new Map()) {
+  function commentReactionMessage(commentId, clientId) {
+    const reactions = state.commentReactions.get(commentId) || new Map();
     return {
       type: "comment-reaction", commentId,
-      reactions: [...reactions].map(([clientId, reaction]) => ({
-        clientId, name: reaction.name, emoji: reaction.emoji
-      }))
+      reactions: [...reactions.values()].map(reaction => ({
+        clientId: reaction.clientId, name: reaction.name, emoji: reaction.emoji
+      })),
+      myReaction: reactions.get(permissionKey(state.clients.get(clientId), clientId))?.emoji || null
     };
   }
 
   function broadcastCommentReactions(commentId) {
-    broadcast(commentReactionMessage(commentId));
+    for (const [clientId, client] of state.clients) send(client.ws, commentReactionMessage(commentId, clientId));
   }
 
   function handleMessage(ws, message) {
@@ -178,7 +180,7 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
           });
           send(ws, sessionState(state, "join"));
           for (const [commentId, reactions] of state.commentReactions) {
-            if (reactions.size) send(ws, commentReactionMessage(commentId, reactions));
+            if (reactions.size) send(ws, commentReactionMessage(commentId, ws.clientId));
           }
           updatePresence();
         }
@@ -221,11 +223,29 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
       case "chat": {
         const text = String(message.message || "").trim().slice(0, 300);
         if (!text) return;
+        const requestId = typeof message.requestId === "string" ? message.requestId.slice(0, 100) : undefined;
+        let replyTo;
+        if (message.replyToId != null) {
+          const original = typeof message.replyToId === "string" && state.comments.get(message.replyToId);
+          if (!original) {
+            send(ws, { type: "error", action: "chat", requestId, code: "REPLY_UNAVAILABLE",
+              message: "That message is no longer available. Cancel your reply or choose another message." });
+            break;
+          }
+          replyTo = { commentId: original.commentId, name: original.name, message: original.message };
+        }
         const commentId = randomUUID();
+        const comment = { type: "chat", commentId, clientId: ws.clientId, name: client.name || "Guest", message: text,
+          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          ...(requestId ? { requestId } : {}), ...(replyTo ? { replyTo } : {}) };
+        state.comments.set(commentId, { commentId, name: comment.name, message: text });
         state.commentReactions.set(commentId, new Map());
-        while (state.commentReactions.size > MAX_COMMENTS) state.commentReactions.delete(state.commentReactions.keys().next().value);
-        broadcast({ type: "chat", commentId, clientId: ws.clientId, name: client.name || "Guest", message: text,
-          time: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) });
+        while (state.commentReactions.size > MAX_COMMENTS) {
+          const oldest = state.commentReactions.keys().next().value;
+          state.commentReactions.delete(oldest);
+          state.comments.delete(oldest);
+        }
+        broadcast(comment);
         break;
       }
       case "comment-reaction": {
@@ -236,8 +256,9 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
           break;
         }
         const reactions = state.commentReactions.get(message.commentId);
-        if (message.emoji === null) reactions.delete(ws.clientId);
-        else reactions.set(ws.clientId, { name: client.name || "Guest", emoji: message.emoji });
+        const identity = permissionKey(client, ws.clientId);
+        if (message.emoji === null) reactions.delete(identity);
+        else reactions.set(identity, { clientId: ws.clientId, name: client.name || "Guest", emoji: message.emoji });
         broadcastCommentReactions(message.commentId);
         break;
       }

@@ -57,7 +57,7 @@ test("HTTP modules, chat names, host-only file sharing, and host handoff work to
   assert.match(comment.commentId, /^[\da-f-]{36}$/i);
   viewer.send({ type: "comment-reaction", commentId: comment.commentId, emoji: "❤️" });
   assert.deepEqual(await host.next("comment-reaction"), {
-    type: "comment-reaction", commentId: comment.commentId,
+    type: "comment-reaction", commentId: comment.commentId, myReaction: null,
     reactions: [{ clientId: viewer.role.clientId, name: "Bob", emoji: "❤️" }]
   });
   assert.deepEqual((await viewer.next("comment-reaction")).reactions, [

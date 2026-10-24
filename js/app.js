@@ -2,6 +2,7 @@ import { getElements, setConnectionStatus } from "./dom.js";
 import { createClientState } from "./state.js";
 import { createConnection } from "./connection.js";
 import { createChat } from "./chat.js";
+import { createChatAttention } from "./chat-attention.js";
 import { createParty } from "./party.js";
 import { createPlayer } from "./player/controller.js";
 import { createVoting } from "./voting.js";
@@ -83,15 +84,17 @@ const connection = createConnection({
   onStatus: (connected, text) => {
     setConnectionStatus(elements, connected, text);
     if (!connected) files?.disconnect();
+    chat.setConnected(connected);
     participants.setConnected(connected);
     voting.setConnected(connected);
   }
 });
 stopCurrentConnection = connection.dispose;
-const chat = createChat({ elements, state, send: connection.send });
+const attention = createChatAttention({ elements });
+const chat = createChat({ elements, state, send: connection.send, attention });
 files = createHostFiles({ send: connection.send, report: chat.addSystemMessage });
-const party = createParty({ elements, send: connection.send });
-const player = createPlayer({ elements, state, send: connection.send, report: chat.addSystemMessage, files });
+const party = createParty({ elements });
+const player = createPlayer({ elements, state, send: connection.send, report: chat.addSystemMessage, files, attention });
 const voting = createVoting({ elements, state, send: connection.send, report: chat.addSystemMessage });
 const participants = createParticipants({ elements, state, send: connection.send });
 
@@ -146,6 +149,7 @@ function handleMessage(message) {
     case "room-blocked": showBlocked(); break;
     case "participant-action-complete": participants.complete(message); break;
     case "error":
+      if (message.action === "chat") chat.rejectSend(message);
       if (["set-viewer-permissions", "block-participant", "unblock-participant", "transfer-host"].includes(message.action)) participants.fail(message);
       chat.addSystemMessage(message.message); break;
   }

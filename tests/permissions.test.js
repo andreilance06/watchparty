@@ -1,3 +1,4 @@
+const { openGlobalPicker } = require("./helpers/chat-actions");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { once } = require("node:events");
@@ -348,7 +349,8 @@ test("successful identity bootstrap opens the control socket and enables global 
   assert.equal(b.sockets.length, 1);
   const socket = b.sockets[0];
   socket.open();
-  b.elements.get("reactClap").dispatch("click");
+  openGlobalPicker(id => b.elements.get(id));
+  b.elements.get("emojiPickerGrid").children.find(button => button.textContent === "\ud83d\udc4f").dispatch("click");
   assert.equal(socket.sent.at(-1).type, "reaction");
   socket.receive({ type: "reaction", emoji: "👏", name: "Viewer" });
   assert.equal(b.elements.get("reactionFeed").children.at(-1).textContent, "👏 Viewer");

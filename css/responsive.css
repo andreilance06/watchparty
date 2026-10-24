@@ -80,10 +80,6 @@
   .name-form { max-width: 100%; }
   .name-form input { width: min(38vw, 9rem); }
   .participant-section { padding: .4rem .65rem; }
-  .reaction-section { padding: .35rem .65rem; }
-  .reaction-feed { min-height: .8rem; }
-  .reaction-buttons { gap: .25rem; margin-top: .2rem; }
-  .reaction-buttons button { min-width: 1.85rem; padding: .15rem .28rem; }
   .chat-messages { padding: .75rem; }
   .chat-form { padding: .55rem; }
 }

@@ -1,11 +1,7 @@
-const REACTIONS = [
-  ["reactLove", "❤️"], ["reactLaugh", "😂"], ["reactWow", "😮"],
-  ["reactClap", "👏"], ["reactSad", "😢"]
-];
-
-export function createParty({ elements, send }) {
+export function createParty({ elements }) {
   const { reactionFeed, floatingReactions } = elements;
   const animations = new Map();
+  const notices = new Map();
   const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
 
   function removeFloatingReaction(reaction) {
@@ -38,13 +34,15 @@ export function createParty({ elements, send }) {
     reaction.className = "reaction-item";
     reaction.textContent = `${message.emoji} ${message.name}`;
     reactionFeed.appendChild(reaction);
-    while (reactionFeed.children.length > 5) reactionFeed.children[0].remove();
+    notices.set(reaction, setTimeout(() => removeNotice(reaction), 4000));
+    while (reactionFeed.children.length > 5) removeNotice(reactionFeed.children[0]);
     showFloatingReaction(message.emoji);
   }
 
-  for (const [id, emoji] of REACTIONS) {
-    elements[id].addEventListener("click", () => send({ type: "reaction", emoji }));
+  function removeNotice(reaction) {
+    clearTimeout(notices.get(reaction));
+    notices.delete(reaction);
+    reaction.remove();
   }
-
   return { receiveReaction };
 }

@@ -1,4 +1,4 @@
-const EMOJI_CHOICES = `
+export const EMOJI_CHOICES = `
 😀 grinning face
 😃 smiling face with big eyes
 😄 smiling face with smiling eyes
@@ -296,9 +296,10 @@ const EMOJI_CHOICES = `
   return { emoji, label: label.join(" ") };
 });
 
-export function createEmojiPicker({ picker, search, grid, emptyMessage }) {
+export function createEmojiPicker({ picker, search, grid, emptyMessage, tabs, messageTab, globalTab, hint, onOpen = () => {} }) {
   let onSelect = null;
   let activeTrigger = null;
+  let globalSelect = null, mode = "message", contextLabel = "Choose an emoji";
   // A viewport-positioned portal avoids clipping inside the scrolling chat.
   document.body.appendChild(picker);
 
@@ -345,9 +346,10 @@ export function createEmojiPicker({ picker, search, grid, emptyMessage }) {
       button.title = label;
       button.textContent = emoji;
       button.addEventListener("click", () => {
-        const select = onSelect;
-        close({ restoreFocus: true });
+        const select = mode === "global" ? globalSelect : onSelect;
         select?.(emoji);
+        if (!picker.hidden && button.isConnected) button.focus({ preventScroll: true });
+        position();
       });
       grid.appendChild(button);
     }
@@ -355,16 +357,52 @@ export function createEmojiPicker({ picker, search, grid, emptyMessage }) {
     position();
   }
 
-  function open(trigger, select) {
+  function setMode(nextMode, focus = false) {
+    mode = nextMode === "global" && globalSelect ? "global" : "message";
+    const global = mode === "global";
+    picker.setAttribute("aria-label", global ? "Send global reaction" : contextLabel);
+    if (hint) hint.textContent = global ? "Send a floating reaction to everyone in the room."
+      : globalSelect ? "Insert an emoji into your message." : "Choose your reaction to this message.";
+    if (tabs) tabs.hidden = !globalSelect;
+    for (const [tab, selected] of [[messageTab, !global], [globalTab, global]]) {
+      if (!tab) continue;
+      tab.setAttribute("aria-selected", String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+      if (focus && selected) tab.focus({ preventScroll: true });
+    }
+    if (globalSelect && messageTab && globalTab) {
+      grid.setAttribute("role", "tabpanel");
+      grid.setAttribute("aria-labelledby", global ? globalTab.id : messageTab.id);
+    } else {
+      grid.removeAttribute("role");
+      grid.removeAttribute("aria-labelledby");
+    }
+    position();
+  }
+
+  messageTab?.addEventListener("click", () => setMode("message"));
+  globalTab?.addEventListener("click", () => setMode("global"));
+  tabs?.addEventListener("keydown", event => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setMode(event.key === "Home" ? "message" : event.key === "End" ? "global" : mode === "message" ? "global" : "message", true);
+  });
+
+  function open(trigger, select, label = "Choose an emoji", sendGlobal = null) {
     const opening = picker.hidden || activeTrigger !== trigger;
     if (!opening) {
       close({ restoreFocus: true });
       return;
     }
+    onOpen();
     close();
     onSelect = select;
+    globalSelect = sendGlobal;
+    contextLabel = label;
     activeTrigger = trigger;
     picker.hidden = false;
+    setMode("message");
     trigger.setAttribute("aria-expanded", "true");
     search.value = "";
     render();
@@ -384,6 +422,7 @@ export function createEmojiPicker({ picker, search, grid, emptyMessage }) {
     picker.hidden = true;
     activeTrigger = null;
     onSelect = null;
+    globalSelect = null;
     document.removeEventListener("pointerdown", dismissOutside, true);
     document.removeEventListener("keydown", dismissEscape, true);
     window.removeEventListener("scroll", position, true);
@@ -394,6 +433,7 @@ export function createEmojiPicker({ picker, search, grid, emptyMessage }) {
   }
 
   search.addEventListener("input", () => render(search.value));
+  document.addEventListener("watchparty-fullscreen-change", () => close());
   search.addEventListener("keydown", (event) => {
     if (event.key === "Enter") event.preventDefault();
   });
