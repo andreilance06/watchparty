@@ -82,6 +82,63 @@ test('bitrate slider previews intermediate values, survives repaint, and synchro
   menu.update(state); assert.equal(slider.value, '1000000');
 });
 
+test('bitrate drags capture releases outside and discard cancelled previews', async () => {
+  const b = createBrowserDouble(), video = b.elements.get('video');
+  const list = b.document.createElement('div'); list.className = 'movi-quality-list'; video.shadowRoot.appendChild(list);
+  const panel = b.document.createElement('div'); panel.className = 'movi-settings-menu'; video.shadowRoot.appendChild(panel);
+  video.openSettingsPage = page => { video._settingsPage = page; };
+  video.closeSettingsPage = () => { video._settingsPage = null; };
+  const { createNativeQualityMenu } = await b.load('js/player/native-quality-menu.js');
+  let state = { enabled: true, mediaVersion: 1, quality: '720', bitrate: 2000000,
+    options: qualityOptions({ width: 1920, height: 1080 }), bitrateRange: { min: 400000, max: 8000000, step: 1000 } };
+  const changes = [];
+  const menu = createNativeQualityMenu({ video, onChange(next) { changes.push(next); state = { ...state, ...next }; menu.update(state); } });
+  menu.update(state);
+  const slider = list.querySelectorAll('input').find(input => input.type === 'range');
+  const captured = new Set();
+  slider.setPointerCapture = id => captured.add(id);
+  slider.hasPointerCapture = id => captured.has(id);
+  slider.releasePointerCapture = id => { captured.delete(id); slider.dispatch('lostpointercapture', { pointerId: id }); };
+  const down = () => slider.dispatch('pointerdown', { pointerId: 7, button: 0 });
+  video.openSettingsPage('quality');
+  assert.equal(panel.getAttribute('data-watchparty-resolution'), '');
+  assert.equal(down().defaultPrevented, false, 'native range behavior remains enabled');
+  assert.equal(captured.has(7), true);
+  slider.value = '3000000'; slider.dispatch('input');
+  menu.update({ ...state, status: 'New telemetry while dragging' });
+  assert.equal(slider.value, '3000000');
+  slider.dispatch('pointerup', { pointerId: 8 });
+  assert.equal(captured.has(7), true, 'unrelated pointer cannot finish drag');
+  slider.dispatch('pointerup', { pointerId: 7, clientX: -100, clientY: -100 });
+  slider.dispatch('change');
+  assert.equal(changes.length, 1); assert.equal(state.bitrate, 3000000); assert.equal(captured.size, 0);
+  assert.equal(slider.value, '3000000', 'lost capture after release cannot revert committed value');
+  for (const type of ['pointercancel', 'lostpointercapture', 'blur']) {
+    down(); slider.value = '4000000'; slider.dispatch('input');
+    slider.dispatch(type, { pointerId: 7 });
+    assert.equal(captured.size, 0); assert.equal(slider.value, '3000000');
+    slider.dispatch('change'); assert.equal(changes.length, 1, 'cancel cannot commit a preview');
+  }
+  down(); slider.value = '5000000'; slider.dispatch('input');
+  state = { ...state, mediaVersion: 2, bitrate: 1000000 }; menu.update(state);
+  assert.equal(captured.size, 0); assert.equal(slider.value, '1000000');
+  slider.dispatch('change'); assert.equal(changes.length, 1, 'old gesture cannot commit to new media');
+  slider.dispatch('keydown', { key: 'ArrowRight' }); slider.value = '1001000'; slider.dispatch('input'); slider.dispatch('change');
+  assert.equal(state.bitrate, 1001000); assert.equal(changes.length, 2);
+  // Some browsers commit change before delivering pointerup.
+  down(); slider.value = '2000000'; slider.dispatch('input'); slider.dispatch('change');
+  slider.dispatch('pointerup', { pointerId: 7 });
+  assert.equal(changes.length, 3); assert.equal(state.bitrate, 2000000); assert.equal(captured.size, 0);
+  for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) {
+    const event = slider.dispatch(type);
+    assert.equal(event.propagationStopped, true); assert.equal(event.defaultPrevented, false);
+  }
+  video.closeSettingsPage();
+  assert.equal(panel.getAttribute('data-watchparty-resolution'), null);
+  menu.update(state);
+  assert.equal(video.shadowRoot.querySelectorAll('[data-watchparty-settings-style]').length, 1);
+});
+
 test('encoder budget is shared and releases permits after failure or cancellation', () => {
   const budget = createEncoderBudget(2);
   const a = budget.acquire('a'), b = budget.acquire('b');

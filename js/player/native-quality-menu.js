@@ -3,6 +3,40 @@
 export function createNativeQualityMenu({ video, onChange }) {
   let state = {}, qualitySelect, bitrateSlider, bitrateAuto, bitrateLabel, auto, status, container;
   let dragging = false, lastManual, previousResolution = "auto";
+  let pointerId = null, suppressChange = false;
+  function endDrag() {
+    const captured = pointerId;
+    pointerId = null;
+    dragging = false;
+    if (captured != null && bitrateSlider?.hasPointerCapture?.(captured)) bitrateSlider.releasePointerCapture(captured);
+  }
+  function cancelDrag() {
+    if (!dragging && pointerId == null) return;
+    suppressChange = true;
+    endDrag();
+    render();
+  }
+  function installPanelStyles() {
+    const root = video.shadowRoot;
+    if (!root || root.querySelector('[data-watchparty-settings-style]')) return;
+    const style = document.createElement("style");
+    style.dataset.watchpartySettingsStyle = "";
+    // Movi's universal active/focus reset also matches the panel while a child
+    // is being adjusted, removing its border and shadow.
+    style.textContent = `
+      .movi-settings-menu {
+        border:1px solid var(--movi-glass-border)!important;
+        box-shadow:var(--movi-shadow-md)!important;
+      }
+      .movi-settings-menu[data-watchparty-resolution] { width:340px; }
+      @container movi-host (max-width:480px) {
+        :host(:not(.movi-audio-strip)) .movi-settings-menu {
+          box-shadow:var(--movi-shadow-md),0 0 0 100vmax rgba(0,0,0,.55)!important;
+        }
+      }
+    `;
+    root.appendChild(style);
+  }
   const bounds = () => state.bitrateRange || { min: 25000, max: 8000000, step: 1000 };
   const clamp = value => Math.max(bounds().min, Math.min(bounds().max, Math.round(value / bounds().step) * bounds().step));
   const resolution = () => state.quality === "source" ? previousResolution : state.quality;
@@ -35,7 +69,7 @@ export function createNativeQualityMenu({ video, onChange }) {
     trigger?.setAttribute("title", "Resolution");
     if (!container || container.parentNode !== list) {
       container = document.createElement("div"); container.dataset.watchpartyQuality = "";
-      container.style.cssText = "padding:8px 12px;display:grid;gap:12px;min-width:220px;max-width:100%;box-sizing:border-box";
+      container.style.cssText = "padding:8px 12px;display:grid;gap:12px;min-width:0;max-width:100%;box-sizing:border-box";
       const style = document.createElement("style");
       style.textContent = `
         [data-watchparty-quality] input[type="range"]::-webkit-slider-thumb {
@@ -72,16 +106,34 @@ export function createNativeQualityMenu({ video, onChange }) {
       bitrateLabel = document.createElement("output"); bitrateLabel.dataset.bitrateLabel = "";
       bitrateLabel.style.cssText = "font:inherit;font-size:13px";
       bitrateSlider = document.createElement("input"); bitrateSlider.type = "range"; bitrateSlider.setAttribute("aria-label", "Bitrate");
-      bitrateSlider.style.cssText = "appearance:none;width:100%;min-width:0;margin:8px 0;cursor:pointer;accent-color:var(--movi-primary-color,#8b7bff);border-radius:999px;height:6px";
-      bitrateSlider.addEventListener("pointerdown", event => { event.stopPropagation(); dragging = true; });
-      bitrateSlider.addEventListener("pointerup", event => { event.stopPropagation(); dragging = false; });
+      bitrateSlider.style.cssText = "appearance:none;width:100%;min-width:0;margin:8px 0;cursor:pointer;accent-color:var(--movi-primary-color,#8b7bff);border-radius:999px;height:6px;touch-action:none";
+      bitrateSlider.addEventListener("pointerdown", event => {
+        event.stopPropagation();
+        if (pointerId != null || event.button !== 0 || bitrateSlider.disabled) return;
+        suppressChange = false; dragging = true; pointerId = event.pointerId;
+        bitrateSlider.setPointerCapture(event.pointerId);
+      });
+      bitrateSlider.addEventListener("pointerup", event => {
+        event.stopPropagation();
+        if (event.pointerId === pointerId) endDrag();
+      });
+      // Touch events are separate from pointer events. Keep slider drags out
+      // of Movi's panel swipe-to-dismiss handler without blocking range input.
+      for (const type of ["touchstart", "touchmove", "touchend", "touchcancel"]) {
+        bitrateSlider.addEventListener(type, event => event.stopPropagation(), { passive: true });
+      }
+      bitrateSlider.addEventListener("keydown", () => { suppressChange = false; });
       bitrateSlider.addEventListener("input", event => { event.stopPropagation(); dragging = true; describeSlider(); });
       bitrateSlider.addEventListener("change", event => {
         event.stopPropagation(); dragging = false;
+        if (suppressChange) { render(); return; }
         selectBitrate(Number(bitrateSlider.value) > bounds().max ? "source" : Number(bitrateSlider.value));
       });
-      bitrateSlider.addEventListener("pointercancel", () => { dragging = false; render(); });
-      bitrateSlider.addEventListener("blur", () => { dragging = false; render(); });
+      for (const type of ["pointercancel", "lostpointercapture"]) bitrateSlider.addEventListener(type, event => {
+        event.stopPropagation();
+        if (event.pointerId === pointerId) cancelDrag();
+      });
+      bitrateSlider.addEventListener("blur", cancelDrag);
       bitrateAuto.addEventListener("change", event => {
         event.stopPropagation(); dragging = false;
         if (bitrateAuto.checked) onChange({ quality: resolution(), bitrate: "auto" });
@@ -95,7 +147,7 @@ export function createNativeQualityMenu({ video, onChange }) {
       // Keep Movi's click/keyboard shortcuts from seeking or closing Settings.
       for (const type of ["click", "keydown", "keyup"]) container.addEventListener(type, event => event.stopPropagation());
       status = document.createElement("p"); status.setAttribute("role", "status");
-      status.style.cssText = "font:inherit;font-size:12px;white-space:normal;line-height:1.5;margin:0;opacity:.85";
+      status.style.cssText = "font:inherit;font-size:12px;white-space:normal;overflow-wrap:anywhere;min-width:0;line-height:1.5;margin:0;opacity:.85";
       container.appendChild(status);
       auto = document.createElement("button"); auto.type = "button"; auto.className = "movi-settings-choice";
       auto.textContent = "Return to auto"; auto.addEventListener("click", event => { event.preventDefault(); event.stopPropagation(); dragging = false; previousResolution = "auto"; onChange({ quality: "auto", bitrate: "auto" }); });
@@ -136,6 +188,7 @@ export function createNativeQualityMenu({ video, onChange }) {
   hook("settingsRowAvailable", (original, selector, items) => selector === ".movi-quality-container" && state.enabled ? true : original?.(selector, items));
   hook("settingsRowValue", (original, page) => page === "quality" && state.enabled ? state.label || "Auto" : original?.(page));
   function renameResolution() {
+    video.shadowRoot?.querySelector(".movi-settings-menu")?.toggleAttribute("data-watchparty-resolution", state.enabled && video._settingsPage === "quality");
     if (!state.enabled) return;
     const rootLabel = video.shadowRoot?.querySelector('[data-page="quality"] .movi-settings-row-label');
     if (rootLabel) rootLabel.textContent = "Resolution";
@@ -146,6 +199,7 @@ export function createNativeQualityMenu({ video, onChange }) {
   }
   hook("buildSettingsRoot", (original, ...args) => { const result = original?.(...args); renameResolution(); return result; });
   hook("openSettingsPage", (original, ...args) => { const result = original?.(...args); renameResolution(); return result; });
+  hook("closeSettingsPage", (original, ...args) => { cancelDrag(); const result = original?.(...args); renameResolution(); return result; });
   hook("clampSettingsPanel", (original, panel) => {
     original?.(panel);
     // Movi measures the timeline to place Settings above the controls. Viewers
@@ -163,8 +217,13 @@ export function createNativeQualityMenu({ video, onChange }) {
     else original?.();
   });
   return { update(next) {
-    if (next.mediaVersion !== state.mediaVersion) dragging = false;
+    if (next.mediaVersion !== state.mediaVersion || !next.enabled) {
+      if (dragging || pointerId != null) suppressChange = true;
+      endDrag();
+    }
     state = next;
+    installPanelStyles();
+    renameResolution();
     if (!(state.options || []).some(option => option.quality === previousResolution)) previousResolution = "auto";
     if (lastManual != null) lastManual = clamp(lastManual);
     render();
