@@ -164,7 +164,8 @@ body > .reaction-feed .reaction-item {
 
 .video-shell > .reaction-feed {
   position: absolute;
-  top: calc(var(--chat-viewport-top, 0px) + max(1rem, env(safe-area-inset-top)));
+  top: calc(var(--chat-viewport-top, 0px) + max(1rem, env(safe-area-inset-top)) + 3.25rem);
+  left: auto;
   bottom: auto;
   right: max(1rem, env(safe-area-inset-right));
   width: 360px;
@@ -172,6 +173,7 @@ body > .reaction-feed .reaction-item {
   max-height: calc(var(--chat-viewport-height, 100dvh) - 7rem);
   overflow: hidden;
   gap: .6rem;
+  align-items: flex-end;
 }
 .video-shell > .reaction-feed .reaction-item {
   box-sizing: border-box;
@@ -185,6 +187,14 @@ body > .reaction-feed .reaction-item {
   font-size: 16px;
   line-height: 1.4;
   backdrop-filter: blur(12px);
+  animation: notification-enter 180ms ease-out both;
+}
+@keyframes notification-enter {
+  from { opacity: 0; transform: translateX(2rem); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .video-shell > .reaction-feed .reaction-item { animation: none; }
 }
 .chat-notification strong {
   display: block;

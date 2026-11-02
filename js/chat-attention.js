@@ -1,15 +1,16 @@
 const REVEAL_MS = 4000;
 
 export function createChatAttention({ elements, notifications }) {
-  const { video, chatMessages, fullscreenChatToggle, fullscreenChatLabel, fullscreenChatUnread } = elements;
+  const { video, chatMessages, fullscreenChatToggle, fullscreenChatLabel, fullscreenChatUnread, socialChatUnread, chatTab } = elements;
   const sound = createNotificationSound();
   let active = false, chatVisible = true, atLatest = true, unread = 0;
+  let socialVisible = true;
   let focused = document.hasFocus?.() ?? true;
   let controlsVisible = !video.classList.contains("movi-bar-collapsed");
   let revealing = false, revealTimer, revealOnFocus = false, onShown;
 
   const windowFocused = () => focused && !document.hidden;
-  const chatShown = () => !active || chatVisible;
+  const chatShown = () => active ? chatVisible : socialVisible;
 
   function latestVisible() {
     const rect = chatMessages.getBoundingClientRect();
@@ -28,6 +29,9 @@ export function createChatAttention({ elements, notifications }) {
     fullscreenChatLabel.textContent = label;
     fullscreenChatUnread.textContent = unread > 99 ? "99+" : String(unread);
     fullscreenChatUnread.hidden = unread === 0;
+    socialChatUnread.textContent = unread > 99 ? "99+" : String(unread);
+    socialChatUnread.hidden = unread === 0;
+    chatTab.setAttribute("aria-label", `Chat${unread ? `, ${unread} unread ${unread === 1 ? "message" : "messages"}` : ""}`);
     fullscreenChatToggle.setAttribute("aria-label", `${label}${unread ? `, ${unread} unread ${unread === 1 ? "message" : "messages"}` : ""}`);
     fullscreenChatToggle.classList.toggle("is-idle", !controlsVisible && !revealing);
   }
@@ -80,12 +84,19 @@ export function createChatAttention({ elements, notifications }) {
       const wasShown = chatShown();
       const entering = nextActive && !active;
       active = nextActive;
-      notifications?.setFullscreen(active);
       chatVisible = nextVisible;
+      notifications?.setFullscreen({ active, chatVisible });
       if (!wasShown && chatShown()) onShown?.();
       refresh();
       if (entering && unread) reveal();
       // Reparenting and fullscreen layout may settle after fullscreenchange.
+      requestAnimationFrame(refresh);
+    },
+    setSocialVisible(value) {
+      const wasShown = chatShown();
+      socialVisible = value;
+      if (!wasShown && chatShown()) onShown?.();
+      refresh();
       requestAnimationFrame(refresh);
     },
     setAtLatest(value) { atLatest = value; refresh(); },

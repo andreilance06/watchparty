@@ -20,7 +20,7 @@ Its objectives are to keep playback synchronized, make group interaction availab
 | Chat and reactions | Send messages and quoted replies, insert emojis, react to comments, and send floating emoji reactions, including in fullscreen. |
 | Movie polls | Start a poll as host, suggest titles with optional Wikipedia metadata, vote, and post the result when the host finishes the poll. |
 | Participants and moderation | See connected participants; hosts can manage playback permissions, transfer hosting, and block or unblock viewers. |
-| Responsive interface | Use desktop or mobile layouts and switch between light and dark themes. |
+| Responsive interface | Watch beside a wider social lounge on desktop, switch between Chat and People tabs on smaller screens, and choose light or dark themes. |
 
 ## Technologies
 
@@ -93,13 +93,13 @@ The hub lists all rooms with video previews and optional password protection. Th
 
 ### Desktop room
 
-The desktop layout places the video panel beside the participant list, movie poll, and chat. The screenshots below predate the message context menu and tabbed emoji picker.
+The desktop layout places the video beside a 380-pixel social lounge with participants above chat and a compact, expandable movie poll. The room bar groups invitations, connection status, and **Room options** for changing your display name or leaving. The screenshots below predate the social lounge redesign, message context menu, and tabbed emoji picker.
 
 ![Desktop WatchParty room showing the video panel, host participant, Arrival poll with one vote, and a welcome chat message](docs/screenshots/desktop-room.png)
 
 ### Mobile room
 
-At a 390-pixel viewport, the video panel and chatroom stack vertically. This full-page capture includes the poll and chat below the player.
+On smaller screens, video sits above a social panel with **Chat** and **People** tabs. Chat shows an unread indicator while you browse People, and drafts survive tab and fullscreen changes. This older full-page capture predates the social tabs.
 
 <img src="docs/screenshots/mobile-room.png" alt="Mobile WatchParty room with vertically stacked video panel, participants, movie poll, and chat" width="390">
 
@@ -121,7 +121,7 @@ The root page is a room hub, separate from the player at `/watch?roomId=ID` (or 
 
 Unexpected host disconnects reserve hosting for 15 seconds so a refresh or brief interruption can reconnect. Other participants see a reconnecting notice; if the host does not return in time, the next connected participant takes over. Explicit room leaving and host transfers take effect immediately. A private room's creator reclaims the sole host role whenever they reconnect, including after leaving and rejoining with the same verified browser identity; any replacement host becomes a viewer. Other hosts cannot block the creator. The public default room has no permanent creator. These identities and rooms last until room expiry or server restart, and localhost and the public domain use separate cookies.
 
-The host starts movie polls from the chatroom. An active poll stays pinned above messages as a compact, expandable card; everyone can suggest and vote. Suggestions search Wikipedia through its keyless MediaWiki API. Choose a matching article for its thumbnail and attribution, or suggest a title without a poster. Suggesting automatically casts your vote. The host and original suggester can remove entries; the suggester keeps that right after browser restarts or rejoining with the same browser cookie and site address while the room/server remains alive. Finishing a poll hides it for everyone and posts the winner, tie, or no-votes result in chat. The host can then start a fresh round. Posters are served by Wikimedia, so availability and licensing depend on each source image. See the [movie poll API](docs/rooms.md#movie-suggestions-and-posters).
+The host starts movie polls from **Chat options** (the three-dot button in the lounge). An active poll stays pinned above messages as a compact, expandable card; everyone can suggest and vote. Suggestions search Wikipedia through its keyless MediaWiki API. Choose a matching article for its thumbnail and attribution, or suggest a title without a poster. Suggesting automatically casts your vote. The host and original suggester can remove entries; the suggester keeps that right after browser restarts or rejoining with the same browser cookie and site address while the room/server remains alive. Finishing a poll hides it for everyone and posts the winner, tie, or no-votes result in chat. The host can then start a fresh round. Posters are served by Wikimedia, so availability and licensing depend on each source image. See the [movie poll API](docs/rooms.md#movie-suggestions-and-posters).
 
 ## Playback
 
@@ -188,7 +188,7 @@ Messages use rounded incoming/outgoing bubbles with timestamps and compact react
 
 Choose Reply from a message's action menu to show its author and text above the composer. Cancel with the preview's close button, or choose another message without losing your draft. Replies appear in the regular chat stream with a quoted preview; selecting the quote scrolls to and highlights the original when it is still available locally. Quotes remain readable if the original is absent. A failed send keeps the draft and reply target; an expired target asks you to cancel the reply or select another message.
 
-Fullscreen shows the same chat and composer in a compact overlay, with a Show/Hide Chat control. Your shown/hidden preference is remembered across fullscreen transitions until you reload the page. The control fades with the video controls and briefly reappears for four seconds with an unread count when new messages arrive. Unread messages clear when the window is focused and the newest messages are visible; opening chat while scrolled upward keeps them unread. Messages, replies, the message action menu, the tabbed emoji picker, and floating reactions work there. Hiding chat still allows incoming floating reactions and brief sender notices. Drafts and scroll position are preserved on entry/exit. Supported fullscreen APIs use the video shell; other browsers use the existing page fullscreen fallback. Native video Picture-in-Picture does not include chat.
+Fullscreen shows the same chat and composer in a compact overlay, with a Show/Hide Chat control. Your shown/hidden preference is remembered across fullscreen transitions until you reload the page. The control fades with the video controls and briefly reappears for four seconds with an unread count when new messages arrive. Unread messages clear when the window is focused and the newest messages are visible; opening chat while scrolled upward keeps them unread. Messages, replies, the message action menu, the tabbed emoji picker, and floating reactions work there. While chat is hidden, incoming message and reaction cards slide in from the right below the chat toggle. Cards are limited to five and expire after six seconds; opening chat clears them and suppresses new cards until chat is hidden again. Reduced-motion preferences disable the slide animation. Global floating reactions remain available with chat open or hidden. Drafts and scroll position are preserved on entry/exit. Supported fullscreen APIs use the video shell; other browsers use the existing page fullscreen fallback. Native video Picture-in-Picture does not include chat.
 
 New messages from other participants play a quiet notification when chat is hidden or the window is unfocused, including outside fullscreen. Sounds become available after your first interaction with the page and are limited to once per second during bursts. Browser audio restrictions may prevent playback; missed sounds are not replayed later. Your own messages, system notices, and emoji reactions do not trigger notifications.
 

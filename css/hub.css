@@ -2,9 +2,15 @@
 
 [hidden] { display: none !important; }
 .eyebrow { margin: 0; color: var(--accent-soft-text); font-size: .68rem; font-weight: 700; letter-spacing: .13em; }
-.hub-main { width: min(1160px, 100%); min-height: calc(100vh - 155px); margin: auto; padding: 3.5rem 2rem 2rem; }
-.hub-intro { padding: 1.5rem 0 3rem; }
-.hub-intro h2 { max-width: 720px; margin: .6rem 0 1rem; font-size: clamp(2rem, 5vw, 3.6rem); line-height: 1.12; letter-spacing: -.045em; }
+.hub-main { width: min(1280px, 100%); min-height: calc(100vh - 155px); margin: auto; padding: 2rem 2rem; }
+.hub-intro { display: grid; grid-template-columns: minmax(0, 1fr) 340px; align-items: center; gap: 2rem; padding: .5rem 0 2.25rem; }
+.hub-intro h2 { max-width: 720px; margin: .6rem 0 .85rem; font-size: clamp(2rem, 4.5vw, 3.2rem); line-height: 1.08; letter-spacing: -.045em; }
+.hub-intro-copy > p:not(.eyebrow) { margin: 0; color: var(--muted); line-height: 1.6; }
+.hub-join-profile { padding: 1.4rem; border: 1px solid var(--border); border-radius: 1rem; background: var(--surface); }
+.hub-join-profile h3 { margin: 0; font-size: 1rem; letter-spacing: -.02em; }
+.hub-join-profile > p { color: var(--muted); font-size: .8rem; line-height: 1.5; }
+.hub-join-profile .hub-name { margin-top: 1rem; }
+.hub-join-profile .hub-profile-hint { margin: .75rem 0 0; font-size: .72rem; }
 .hub-intro > p:not(.eyebrow) { color: var(--muted); line-height: 1.6; margin: 0; }
 .hub-name { display: block; margin-top: 1.7rem; font-size: .8rem; font-weight: 600; }
 .hub-name span, .hub-field span { color: var(--muted); font-weight: 400; }
@@ -38,7 +44,7 @@ input:focus-visible, .hub-button:focus-visible { outline: 2px solid var(--accent
 .room-file { overflow: hidden; margin: 0; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; font-size: .78rem; }
 .room-card-footer { display: flex; align-items: center; justify-content: space-between; gap: .6rem; margin-top: 1.2rem; }
 .room-participants { color: var(--muted); font-size: .75rem; }
-.room-card-footer .hub-button { min-height: 38px; padding: .5rem .85rem; font-size: .78rem; }
+.room-card-footer .hub-button { min-height: 44px; padding: .6rem 1rem; font-size: .82rem; }
 .hub-preview-note { margin: 1.5rem 0 0; color: var(--muted); font-size: .73rem; line-height: 1.6; }
 .hub-dialog { width: min(440px, calc(100% - 2rem)); max-height: calc(100dvh - 2rem); padding: 1.75rem; border: 1px solid var(--border); border-radius: 1rem; color: var(--text); background: var(--surface); box-shadow: var(--shadow); }
 .hub-dialog::backdrop { background: rgba(5,7,12,.75); backdrop-filter: blur(7px); }
@@ -59,5 +65,11 @@ input:focus-visible, .hub-button:focus-visible { outline: 2px solid var(--accent
   .header-actions { gap: .5rem; }
   .header-actions .hub-button { padding: .6rem .7rem; font-size: .78rem; }
   .hub-live { font-size: .68rem; }
+}
+@media (max-width: 760px) {
+  .hub-intro { grid-template-columns: minmax(0, 1fr); gap: 1.25rem; }
+  .hub-join-profile { padding: 1rem; }
+  .hub-join-profile .hub-name input { width: 100%; }
+  .hub-name input, .hub-field input { font-size: 16px; }
 }
 @media (prefers-reduced-motion: reduce) { .hub-button { transition: none; } }

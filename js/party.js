@@ -3,6 +3,7 @@ export function createParty({ elements }) {
   const animations = new Map();
   const notices = new Map();
   let fullscreen = false;
+  let chatVisible = true;
   const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
 
   function removeFloatingReaction(reaction) {
@@ -34,7 +35,7 @@ export function createParty({ elements }) {
     const reaction = document.createElement("p");
     reaction.className = "reaction-item";
     reaction.textContent = `${message.emoji} ${message.name}`;
-    appendNotice(reaction);
+    if (!fullscreen || !chatVisible) appendNotice(reaction);
     showFloatingReaction(message.emoji);
   }
 
@@ -45,7 +46,7 @@ export function createParty({ elements }) {
   }
 
   function receiveChat({ name, message }) {
-    if (!fullscreen) return;
+    if (!fullscreen || chatVisible) return;
     const card = document.createElement("div");
     card.className = "reaction-item chat-notification";
     const sender = document.createElement("strong"); sender.textContent = name;
@@ -59,10 +60,9 @@ export function createParty({ elements }) {
     notices.delete(reaction);
     reaction.remove();
   }
-  return { receiveReaction, receiveChat, setFullscreen(active) {
+  return { receiveReaction, receiveChat, setFullscreen({ active, chatVisible: visible }) {
     fullscreen = active;
-    if (!active) for (const notice of notices.keys()) {
-      if (notice.classList.contains("chat-notification")) removeNotice(notice);
-    }
+    chatVisible = visible;
+    if (!active || visible) for (const notice of notices.keys()) removeNotice(notice);
   } };
 }

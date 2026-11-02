@@ -129,6 +129,7 @@ export function createParticipants({ elements, state, send }) {
   }
   function dismissEscape(event) { if (event.key === "Escape" && !participantDropdown.hidden) { event.preventDefault(); close(true); } }
   window.addEventListener("resize", position); window.addEventListener("scroll", position, true);
+  document.addEventListener("watchparty-social-change", () => close());
   participantDropdown.hidden = true;
   return {
     close, refresh: () => { if (selected) renderDetails(); },

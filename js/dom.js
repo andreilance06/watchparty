@@ -1,5 +1,7 @@
 export function getElements(root = document) {
   const ids = [
+    "socialTabs", "chatTab", "peopleTab", "socialPeople", "socialChat", "socialChatUnread",
+    "roomMenuToggle", "roomMenu", "chatMenuToggle", "chatMenu", "nameStatus",
     "participantDropdown", "participantDetails", "participantStatus",
     "fileSharingStatus",
     "video", "videoShell", "videoPlaceholder", "hostControls", "chooseVideoButton",

@@ -10,6 +10,7 @@ import { initializeTheme } from "./theme.js";
 import { createHostFiles } from "./host-files.js";
 import { initializeRoomControls } from "./room-controls.js";
 import { createParticipants } from "./participants.js";
+import { initializeLounge } from "./lounge.js";
 
 const elements = getElements();
 initializeTheme(elements.themeToggle, undefined, document.documentElement, elements.video);
@@ -74,6 +75,7 @@ initializeRoomControls(elements, { roomId, room: roomMetadata, onLeave: () => st
 const party = createParty({ elements });
 const attention = createChatAttention({ elements, notifications: party });
 const chat = createChat({ elements, state, send: connection.send, attention });
+initializeLounge(elements, attention);
 files = createHostFiles({ send: connection.send, report: chat.addSystemMessage });
 const player = createPlayer({ elements, state, send: connection.send, report: chat.addSystemMessage, files, attention });
 const voting = createVoting({ elements, state, send: connection.send, report: chat.addSystemMessage });

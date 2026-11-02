@@ -26,12 +26,7 @@
           <path d="M20.4 15.2A8.5 8.5 0 0 1 8.8 3.6 8.5 8.5 0 1 0 20.4 15.2Z"/>
         </svg>
       </button>
-      <button id="roomActionButton" class="room-action-button" type="button">Leave room</button>
-      <span id="roomActionStatus" class="room-action-status" role="status" aria-live="polite"></span>
-      <div class="connection" aria-live="polite">
-        <span id="statusDot" class="status-dot"></span>
-        <span id="connectionStatus">Connecting...</span>
-      </div>
+      <a class="rooms-link" href="/">Browse rooms</a>
     </div>
   </header>
 
@@ -43,8 +38,13 @@
     <section id="roomInfo" class="room-info" hidden aria-label="Current room">
       <div class="room-info-bar">
         <div class="room-info-current">
-          <p class="room-info-label">CURRENT ROOM</p>
+          <p class="room-info-label">YOUR WATCH PARTY</p>
           <p id="roomInfoName" class="room-info-name"></p>
+        </div>
+        <div class="room-bar-actions">
+        <div class="connection" aria-live="polite">
+          <span id="statusDot" class="status-dot"></span>
+          <span id="connectionStatus">Connecting...</span>
         </div>
         <button id="roomInfoToggle" class="room-info-invite" type="button" aria-expanded="false" aria-controls="roomInfoDetails">
           Invite
@@ -52,6 +52,23 @@
             <path d="m5 7.5 5 5 5-5" />
           </svg>
         </button>
+        <button id="roomMenuToggle" class="lounge-button" type="button" aria-label="Room options" aria-expanded="false" aria-controls="roomMenu">Room options</button>
+        </div>
+      </div>
+      <div id="roomMenu" class="lounge-disclosure room-menu" hidden>
+        <h2>Your profile</h2>
+        <form id="nameForm" class="name-form" autocomplete="off">
+          <label for="displayNameInput">Display name</label>
+          <div class="name-form-row">
+            <input id="displayNameInput" name="displayName" type="text" maxlength="24" placeholder="Display name" aria-describedby="nameStatus" required>
+            <button type="submit">Save</button>
+          </div>
+          <p id="nameStatus" class="control-help" role="status" aria-live="polite"></p>
+        </form>
+        <div class="room-menu-leave">
+          <button id="roomActionButton" class="room-action-button" type="button">Leave room</button>
+          <span id="roomActionStatus" class="room-action-status" role="status" aria-live="polite"></span>
+        </div>
       </div>
       <div id="roomInfoDetails" class="room-info-details" hidden>
         <p class="room-info-label">INVITATION LINK</p>
@@ -63,14 +80,6 @@
       </div>
     </section>
     <section class="player-panel" aria-labelledby="player-title">
-      <div class="panel-heading">
-        <div>
-          <p class="eyebrow">WATCH TOGETHER</p>
-          <h2 id="player-title">Now Playing</h2>
-        </div>
-        <span id="roleBadge" class="role-badge">Viewer</span>
-      </div>
-
       <div id="videoShell" class="video-shell">
         <movi-player
           id="video"
@@ -106,10 +115,11 @@
 
       <div class="player-info">
         <div>
-          <p class="eyebrow">CURRENT VIDEO</p>
+          <h2 id="player-title" class="eyebrow">NOW PLAYING</h2>
           <h3 id="fileName">No video selected</h3>
         </div>
         <div class="player-local-controls">
+          <span id="roleBadge" class="role-badge">Viewer</span>
           <p id="syncStatus" class="sync-status">Waiting for host</p>
         </div>
       </div>
@@ -128,21 +138,23 @@
     <aside id="chatPanel" class="chat-panel" aria-labelledby="chat-title">
       <div class="chat-heading">
         <div>
-          <p class="eyebrow">LIVE</p>
-          <h2 id="chat-title">Chatroom</h2>
+          <h2 id="chat-title">The lounge</h2>
+          <span id="viewerCount" class="viewer-count">0 online</span>
         </div>
         <div class="chat-heading-actions">
-          <span id="viewerCount" class="viewer-count">0 online</span>
+          <button id="chatMenuToggle" class="lounge-button" type="button" aria-label="Chat options" aria-expanded="false" aria-controls="chatMenu">•••</button>
+          <div id="chatMenu" class="lounge-disclosure chat-menu" hidden>
+          <p class="control-help">Choose what to watch together.</p>
           <button id="startPollButton" class="start-poll-button" type="button" hidden>Start poll</button>
-          <form id="nameForm" class="name-form" autocomplete="off">
-            <label class="sr-only" for="displayNameInput">Display name</label>
-            <input id="displayNameInput" name="displayName" type="text" maxlength="24" placeholder="Display name" aria-label="Display name" required>
-            <button type="submit">Save</button>
-          </form>
+          </div>
         </div>
       </div>
 
-      <section class="participant-section" aria-labelledby="participants-title">
+      <div id="socialTabs" class="social-tabs" role="tablist" aria-label="Lounge">
+        <button id="chatTab" type="button" role="tab" aria-selected="true" aria-controls="socialChat">Chat <span id="socialChatUnread" class="social-unread" hidden></span></button>
+        <button id="peopleTab" type="button" role="tab" aria-selected="false" aria-controls="socialPeople" tabindex="-1">People</button>
+      </div>
+      <section id="socialPeople" class="participant-section" aria-labelledby="participants-title">
         <h3 id="participants-title">Participants</h3>
         <ul id="participantList" class="participant-list" aria-live="polite"></ul>
       </section>
@@ -152,7 +164,7 @@
       </div>
       <p id="fileSharingStatus" class="control-help" hidden>You are sharing the current video. Keep this page open while others watch.</p>
 
-      <div class="chat-body">
+      <div id="socialChat" class="chat-body">
         <p id="hostReconnectStatus" class="host-reconnect-status" role="status" hidden></p>
         <section id="votePanel" class="vote-panel" hidden aria-labelledby="vote-title">
           <div class="vote-heading">

@@ -1,0 +1,97 @@
+/* Social lounge: a shared screen and a conversation, with occasional tools tucked away. */
+.watch-layout { gap: 1rem; padding-block: 1.25rem; }
+.room-info-bar { min-height: 5rem; padding: 1rem 1.25rem; box-shadow: none; }
+.room-info-label { font-size: .65rem; letter-spacing: .12em; color: var(--muted); }
+.room-info-name { font-size: 1.2rem; letter-spacing: -.025em; }
+.room-info-current { min-width: 0; }
+.room-bar-actions { display: flex; align-items: center; justify-content: flex-end; gap: .65rem; }
+.rooms-link { color: var(--muted); font-size: .8rem; text-decoration: none; padding: .75rem .25rem; }
+.rooms-link:hover { color: var(--text); }
+.lounge-button { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; padding: .6rem .8rem; border: 1px solid var(--border); border-radius: .65rem; color: var(--text); background: var(--surface-2); font-size: .8rem; cursor: pointer; }
+.lounge-button:hover, .lounge-button[aria-expanded="true"] { border-color: var(--accent); background: var(--surface-3); }
+button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid var(--accent-hover); outline-offset: 3px; }
+.room-info-invite, .room-info-copy, .room-action-button, .name-form button, .name-form input { min-height: 44px; }
+.room-info-invite { background: var(--accent); color: white; border-color: var(--accent); }
+.room-info-invite:hover, .room-info-invite[aria-expanded="true"] { background: var(--accent-hover); }
+.lounge-disclosure { position: absolute; z-index: 12; width: min(20rem, calc(100vw - 2rem)); padding: 1rem; border: 1px solid var(--border); border-radius: .85rem; background: var(--surface); box-shadow: var(--shadow-raised); }
+.lounge-disclosure[hidden], .social-tabs[hidden], #socialPeople[hidden], #socialChat[hidden] { display: none; }
+.room-menu { right: 0; top: calc(100% + .5rem); }
+.room-menu h2 { margin: 0 0 .85rem; font-size: .95rem; }
+.room-menu .name-form { flex-direction: column; font-size: .8rem; gap: .5rem; }
+.name-form-row { display: flex; gap: .5rem; }
+.room-menu .name-form input { flex: 1; width: 0; max-width: none; font-size: .85rem; }
+.room-menu .name-form button { padding-inline: 1rem; font-size: .8rem; }
+.room-menu-leave { display: grid; gap: .5rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.room-menu .room-action-button { color: var(--danger); font-size: .8rem; }
+.room-menu .room-action-status { max-width: none; text-align: left; }
+.room-info-details { width: min(24rem, 100%); }
+.player-panel, .chat-panel { border-radius: 1.1rem; box-shadow: 0 6px 24px rgba(0,0,0,.08); }
+.player-info { padding: 1.15rem 1.25rem; gap: 1rem; border-bottom: 0; }
+.player-info > div:first-child { min-width: 0; flex: 1; }
+.player-info .eyebrow { margin: 0 0 .35rem; font-size: .65rem; color: var(--muted); }
+.player-info h3 { font-size: 1.05rem; }
+.player-local-controls { flex-direction: row; flex-wrap: wrap; align-items: center; gap: .6rem; }
+.role-badge { font-size: .75rem; }
+.sync-status { font-size: .75rem; }
+.host-controls { padding: 0 1.25rem 1.25rem; border: 0; }
+.host-controls .control-help { max-width: 40rem; font-size: .78rem; }
+.chat-panel { overflow: visible; height: clamp(30rem, 72dvh, 44rem); min-height: 24rem; max-height: none; }
+.chat-heading { position: relative; flex-wrap: nowrap; padding: 1rem 1.15rem; border-radius: 1.1rem 1.1rem 0 0; background: var(--surface); }
+.chat-heading h2 { font-size: 1.1rem; }
+.chat-heading .viewer-count { display: inline-flex; margin-top: .35rem; padding: 0; border: 0; background: transparent; font-size: .75rem; }
+.chat-heading .viewer-count::before { content: ""; width: .4rem; height: .4rem; margin: .3rem .4rem 0 0; border-radius: 50%; background: var(--success); }
+.chat-heading-actions { max-width: none; }
+.chat-menu { right: .75rem; top: calc(100% - .25rem); }
+.chat-menu .control-help { margin: 0 0 .7rem; font-size: .8rem; }
+.chat-menu .start-poll-button { width: 100%; min-height: 44px; font-size: .85rem; }
+.social-tabs { display: flex; flex-shrink: 0; gap: .25rem; padding: .35rem .8rem 0; border-bottom: 1px solid var(--border); }
+.social-tabs button { display: inline-flex; align-items: center; justify-content: center; gap: .5rem; flex: 1; min-height: 44px; padding: .65rem; border: 0; border-bottom: 2px solid transparent; color: var(--muted); background: transparent; font-size: .85rem; font-weight: 600; cursor: pointer; }
+.social-tabs button[aria-selected="true"] { color: var(--accent-soft-text); border-bottom-color: var(--accent); }
+.social-unread { display: inline-grid; place-items: center; min-width: 1.25rem; height: 1.25rem; padding-inline: .25rem; border-radius: 999px; background: var(--accent); color: white; font-size: .65rem; }
+.social-unread[hidden] { display: none; }
+.participant-section { padding: 1rem 1.15rem; min-height: 0; overflow-y: auto; }
+.participant-section h3 { color: var(--muted); font-size: .68rem; }
+.participant-list { gap: .45rem; max-height: 7rem; margin-top: .65rem; }
+button.participant { min-height: 44px; padding: .45rem .7rem; gap: .45rem; font-size: .78rem; }
+.participant-role { font-size: .68rem; }
+.chat-body { overflow: hidden; border-radius: 0 0 1.1rem 1.1rem; }
+.chat-messages { gap: .9rem; padding: 1.15rem; }
+.chat-message { font-size: .85rem; border-radius: .85rem; }
+.chat-form { padding: .85rem; }
+.chat-compose-row { gap: .4rem; }
+.chat-form input { min-height: 44px; font-size: .85rem; }
+.chat-form .chat-emoji-button { width: 44px; height: 44px; border-radius: .65rem; }
+.chat-compose-row > button[type="submit"] { min-width: 44px; min-height: 44px; font-size: .8rem; }
+.chat-jump-latest { min-height: 44px; }
+.vote-heading { gap: .5rem; }
+.poll-toggle, .finish-poll-button { min-height: 44px; }
+#fileSharingStatus { padding: 0 1rem .65rem; }
+@media (min-width: 1100px) {
+  .watch-layout { grid-template-columns: minmax(0, 1fr) 380px; grid-template-areas: "room room" "player chat"; align-items: start; }
+  .chat-panel { height: clamp(34rem, calc(100dvh - 13rem), 50rem); }
+}
+@media (max-width: 1099px) {
+  #socialPeople { flex: 1; border-bottom: 0; }
+  #socialPeople .participant-list { flex-direction: column; max-height: none; }
+  #socialPeople .participant { width: 100%; border-radius: .7rem; padding: .7rem; }
+  #socialPeople .participant-name { max-width: none; }
+  #socialPeople .participant-role { margin-left: auto; }
+}
+@media (max-width: 600px) {
+  .watch-layout { gap: .75rem; padding: .75rem; }
+  .brand p { display: none; }
+  .room-info-bar { flex-wrap: wrap; gap: .75rem; padding: 1rem; }
+  .room-info-current { width: 100%; }
+  .room-bar-actions { width: 100%; gap: .5rem; }
+  .room-bar-actions .connection { margin-right: auto; font-size: .7rem; white-space: normal; }
+  .room-bar-actions .lounge-button { font-size: .75rem; }
+  .player-info { padding: 1rem; }
+  .host-controls { padding: 0 1rem 1rem; }
+  .chat-panel { height: clamp(30rem, 75dvh, 40rem); min-height: 24rem; }
+  .chat-messages { padding: .85rem; }
+  .chat-form { padding: .6rem; }
+  .chat-compose-row { gap: .2rem; }
+  .chat-form input { padding-inline: .6rem; }
+  .chat-form input, .room-menu .name-form input { font-size: 16px; }
+  .rooms-link { font-size: .75rem; }
+}

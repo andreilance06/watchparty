@@ -228,7 +228,7 @@ test("frontend modules initialize and route playback, captions, fullscreen, chat
   el("emojiPickerGrid").children.find(button => button.textContent === "\u2764\ufe0f").dispatch("click");
   assert.deepEqual(socket.sent.at(-1), { type: "reaction", emoji: "❤️" });
   socket.receive({ type: "reaction", clientId: "host-id", name: "Host", emoji: "❤️" });
-  assert.equal(el("reactionFeed").children[0].textContent, "❤️ Host");
+  assert.equal(el("reactionFeed").children.length, 0, "open fullscreen chat suppresses reaction cards");
   assert.equal(el("floatingReactions").children.length, 6);
   assert.ok(el("floatingReactions").children.every((reaction) => reaction.textContent === "❤️"));
   socket.receive({

@@ -23,6 +23,7 @@ export function createChat({ elements, state: session, send, attention }) {
     menu: messageMenu, beforeOpen: () => picker.close(),
     onReply: selectReply, onReact: toggleCommentReaction
   });
+  document.addEventListener("watchparty-social-change", () => { picker.close(); menu.close(); });
   displayNameInput.value = session.clientName;
 
   function showStatus(message = "") {
@@ -266,9 +267,11 @@ export function createChat({ elements, state: session, send, attention }) {
 
   function handleNameMessage(message) {
     acceptName(message.name, message.type === "name-rejected");
-    addSystemMessage(message.type === "name-updated"
+    const feedback = message.type === "name-updated"
       ? `Your display name is now ${session.clientName}.`
-      : message.message || "That display name is already in use.");
+      : message.message || "That display name is already in use.";
+    elements.nameStatus.textContent = feedback;
+    addSystemMessage(feedback);
   }
 
   chatForm.addEventListener("submit", (event) => {
@@ -296,8 +299,11 @@ export function createChat({ elements, state: session, send, attention }) {
     session.clientName = nextName;
     displayNameInput.value = session.clientName;
     try { localStorage.setItem("watchparty-display-name", session.clientName); } catch {}
-    send({ type: "set-name", name: session.clientName });
-    chatInput.focus();
+    elements.nameStatus.textContent = "Saving name…";
+    if (send({ type: "set-name", name: session.clientName }) === false) {
+      elements.nameStatus.textContent = "Reconnect before changing your name.";
+    }
+    displayNameInput.focus();
   });
   displayNameInput.addEventListener("input", () => displayNameInput.removeAttribute("aria-invalid"));
 

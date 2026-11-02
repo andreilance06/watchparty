@@ -52,6 +52,11 @@ test('fullscreen cards show accepted incoming text and reactions, stay bounded, 
   const b = await setup(), feed = b.el('reactionFeed');
   b.add('outside'); assert.equal(feed.children.length, 0);
   await b.el('videoShell').requestFullscreen();
+  b.add('panel-visible');
+  b.socket.receive({ type: 'reaction', emoji: '🎉', name: 'Friend' });
+  assert.equal(feed.children.length, 0, 'open conversation suppresses popup cards');
+  assert.equal(b.el('floatingReactions').children.length, 6, 'global animations remain available');
+  toggle(b).click();
   b.add('visible', { name: '<b>Friend</b>', message: '<img src=x onerror=alert(1)>' });
   assert.equal(feed.children.length, 1);
   const card = feed.children[0];
@@ -61,7 +66,7 @@ test('fullscreen cards show accepted incoming text and reactions, stay bounded, 
   b.add('visible'); b.add('mine', { clientId: 'self' });
   b.socket.receive({ type: 'error', message: 'System notice' });
   assert.equal(feed.children.length, 1);
-  toggle(b).click(); b.add('hidden');
+  b.add('hidden');
   assert.equal(feed.children.length, 2, 'cards also appear with the full panel hidden');
   b.socket.receive({ type: 'reaction', emoji: '❤️', name: 'Friend' });
   assert.equal(feed.children.at(-1).textContent, '❤️ Friend');
@@ -70,6 +75,10 @@ test('fullscreen cards show accepted incoming text and reactions, stay bounded, 
   assert.equal(card.parentNode, null, 'oldest cards are evicted');
   b.runTimers(4000); assert.equal(feed.children.length, 5);
   b.runTimers(6000); assert.equal(feed.children.length, 0);
+  b.add('clear-on-open'); toggle(b).click();
+  assert.equal(feed.children.length, 0, 'opening the conversation clears existing cards');
+  toggle(b).click();
+  assert.equal(feed.children.length, 0, 'closing chat does not replay previous messages');
   b.add('exit'); await b.document.exitFullscreen();
   assert.equal(feed.children.length, 0);
   await b.el('videoShell').requestFullscreen();
