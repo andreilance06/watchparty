@@ -2,12 +2,34 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { transcodeAttempts } = require("../server/media/transcode");
 const { CPU_ENCODER } = require("../server/encoders");
+const { renditionEncoderArgs } = require("../server/media/segments");
 
 function hardware(name = "h264_nvenc", filters = ["scale_cuda", "libplacebo"]) {
   return { name, args: [], input: [], capabilities: { hwaccels: new Set(["cuda", "vulkan", "qsv", "d3d11va", "videotoolbox"]),
     filters: new Set(filters), options: { libplacebo: "inherit_device  <boolean>", vpp_qsv: "tonemap <int>" } } };
 }
 const info = { width: 3840, height: 2160, pixelFormat: "yuv420p10le", bitDepth: 10 };
+
+test("Source quality replaces rate control and level limits on each encoder without changing capped profiles", () => {
+  const source = { rateControl: "near-lossless" };
+  const cases = [
+    [CPU_ENCODER, "-crf", "14"],
+    [{ name: "h264_nvenc", args: ["-preset", "p3", "-cq", "20", "-rc", "vbr", "-b:v", "0", "-level:v", "4.2"] }, "-cq", "14"],
+    [{ name: "h264_qsv", args: ["-preset", "slow", "-global_quality", "19"] }, "-global_quality", "14"],
+    [{ name: "h264_amf", args: ["-quality", "quality", "-rc", "cqp", "-qp_i", "18", "-qp_p", "20", "-qp_b", "22"] }, "-qp_p", "14"],
+    [{ name: "h264_videotoolbox", args: ["-q:v", "80"] }, "-q:v", "90"]
+  ];
+  for (const [encoder, flag, target] of cases) {
+    const args = renditionEncoderArgs(encoder, source);
+    assert.equal(args[args.indexOf(flag) + 1], target, encoder.name);
+    assert.equal(args.filter(value => value === flag).length, 1);
+    assert.equal(args.includes("-level:v"), false);
+    assert.equal(args.includes("-maxrate"), false); assert.equal(args.includes("-bufsize"), false);
+    assert.equal(args.includes("-b:v"), encoder.name === "h264_nvenc");
+    if (encoder.name === "h264_nvenc") assert.equal(args[args.indexOf("-b:v") + 1], "0");
+  }
+  assert.equal(renditionEncoderArgs(CPU_ENCODER, { bitrate: 3000000 }).includes("20"), true);
+});
 
 test("GPU SDR plans retain hardware frames, scale without upscaling, and keep independent fallback IDs", () => {
   const attempts = transcodeAttempts(hardware(), info, null, 24);

@@ -11,7 +11,9 @@ function createRenditionService({ state, config, encoderPromise, broadcast }) {
   const url = entry => `${state.basePath || ""}/hls/master.m3u8?s=${state.sessionId}&v=${state.mediaVersion}&g=${state.streamGeneration || 0}&r=${entry.profile.id}&rg=${entry.state.streamGeneration}`;
   const sendReplacement = entry => {
     generations.set(entry.profile.id, entry.state.streamGeneration);
-    broadcast({ type: "rendition-replaced", mediaVersion: state.mediaVersion, renditionId: entry.profile.id, url: url(entry) });
+    broadcast({ type: "rendition-replaced", mediaVersion: state.mediaVersion, playbackRevision: state.playbackRevision,
+      streamGeneration: state.streamGeneration || 0, renditionGeneration: entry.state.streamGeneration,
+      renditionId: entry.profile.id, url: url(entry) });
   };
   function references(id, now = Date.now()) {
     const entry = entries.get(id);
@@ -52,7 +54,7 @@ function createRenditionService({ state, config, encoderPromise, broadcast }) {
       generations.set(entry.profile.id, entry.state.streamGeneration);
       // Direct children are constructed exclusively from validated profile IDs.
       const directory = entry.state.hlsDirectory;
-      if (path.dirname(directory) === state.hlsDirectory && /^r_\d+x\d+_\d+_\d+$/.test(path.basename(directory))) {
+      if (path.dirname(directory) === state.hlsDirectory && /^r_\d+x\d+_(?:\d+|source)_\d+$/.test(path.basename(directory))) {
         Promise.resolve(entry.drained).then(() => fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }, () => {}));
       }
     }
@@ -62,12 +64,14 @@ function createRenditionService({ state, config, encoderPromise, broadcast }) {
     const initialGeneration = (generations.get(profile.id) ?? -1) + 1;
     generations.set(profile.id, initialGeneration);
     Object.assign(local, { roomState: state, rendition: profile, streamGeneration: initialGeneration,
-      compatibilityStartIndex: Math.max(0, Math.floor(currentTime(state) / segmentSchedule(state, config.segmentSeconds).seconds) - 1),
       hlsDirectory: path.join(state.hlsDirectory, `r_${profile.id}_${initialGeneration}`), selectedEncoder: "Compatibility playback", transcodeInfo: null });
+    local.compatibilityStartIndex = Math.max(0, Math.floor(currentTime(state) / segmentSchedule(local, config.segmentSeconds).seconds) - 1);
     const entry = { profile, state: local, usedAt: Date.now(), retired: false, idleAt: null };
     entry.service = createSegmentService({ state: local, config, encoderPromise, broadcast(message) {
       if (message.type === "session-state") sendReplacement(entry);
-      else if (message.type === "media-error") broadcast({ ...message, type: "rendition-error", mediaVersion: state.mediaVersion, renditionId: profile.id });
+      else if (message.type === "media-error") broadcast({ ...message, type: "rendition-error", mediaVersion: state.mediaVersion,
+        playbackRevision: state.playbackRevision, streamGeneration: state.streamGeneration || 0,
+        renditionGeneration: local.streamGeneration, renditionId: profile.id });
       else broadcast({ ...message, renditionId: profile.id });
     } });
     fs.mkdirSync(local.hlsDirectory, { recursive: true });
@@ -80,7 +84,7 @@ function createRenditionService({ state, config, encoderPromise, broadcast }) {
     let profile = resolveQuality(state.mediaInfo, quality, bitrate);
     const load = config.encoderBudget?.snapshot();
     if (load?.active >= load.limit && !entries.has(profile.id)) {
-      const shared = automatic && [...entries.values()].filter(entry => entry.service.running() &&
+      const shared = automatic && [...entries.values()].filter(entry => entry.service.running() && entry.profile.rateControl !== "near-lossless" &&
         entry.profile.height <= profile.height && entry.profile.bitrate <= profile.bitrate)
         .sort((a, b) => b.profile.height - a.profile.height || b.profile.bitrate - a.profile.bitrate)[0];
       if (shared) profile = shared.profile;

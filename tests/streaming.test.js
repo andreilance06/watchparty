@@ -179,6 +179,37 @@ test('restarting on the same address never reuses cached media URLs even when ve
   assert.equal(fragment.status, 200); await fragment.arrayBuffer();
 });
 
+test('Source transcodes keep source dimensions and frame rate without bitrate or level ceilings', async t => {
+  const { createSegmentService } = require('../server/media/segments');
+  const { resolveQuality } = require('../server/media/quality');
+  const { writePlaylists } = require('../server/media/playlists');
+  const source = fixture(t, { size: '2048x1152', fps: '60', duration: '2' }); if (!source) return;
+  const ffprobe = (await resolveFfprobe()).path;
+  const { info } = await probeMedia(path.join(source.directory, 'source.mkv'), ffprobe, undefined, 'source.mkv');
+  const state = { mediaVersion: 1, streamGeneration: 0, sessionId: 'source-test', hlsDirectory: source.directory,
+    mediaPath: path.join(source.directory, 'source.mkv'), mediaDuration: 2, mediaInfo: info,
+    rendition: resolveQuality(info, 'source', 'source'),
+    playback: { paused: true, time: 0, rate: 0, updatedAt: Date.now() } };
+  const calls = [];
+  const service = createSegmentService({ state, config: { segmentSeconds: 2, maxSegmentsAhead: 2, ffmpegPath: source.ffmpeg },
+    encoderPromise: Promise.resolve(CPU_ENCODER), broadcast() {},
+    spawnEncoder: (...args) => { calls.push(args[1]); return require('node:child_process').spawn(...args); } });
+  t.after(() => service.cancel());
+  writePlaylists(state, 2);
+  const master = fs.readFileSync(path.join(source.directory, 'master.m3u8'), 'utf8');
+  assert.match(master, /BANDWIDTH=\d+/); assert.doesNotMatch(master, /NaN|Infinity|CODECS=/);
+  assert.match(master, /RESOLUTION=2048x1152/);
+  const output = await service.ensure(0);
+  assert.equal(calls.length, 1);
+  const args = calls[0];
+  for (const flag of ['-maxrate', '-bufsize', '-b:v', '-level:v']) assert.equal(args.includes(flag), false, flag);
+  assert.equal(args[args.indexOf('-crf') + 1], '14');
+  const probe = await probeMedia(output, ffprobe, undefined, 'segment.ts');
+  assert.equal(probe.info.width, 2048); assert.equal(probe.info.height, 1152); assert.equal(probe.info.fps, 60);
+  assert.equal(segmentSchedule(state).fps, 60);
+  await service.cancel();
+});
+
 test('compatibility requests are local to a viewer and one run publishes bounded cached segments with continuous AAC audio', async t=>{
   const source=fixture(t); if(!source)return;
   const {app,base,host}=await application(t);
@@ -391,6 +422,41 @@ test('seek acknowledgements change stream generation and stale ticks cannot roll
   host.send({ type: 'video-state', mediaVersion: ready.mediaVersion, playbackRevision: ready.playbackRevision,
     commandSequence: 3, syncMode: 'seek', time: 3, paused: true, playbackRate: 1.25 });
   assert.equal((await host.next('session-state', m => m.syncMode === 'seek' && m.seekSequence === 3)).time, 3);
+});
+
+test('20 successive seeks retire in-flight rendition encodes and serve only the final generation', async t => {
+  const source = fixture(t); if (!source) return;
+  const { app, base, host } = await application(t);
+  await serveHostFiles(host, base, { name: 'rapid-seeks.mkv', bytes: source.bytes });
+  const ready = await host.next('session-state', m => m.hasVideo);
+  host.send({ type: 'compatibility-request', mediaVersion: ready.mediaVersion,
+    requestId: 'stress', quality: '180', bitrate: 750000, automatic: true });
+  const selection = await host.next('compatibility-ready', m => m.requestId === 'stress');
+  const entry = app.media.rendition(selection.rendition.id), obsolete = [], urls = [selection.url];
+  const bootstrap = await fetch(base + selection.url.replace('master.m3u8', 'segment_000000.ts'));
+  assert.equal(bootstrap.status, 200); await bootstrap.arrayBuffer();
+  for (let i = 1; i <= 20; i++) {
+    // A request in the old generation is allowed to be waiting for permission
+    // or encoding when the next seek cancels it.
+    obsolete.push(entry.service.ensure(5).catch(error => error));
+    await delay(5);
+    host.send({ type: 'video-state', mediaVersion: ready.mediaVersion, commandSequence: i,
+      playbackRevision: ready.playbackRevision, syncMode: 'seek', time: i % 2 ? 8 : 3, paused: true, playbackRate: 1.25 });
+    const snapshot = await host.next('session-state', m => m.syncMode === 'seek' && m.seekSequence === i);
+    const replacement = await host.next('rendition-replaced', m => m.streamGeneration === snapshot.streamGeneration);
+    assert.equal(replacement.playbackRevision, snapshot.playbackRevision);
+    assert.equal(replacement.renditionGeneration, entry.state.streamGeneration);
+    urls.push(replacement.url);
+  }
+  const final = urls.pop();
+  const response = await fetch(base + final.replace('master.m3u8', 'segment_000001.ts'));
+  assert.equal(response.status, 200); assert.ok((await response.arrayBuffer()).byteLength > 0);
+  await Promise.all(obsolete);
+  for (const url of urls) assert.equal((await fetch(base + url)).status, 404);
+  assert.equal(app.state.playback.time, 3); assert.equal(app.state.playback.paused, true);
+  assert.equal(app.config.encoderBudget.snapshot().active, 1, 'only the final continuous encoder retains its permit');
+  await entry.service.cancel();
+  assert.equal(app.config.encoderBudget.snapshot().active, 0);
 });
 
 test('published-run failures recover with fresh URLs and stop after bounded retries', async t => {

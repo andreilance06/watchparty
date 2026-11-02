@@ -3,7 +3,8 @@ const path = require("node:path");
 
 // Use whole output frames, including at fractional frame rates.
 function segmentSchedule(state, targetSeconds = 2) {
-  const fps = Math.min(30, state.mediaInfo?.fps || 30);
+  const sourceFps = state.mediaInfo?.fps || 30;
+  const fps = state.rendition?.rateControl === "near-lossless" ? sourceFps : Math.min(30, sourceFps);
   const frames = Math.max(1, Math.round(targetSeconds * fps));
   const seconds = frames / fps;
   return { fps, frames, seconds, count: Math.ceil(state.mediaDuration / seconds) };
@@ -28,10 +29,11 @@ function writePlaylists(state, targetSeconds) {
   video.push("#EXT-X-ENDLIST", "");
   fs.writeFileSync(path.join(state.hlsDirectory, "video.m3u8"), video.join("\n"));
   const codec = `avc1.640029${state.mediaInfo?.hasAudio === false ? "" : ",mp4a.40.2"}`;
-  const bandwidth = state.rendition ? Math.ceil((state.rendition.bitrate + (state.mediaInfo?.hasAudio === false ? 0 : 192000)) * 11 / 10) : 8500000;
+  const bandwidth = state.rendition ? Math.ceil(((state.rendition.estimatedBitrate || state.rendition.bitrate) + (state.mediaInfo?.hasAudio === false ? 0 : 192000)) * 11 / 10) : 8500000;
+  const codecs = state.rendition?.rateControl === "near-lossless" ? "" : `,CODECS="${codec}"`;
   const resolution = state.rendition ? `,RESOLUTION=${state.rendition.width}x${state.rendition.height}` : "";
   fs.writeFileSync(path.join(state.hlsDirectory, "master.m3u8"),
-    `#EXTM3U\n#EXT-X-VERSION:6\n#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth},CODECS="${codec}"${resolution}\nvideo.m3u8?${query}\n`);
+    `#EXTM3U\n#EXT-X-VERSION:6\n#EXT-X-STREAM-INF:BANDWIDTH=${bandwidth}${codecs}${resolution}\nvideo.m3u8?${query}\n`);
 }
 
 module.exports = { writePlaylists, segmentSchedule, streamDirectory };

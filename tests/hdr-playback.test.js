@@ -123,13 +123,19 @@ test("manual Original selection reassesses HDR, and a decoder failure from Origi
   const before = assessments; supported = false;
   change("source"); await flush(); await flush();
   assert.ok(assessments > before); assert.equal(state.activeMediaUrl, "/hls/sdr/master.m3u8");
-  assert.equal(video.watchpartyQualityMetrics.preferences.quality, "auto");
+  const compatible = sent.filter(message => message.type === "compatibility-request").at(-1);
+  assert.equal(compatible.quality, "source"); assert.equal(compatible.bitrate, "source");
+  player.applyCompatibility({ ...snapshot, type: "compatibility-ready", requestId: compatible.requestId,
+    rendition: resolveQuality(hdr, "source", "source"), segmentSeconds: 2, url: "/hls/source/master.m3u8" });
+  await flush(); await flush();
+  assert.equal(video.watchpartyQualityMetrics.preferences.quality, "source");
+  assert.equal(video.watchpartyQualityMetrics.preferences.bitrate, "source");
   supported = true;
   [...queries.values()][0].changed(); await flush();
   change("source"); await flush(); await flush();
   assert.equal(state.activeMediaUrl, "/original"); assert.equal(video.getAttribute("engine"), "native");
   state.sourceSwitching = false;
   video.dispatch("error", { detail: { message: "decoder failed" } });
-  assert.equal(sent.filter(message => message.type === "compatibility-request").length, 2);
+  assert.equal(sent.filter(message => message.type === "compatibility-request").length, 3);
   assert.equal(sent.filter(message => message.type === "video-state").length, 0);
 });

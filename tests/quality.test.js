@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { createBrowserDouble } = require('./helpers/browser');
-const { qualityOptions, resolveQuality } = require('../server/media/quality');
+const { bitrateRange, qualityOptions, resolveQuality } = require('../server/media/quality');
 const { createEncoderBudget } = require('../server/media/encoder-budget');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
@@ -10,13 +10,76 @@ test('finite quality profiles preserve aspect ratio, never upscale, and reject u
   assert.deepEqual(qualityOptions(info).map(option => option.quality), ['1080','720','480','360']);
   assert.deepEqual(resolveQuality(info, '720', 1500000), { quality:'720',width:1280,height:720,bitrate:1500000,id:'1280x720_1500000' });
   assert.equal(resolveQuality(info, 'auto').quality, '720');
-  assert.deepEqual(qualityOptions({width:320,height:180})[0], {quality:'180',width:320,height:180,bitrate:750000});
+  assert.deepEqual(qualityOptions({width:320,height:180})[0], {quality:'180',width:320,height:180,bitrate:260000});
   assert.equal(qualityOptions({width:640,height:480})[0].quality,'480','4:3 sources retain their supported height');
   assert.equal(qualityOptions({width:1080,height:1920})[0].quality,'1080','portrait sources retain their supported height');
   for (const [quality, bitrate] of [['2160','auto'],['720',1],['720','3000000'],['../720','auto'],[{},'auto']])
     assert.throws(() => resolveQuality(info,quality,bitrate));
   const wide = qualityOptions({width:1920,height:800});
   assert.ok(wide.every(option => option.width <= 1920 && option.height <= 800));
+});
+
+test('bitrate bounds follow source dimensions, frame rate and bitrate and accept intermediate values', () => {
+  const info = { width: 1920, height: 1080, fps: 30, bitrate: 10000000 };
+  assert.deepEqual(bitrateRange(info), { min: 500000, max: 10000000, step: 1000 });
+  assert.equal(resolveQuality(info, '720', 2345000).id, '1280x720_2345000');
+  assert.equal(resolveQuality(info, '720', 500000).bitrate, 500000);
+  assert.equal(resolveQuality(info, '720', 10000000).bitrate, 10000000);
+  for (const value of [499999, 10000001, NaN, Infinity, -1, 2345000.5, '2345000', {}, null, 'source']) {
+    assert.throws(() => resolveQuality(info, '720', value));
+  }
+  const large = { width: 3840, height: 2160, fps: 60, bitrate: 40000000 };
+  assert.ok(bitrateRange(large).max > bitrateRange(info).max);
+  assert.ok(bitrateRange({ width: 640, height: 360 }).max < bitrateRange(info).max);
+  for (const info of [{}, { width: 2, height: 2, fps: 1 }, { bitrate: Infinity, fps: NaN }]) {
+    const range = bitrateRange(info);
+    assert.ok(Number.isFinite(range.max) && range.max >= range.min && range.min > 0);
+  }
+  const profile = resolveQuality(large, 'source', 'source');
+  assert.equal(profile.width, 3840); assert.equal(profile.height, 2160);
+  assert.equal(profile.rateControl, 'near-lossless'); assert.equal(profile.bitrate, 'source');
+  assert.equal(profile.id, '3840x2160_source');
+  assert.throws(() => resolveQuality(large, 'source', 'auto'));
+});
+
+test('bitrate slider previews intermediate values, survives repaint, and synchronizes Source and Auto', async () => {
+  const b = createBrowserDouble(), video = b.elements.get('video');
+  const list = b.document.createElement('div'); list.className = 'movi-quality-list'; video.shadowRoot.appendChild(list);
+  const { createNativeQualityMenu } = await b.load('js/player/native-quality-menu.js');
+  let state = { enabled: true, mediaVersion: 1, quality: 'auto', bitrate: 'auto',
+    options: qualityOptions({ width: 1920, height: 1080 }), bitrateRange: { min: 400000, max: 8000000, step: 1000 } };
+  const changes = [];
+  const menu = createNativeQualityMenu({ video, onChange(next) { changes.push(next); state = { ...state, ...next }; menu.update(state); } });
+  menu.update(state);
+  const select = list.querySelector('select'), slider = list.querySelectorAll('input').find(input => input.type === 'range');
+  const auto = list.querySelectorAll('input').find(input => input.type === 'checkbox');
+  const label = list.querySelector('output'), reset = list.querySelector('button');
+  assert.equal(select.getAttribute('aria-label'), 'Resolution');
+  assert.equal(auto.checked, true); assert.equal(slider.disabled, true); assert.equal(reset.hidden, true);
+  auto.checked = false; auto.dispatch('change');
+  assert.equal(slider.disabled, false); assert.equal(reset.hidden, false);
+  const before = changes.length;
+  for (const [value, expected] of [[1499000,'Low'], [1500000,'Medium'], [2999000,'Medium'], [3000000,'High'], [4999000,'High'], [5000000,'Very high']]) {
+    slider.value = String(value); slider.dispatch('input'); assert.match(label.textContent, new RegExp(`^${expected}`));
+  }
+  slider.value = '2345000'; slider.dispatch('input');
+  assert.equal(label.textContent, 'Medium · 2.345 Mbps');
+  assert.equal(slider.getAttribute('aria-valuetext'), label.textContent);
+  menu.update({ ...state, status: 'Telemetry update' });
+  assert.equal(slider.value, '2345000'); assert.equal(changes.length, before);
+  assert.equal(list.children[0].dispatch('keydown', { key: 'ArrowRight' }).propagationStopped, true);
+  slider.dispatch('change'); assert.equal(state.bitrate, 2345000); assert.equal(changes.length, before + 1);
+  select.value = '720'; select.dispatch('change');
+  slider.value = slider.max; slider.dispatch('input'); assert.equal(label.textContent, 'Source'); slider.dispatch('change');
+  assert.equal(select.value, 'source'); assert.equal(state.bitrate, 'source'); assert.equal(reset.hidden, false);
+  slider.value = '2000000'; slider.dispatch('input'); slider.dispatch('change');
+  assert.equal(select.value, '720'); assert.equal(state.bitrate, 2000000);
+  auto.checked = true; auto.dispatch('change'); assert.equal(reset.hidden, false, 'manual resolution still needs reset');
+  reset.click(); assert.equal(reset.hidden, true); assert.equal(slider.disabled, true); assert.equal(select.value, 'auto');
+  auto.checked = false; auto.dispatch('change'); assert.equal(state.bitrate, 2000000, 'remember the previous manual bitrate');
+  slider.value = '3000000'; slider.dispatch('input');
+  state = { ...state, mediaVersion: 2, bitrate: 1000000, bitrateRange: { min: 25000, max: 1000000, step: 1000 } };
+  menu.update(state); assert.equal(slider.value, '1000000');
 });
 
 test('encoder budget is shared and releases permits after failure or cancellation', () => {
@@ -74,13 +137,14 @@ async function harness({ supported = true, observe = false, role = 'viewer' } = 
   const snapshot={mediaVersion:1,playbackRevision:1,streamGeneration:0,hasVideo:true,paused:true,time:17,playbackRate:1.25,duration:200,
     originalUrl:'/media/original?v=1',compatibilityUrl:'/hls/master.m3u8?v=1&g=0',captions:[],
     mediaInfo:{mime:'video/mp4',videoCodec:'h264',bitDepth:8,hasAudio:false,width:1920,height:1080,bitrate:10000000,
-      qualityOptions:qualityOptions({width:1920,height:1080}),bitrateLimits:[8000000,5000000,3000000,1500000,750000]}};
+      qualityOptions:qualityOptions({width:1920,height:1080}),bitrateRange:bitrateRange({width:1920,height:1080,bitrate:10000000})}};
   player.applySessionState(snapshot); await flush();
-  const controls=()=>video.shadowRoot.querySelector('.movi-quality-list').querySelectorAll('select');
+  const controls=()=>[video.shadowRoot.querySelector('.movi-quality-list').querySelector('select'),
+    video.shadowRoot.querySelector('.movi-quality-list').querySelectorAll('input').find(input=>input.type==='range')];
   const change=(quality,bitrate)=>{
     const [q,r]=controls();
     if(quality!==undefined){q.value=quality;q.dispatch('change');}
-    if(bitrate!==undefined){r.value=String(bitrate);r.dispatch('change');}
+    if(bitrate!==undefined){r.value=String(bitrate==='source'?r.max:bitrate);r.dispatch('change');}
   };
   const requests=()=>sent.filter(m=>m.type==='compatibility-request');
   const reply=async(values={})=>{
@@ -99,7 +163,7 @@ test('Settings is lazy; manual changes preserve the room transport and expose bo
   assert.equal(h.requests().length,0); assert.equal(h.b.requests.length,0);
   assert.equal(h.source().src,h.snapshot.originalUrl);
   assert.equal(h.video.settingsRowAvailable('.movi-quality-container'),true);
-  const [q,r]=h.controls();assert.equal(q.value,'auto');assert.equal(r.value,'auto');
+  const [q,r]=h.controls();assert.equal(q.value,'auto');assert.equal(r.disabled,true);
   h.change('720');assert.equal(h.requests().length,1);assert.equal(h.source().src,h.snapshot.originalUrl,'keep original until rendition is ready');
   await h.reply();
   assert.match(h.source().src,/r=1280x720_3000000/);
@@ -108,7 +172,8 @@ test('Settings is lazy; manual changes preserve the room transport and expose bo
   assert.equal(h.sent.some(m=>m.type==='quality-selection'&&m.renditionId==='1280x720_3000000'),true);
   h.change(undefined,1500000);await h.reply();assert.match(h.source().src,/r=1280x720_1500000/);
   h.advance(60000);h.b.runTimers(2000);assert.equal(h.requests().length,2,'manual quality never changes with load');
-  h.change('source');assert.equal(h.source().src,h.snapshot.originalUrl);assert.equal(h.controls()[1].disabled,true);
+  h.change('source');assert.equal(h.source().src,h.snapshot.originalUrl);assert.equal(h.controls()[1].disabled,false);
+  assert.equal(r.value,r.max);
 });
 
 test('busy selections, stale replies, and superseded prefetches cannot replace current playback', async () => {
@@ -123,10 +188,44 @@ test('busy selections, stale replies, and superseded prefetches cannot replace c
   assert.equal(h.source().src,before,'a timed-out choice preserves working playback');
 });
 
+test('reset visibility follows pending manual settings and returns to Auto after a rejected selection', async () => {
+  const h = await harness(), list = h.video.shadowRoot.querySelector('.movi-quality-list');
+  const reset = list.querySelector('button');
+  assert.equal(reset.hidden, true);
+  h.change('720'); assert.equal(reset.hidden, false);
+  h.player.handleQuality({ type: 'quality-error', mediaVersion: 1, requestId: h.requests().at(-1).requestId, message: 'Server busy' });
+  assert.equal(reset.hidden, true); assert.equal(h.controls()[0].value, 'auto');
+  h.change('source'); assert.equal(reset.hidden, false);
+  reset.click(); assert.equal(reset.hidden, true);
+});
+
+test('manual Source keeps original playback when supported and falls back to uncapped compatible playback on decoder failure', async () => {
+  const h = await harness();
+  h.change('source'); assert.equal(h.requests().length, 0); assert.equal(h.source().src, h.snapshot.originalUrl);
+  h.state.sourceSwitching = false;
+  h.video.dispatch('error', { detail: { message: 'decoder failed' } });
+  assert.equal(h.requests().length, 1);
+  assert.equal(h.requests()[0].quality, 'source'); assert.equal(h.requests()[0].bitrate, 'source');
+  await h.reply();
+  assert.match(h.source().src, /r=1920x1080_source/);
+  assert.equal(h.video.watchpartyQualityMetrics.preferences.quality, 'source');
+  assert.match(h.video.shadowRoot.querySelector('.movi-quality-list').querySelector('p').textContent, /compatible near-lossless/);
+  assert.equal(h.sent.some(message => message.type === 'video-state'), false);
+});
+
+test('unsupported originals can select Source and retain it across media replacement', async () => {
+  const h = await harness({ supported: false });
+  h.change('source'); assert.equal(h.requests().at(-1).bitrate, 'source');
+  await h.reply();
+  assert.equal(h.controls()[0].value, 'source'); assert.equal(h.controls()[1].value, h.controls()[1].max);
+  h.player.applySessionState({ ...h.snapshot, mediaVersion: 2 }); await flush();
+  assert.equal(h.requests().at(-1).quality, 'source'); assert.equal(h.requests().at(-1).bitrate, 'source');
+});
+
 test('unsupported originals request only one initial rendition; source replacement cancels pending work', async () => {
   const h=await harness({supported:false});
   assert.equal(h.requests().length,1);assert.equal(h.requests()[0].quality,'720');assert.equal(h.b.requests.length,0);
-  assert.equal(h.controls()[0].children.find(option=>option.value==='source').disabled,true);
+  assert.equal(h.controls()[0].children.find(option=>option.value==='source').disabled,false);
   const retired=h.requests()[0];
   h.player.applySessionState({...h.snapshot,mediaVersion:2,processing:true,hasVideo:false});
   h.player.applyCompatibility({...h.snapshot,type:'compatibility-ready',requestId:retired.requestId,rendition:resolveQuality(h.snapshot.mediaInfo,'720'),segmentSeconds:2,url:'/obsolete'});
@@ -190,6 +289,135 @@ async function asynchronousPlayer(h) {
   };
   return { replace, settle, current: () => active, plays: () => plays };
 }
+
+function seekSnapshot(h, index, time, paused, command) {
+  return { ...h.snapshot, time, paused, syncMode: 'seek', streamGeneration: index,
+    playbackRevision: index + 1, seekSequence: command.commandSequence, commandClientId: 'host',
+    compatibilityUrl: `/hls/master.m3u8?v=1&g=${index}` };
+}
+
+for (const count of [3, 5, 10, 20]) for (const direction of ['forward', 'backward', 'alternating']) {
+  for (const paused of [false, true]) for (const interleaved of [false, true]) test(`${count} ${direction} seeks ${interleaved ? 'during downloads' : 'in one burst'}, ${paused ? 'paused' : 'playing'}, keep only the final Auto target`, async () => {
+    const h = await harness({ supported: false, role: 'host' });
+    h.b.context.AbortController = AbortController;
+    await h.reply();
+    const native = await asynchronousPlayer(h);
+    if (!paused) await h.video.play();
+    const original = h.source().src, obsolete = [], snapshots = [], replacements = [];
+    h.b.context.fetch = (url, options) => {
+      if (url.includes('segment_000000.ts')) return Promise.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(1) });
+      return new Promise(resolve => obsolete.push({ url, signal: options.signal, resolve }));
+    };
+    const rendition = h.video.watchpartyQualityMetrics.rendition;
+    for (let i = 1; i <= count; i++) {
+      const time = direction === 'forward' ? 20 + i * 5 : direction === 'backward' ? 170 - i * 5 : i % 2 ? 140 : 40;
+      native.current().currentTime = time;
+      h.video.dispatch('watchparty-seek-intent', { detail: { time } });
+      const command = h.sent.filter(m => m.type === 'video-state' && m.syncMode === 'seek').at(-1);
+      assert.ok(command);
+      const snapshot = seekSnapshot(h, i, time, paused, command);
+      const replacement = { type: 'rendition-replaced', mediaVersion: 1, playbackRevision: i + 1,
+        streamGeneration: i, renditionGeneration: i, renditionId: rendition.id,
+        url: `${snapshot.compatibilityUrl}&r=${rendition.id}&rg=${i}` };
+      snapshots.push(snapshot); replacements.push(replacement);
+      h.player.handleQuality(replacement);
+      h.player.handleQuality(replacement);
+      if (interleaved) {
+        h.player.applySessionState(snapshot);
+        await h.reply({ ...snapshot, renditionGeneration: i, url: replacement.url });
+        assert.equal(obsolete.length, i, 'one fragment preparation per acknowledged generation');
+      }
+    }
+    if (!interleaved) {
+      for (const snapshot of snapshots) h.player.applySessionState(snapshot);
+      assert.equal(h.requests().length, 2, 'intermediate acknowledgements do not launch preparation');
+      await h.reply({ ...snapshots.at(-1), renditionGeneration: count, url: replacements.at(-1).url });
+    }
+    const final = obsolete.pop();
+    for (let i = 0; i < obsolete.length; i++) {
+      const request = obsolete[i];
+      assert.equal(request.signal.aborted, true);
+      request.resolve({ ok: i % 2 === 0, arrayBuffer: async () => new ArrayBuffer(1) });
+    }
+    await flush(); await flush();
+    assert.equal(h.source().src, original, 'obsolete successes and failures cannot switch players');
+    const before = h.requests().length;
+    for (const replacement of replacements) h.player.handleQuality(replacement);
+    assert.equal(h.requests().length, before, 'stale and duplicate replacements do not restart preparation');
+    final.resolve({ ok: true, arrayBuffer: async () => new ArrayBuffer(1) });
+    await flush(); await flush();
+    assert.equal(h.source().src, replacements.at(-1).url);
+    assert.equal(Number(h.video.getAttribute('startat')), snapshots.at(-1).time);
+    native.replace(); await native.settle();
+    assert.equal(h.video.currentTime, snapshots.at(-1).time);
+    assert.equal(h.video.paused, paused);
+    assert.equal(h.video.playbackRate, 1.25);
+    assert.equal(h.state.sourceSwitching, false);
+    assert.equal(h.video.watchpartyQualityMetrics.preferences.quality, 'auto');
+    h.b.runTimers(100);
+    h.b.runTimers(10000);
+    assert.deepEqual(h.reports, []);
+  });
+}
+
+test('a superseded fragment body cannot commit and a current failure still surfaces', async () => {
+  const h = await harness({ supported: false, role: 'host' });
+  h.b.context.AbortController = AbortController;
+  await h.reply(); const native = await asynchronousPlayer(h);
+  let finishBody, signal;
+  h.change('480');
+  h.b.context.fetch = async (url, options) => url.includes('segment_000000.ts') ?
+    { ok: true, arrayBuffer: async () => new ArrayBuffer(1) } :
+    { ok: true, arrayBuffer: () => { signal = options.signal; return new Promise(resolve => { finishBody = resolve; }); } };
+  await h.reply();
+  h.video.dispatch('watchparty-seek-intent', { detail: { time: 0 } });
+  assert.equal(signal.aborted, true);
+  const command = h.sent.filter(m => m.syncMode === 'seek').at(-1);
+  h.player.applySessionState(seekSnapshot(h, 1, 0, true, command));
+  finishBody(new ArrayBuffer(1)); await flush();
+  assert.doesNotMatch(h.source().src, /854x480/);
+  h.b.context.fetch = async () => ({ ok: false });
+  await h.reply({ time: 0, playbackRevision: 2, streamGeneration: 1 });
+  assert.match(h.reports.at(-1), /could not initialize|unavailable/);
+  assert.equal(native.current().paused, true);
+});
+
+for (const target of [0, 200]) test(`20 remote seeks retain manual quality and can finish preparation at ${target}`, async () => {
+  const h = await harness({ supported: false, role: 'host' });
+  h.change('480'); await h.reply();
+  const native = await asynchronousPlayer(h);
+  const retired = native.current();
+  for (let i = 1; i <= 20; i++) {
+    const time = i === 20 ? target : i % 2 ? 150 : 30;
+    const snapshot = { ...seekSnapshot(h, i, time, true, { commandSequence: i }), commandClientId: 'another-host' };
+    h.player.applySessionState(snapshot);
+  }
+  const request = h.requests().at(-1);
+  assert.equal(request.quality, '480');
+  await h.reply({ time: target, playbackRevision: 21, streamGeneration: 20,
+    url: '/hls/master.m3u8?v=1&g=20&r=854x480_1500000&rg=20' });
+  assert.equal(h.video.getAttribute('startat'), String(target));
+  assert.ok(h.b.requests.some(r => r.url.includes(target === 0 ? 'segment_000000.ts?v=1&g=20' : 'segment_000099.ts?v=1&g=20')));
+  assert.equal(h.b.requests.some(r => r.url.includes('segment_000100.ts')), false);
+  native.replace(); retired.dispatch('canplay');
+  assert.equal(h.state.sourceSwitching, true);
+  await native.settle(); h.b.runTimers(100); h.b.runTimers(10000);
+  assert.equal(h.video.currentTime, target);
+  assert.equal(h.video.watchpartyQualityMetrics.preferences.quality, '480');
+  assert.deepEqual(h.reports, []);
+});
+
+test('a rejected seek resumes preparation against the correction snapshot', async () => {
+  const h = await harness({ supported: false, role: 'host' });
+  await h.reply(); await asynchronousPlayer(h);
+  h.video.dispatch('watchparty-seek-intent', { detail: { time: 50 } });
+  const command = h.sent.filter(m => m.syncMode === 'seek').at(-1);
+  h.player.rejectPlayback({ commandSequence: command.commandSequence, state: { ...h.snapshot, syncMode: 'correction' } });
+  assert.equal(h.requests().length, 2);
+  await h.reply();
+  assert.equal(h.video.getAttribute('startat'), '17');
+  assert.deepEqual(h.reports, []);
+});
 
 test('host quality and bitrate switches preserve unacknowledged local play/pause and the actual playhead', async () => {
   const h = await harness({ role: 'host' }), native = await asynchronousPlayer(h);

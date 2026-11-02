@@ -36,7 +36,7 @@ async function fixture(t, hdr = false) {
 
 function service(t, source, spawnEncoder = spawn) {
   const state = { mediaVersion: 1, streamGeneration: 0, hlsDirectory: source.directory, mediaPath: source.source, mediaDuration: 4,
-    mediaInfo: source.info, rendition: { width: 320, height: 180, bitrate: 750000 },
+    mediaInfo: source.info, rendition: source.rendition || { width: 320, height: 180, bitrate: 750000 },
     playback: { paused: true, time: 0, rate: 1, updatedAt: Date.now() } };
   const events = [], calls = [];
   const segments = createSegmentService({ state, config: { segmentSeconds: 2, maxSegmentsAhead: 2, ffmpegPath: source.selected.path },
@@ -78,6 +78,20 @@ test("NVIDIA HDR streaming performs GPU tone mapping and publishes SDR H264", { 
   const bytes = fs.readFileSync(source.source);
   const metadata = await inspectIso({ size: bytes.length, read: async (offset, length) => bytes.subarray(offset, offset + length) });
   assert.match(isoVideoCodec(metadata), /^hvc1\.2\.[\dA-F]+\.L\d+(?:\.[\dA-F]{2})*$/);
+});
+
+test("NVIDIA Source fallback retains GPU processing, source size and frame rate with uncapped quality", { timeout: 30000 }, async t => {
+  const source = await fixture(t); if (!source) return;
+  source.rendition = require('../server/media/quality').resolveQuality(source.info, 'source', 'source');
+  const { segments, calls, events } = service(t, source);
+  const output = await segments.ensure(0);
+  const args = calls[0];
+  assert.equal(calls.length, 1);
+  assert.equal(args[args.indexOf('-cq') + 1], '14'); assert.equal(args[args.indexOf('-b:v') + 1], '0');
+  for (const flag of ['-maxrate','-bufsize','-level:v']) assert.equal(args.includes(flag), false);
+  assert.match(events.find(event => event.type === 'transcode-info').encoder, /hardware decode \+ GPU scale \+ hardware encode/);
+  const probe = await probeMedia(output, (await resolveFfprobe()).path, undefined, 'segment.ts');
+  assert.equal(probe.info.width, 640); assert.equal(probe.info.height, 360); assert.equal(probe.info.fps, 60);
 });
 
 test("failed GPU decoding/filters retain hardware encoding and failed modes are skipped on later seeks", { timeout: 30000 }, async t => {

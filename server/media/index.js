@@ -9,7 +9,7 @@ const { writePlaylists, segmentSchedule } = require("./playlists");
 const { removeTempDirectory } = require("./temp-files");
 const { createSegmentService } = require("./segments");
 const { createRenditionService } = require("./renditions");
-const { qualityOptions, BITRATES } = require("./quality");
+const { qualityOptions, BITRATES, bitrateRange } = require("./quality");
 const { createSubtitleService } = require("./subtitles");
 const { inspectIso, isoTimeline } = require("./containers/iso-metadata");
 const { checkedReader } = require("./containers/bytes");
@@ -101,6 +101,7 @@ function createMediaService({ state, config, encoderPromise, broadcast, thumbnai
       state.mediaInfo.bitrate = sourceReader?.size ? sourceReader.size * 8 / probe.duration : probe.info.bitrate || 0;
       state.mediaInfo.qualityOptions = qualityOptions(state.mediaInfo);
       state.mediaInfo.bitrateLimits = BITRATES;
+      state.mediaInfo.bitrateRange = bitrateRange(state.mediaInfo);
       subtitlesService.setFonts(probe.fonts, version);
       const subtitles = [...probe.subtitles, ...externalCaptions].slice(0, 16).map(assignCaption);
       writePlaylists(state, config.segmentSeconds);

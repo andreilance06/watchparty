@@ -78,6 +78,20 @@ test("an intermediate frame immediately rearms observation and an unchanged posi
   assert.equal(h.presentation.active(), false);
 });
 
+for (const count of [3, 5, 10, 20]) test(`${count} seeks retain one frame and only the final target releases it`, async () => {
+  const h = await harness(), retired = [];
+  for (let i = 0; i < count; i++) {
+    h.presentation.begin(i === count - 1 ? 99.9 : i % 2 ? 0 : 70, 100);
+    retired.push(...h.callbacks.values());
+  }
+  assert.equal(h.captures(), 1); assert.equal(h.video.clock, 99.9);
+  for (const callback of retired.slice(0, -1)) callback(0, { mediaTime: 70 });
+  h.b.runFrame(); assert.equal(h.presentation.active(), true);
+  h.native.currentTime = 99.9; h.settle(); h.presentation.update(); h.frame(99.9); h.b.runFrame();
+  assert.equal(h.presentation.active(), false);
+  h.b.runTimers(10000); assert.equal(h.timedOut(), 0);
+});
+
 test("paused HLS can repaint its target even when its frame callback already fired", async () => {
   const h = await harness();
   h.presentation.begin(44, 100, true);

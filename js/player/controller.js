@@ -39,7 +39,8 @@ export function createPlayer({ elements, state: session, send, report, files, at
       setVideoSource(latest.originalUrl, latest.mediaInfo?.mime || "application/octet-stream", originalEngine(engine));
     },
     switchRendition(message, recover) {
-      terminalError = false; cancelRecovery(); captureQualityPlayback();
+      terminalError = false; cancelRecovery();
+      if (recover) advanceSnapshot(); else captureQualityPlayback();
       activatePipeline(message, true);
       if (recover && session.activeMediaUrl === message.url && typeof video.load === "function") {
         setVideoSource(message.url, "application/vnd.apple.mpegurl", "hlsjs native");
@@ -330,9 +331,11 @@ export function createPlayer({ elements, state: session, send, report, files, at
       }
       if (state.captions) subtitles.setTracks(state.captions);
       if (terminalError) return;
-      if (compatibilityChanged) {
+      if (compatibilityChanged || state.syncMode === "seek" && quality.managed() ||
+          state.syncMode === "correction" && quality.needsRefresh()) {
         clearCompatibilityRequest();
-        if (quality.managed()) quality.refresh(); else reloadCompatibility(state.compatibilityUrl);
+        if (quality.managed()) quality.refresh(state); else reloadCompatibility(state.compatibilityUrl);
+        if (mode !== "compatibility" && session.activeMediaUrl) sync.apply(state, false);
       } else if (session.activeMediaUrl && !pendingCompatibility && !awaitingReplacement()) sync.apply(state, false);
       if (recovery) sync.status("Reconnecting playback…");
     }
@@ -396,7 +399,10 @@ export function createPlayer({ elements, state: session, send, report, files, at
       }
       return;
     }
-    if (mode === "seek") seekPresentation.begin(Number.isFinite(target) ? target : surface().currentTime, latest?.duration);
+    if (mode === "seek") {
+      quality.seekStarted();
+      seekPresentation.begin(Number.isFinite(target) ? target : surface().currentTime, latest?.duration);
+    }
     // Host commands are not echoed by the server. Keep the snapshot used by
     // quality replacement current, including intent emitted before native state.
     if (latest) {
@@ -499,6 +505,7 @@ export function createPlayer({ elements, state: session, send, report, files, at
     compatibilityBuffer.update();
     sync.update();
     if (session.sourceSwitching && readyState() >= 1) ready();
+    quality.settleLoading();
     seekPresentation.update();
     if (readyState() >= 2 && (!metrics.firstPictureMs || metrics.fallbackPending)) {
       progress(); video.dispatchEvent(new Event("watchparty-picture-ready"));

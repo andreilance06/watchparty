@@ -14,6 +14,20 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function renditionEncoderArgs(encoder, profile) {
   if (!profile) return encoder.args;
+  if (profile.rateControl === "near-lossless") {
+    const replaced = new Set(["-crf", "-cq", "-global_quality", "-q:v", "-qp_i", "-qp_p", "-qp_b", "-rc", "-b:v", "-maxrate", "-bufsize", "-level:v"]);
+    const args = [];
+    for (let index = 0; index < encoder.args.length; index++) {
+      if (replaced.has(encoder.args[index])) index++;
+      else args.push(encoder.args[index]);
+    }
+    const quality = {
+      libx264: ["-crf", "14"], h264_nvenc: ["-rc", "vbr", "-cq", "14", "-b:v", "0"],
+      h264_qsv: ["-global_quality", "14"], h264_amf: ["-rc", "cqp", "-qp_i", "14", "-qp_p", "14", "-qp_b", "14"],
+      h264_videotoolbox: ["-q:v", "90"]
+    };
+    return [...args, ...(quality[encoder.name] || ["-q:v", "2"])];
+  }
   // ICQ/CQP and VideoToolbox's quality mode can ignore a bandwidth budget.
   // Select bitrate-based rate control for those encoders; x264 keeps CRF+VBV.
   const qualityFlags = new Set(["-global_quality", "-q:v", "-qp_i", "-qp_p", "-qp_b"]);
@@ -62,7 +76,7 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
     // Drain cancelled writes before reclaiming a retired generation. The
     // bootstrap fragment lives separately and remains available to native HLS.
     const renditionDirectory = state.roomState && isWatchPartyTempDirectory(state.roomState.hlsDirectory) &&
-      path.dirname(parent) === state.roomState.hlsDirectory && /^r_\d+x\d+_\d+_\d+$/.test(path.basename(parent));
+      path.dirname(parent) === state.roomState.hlsDirectory && /^r_\d+x\d+_(?:\d+|source)_\d+$/.test(path.basename(parent));
     if ((isWatchPartyTempDirectory(parent) || renditionDirectory) && path.dirname(directory) === parent && /^run_\d+$/.test(path.basename(directory))) {
       Promise.allSettled(retired).then(() => fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }, () => {}));
     }
@@ -179,14 +193,16 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
       }
       if (job.preparationBudget) job.inputLease = state.openMediaLease?.(job.preparationBudget);
       const input = job.inputLease?.url || state.mediaPath;
+      const uncapped = state.rendition?.rateControl === "near-lossless";
       const args = ["-hide_banner", "-loglevel", "warning", "-y", ...encoder.init, ...encoder.input,
         "-ss", start.toFixed(9), ...(input.startsWith("http:") ? ["-rw_timeout", "30000000"] : []), ...(state.mediaInputArgs || []),
         "-i", input, "-t", duration.toFixed(9), "-map", "0:v:0", "-map", "0:a:0?",
         "-vf", encoder.filter, "-c:v", encoder.name, ...renditionEncoderArgs(encoder, state.rendition),
-        ...(state.rendition ? ["-b:v", String(state.rendition.bitrate)] : []),
-        "-maxrate", String(state.rendition?.bitrate || 8000000), "-bufsize", String((state.rendition?.bitrate || 8000000) * 2), "-pix_fmt", encoder.pixelFormat, "-bf", "0",
+        ...(uncapped ? [] : [...(state.rendition ? ["-b:v", String(state.rendition.bitrate)] : []),
+          "-maxrate", String(state.rendition?.bitrate || 8000000), "-bufsize", String((state.rendition?.bitrate || 8000000) * 2)]),
+        "-pix_fmt", encoder.pixelFormat, "-bf", "0",
         ...(state.mediaInfo?.hdr ? ["-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709", "-color_range", "tv"] : []),
-        "-r", String(job.schedule.fps), "-profile:v", "high", "-level:v", "4.1",
+        "-r", String(job.schedule.fps), "-profile:v", "high", ...(uncapped ? [] : ["-level:v", "4.1"]),
         "-g", String(job.schedule.frames), "-keyint_min", String(job.schedule.frames),
         "-force_key_frames", `expr:gte(n,n_forced*${job.schedule.frames})`, "-sc_threshold", "0",
         "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-ar", "48000",
@@ -293,4 +309,4 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
   return { ensure, cancel, restart, running: () => [...jobs].some(job => !job.done) };
 }
 
-module.exports = { createSegmentService, compatibilityFilter };
+module.exports = { createSegmentService, compatibilityFilter, renditionEncoderArgs };

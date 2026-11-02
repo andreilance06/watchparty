@@ -4,20 +4,31 @@ import { createNativeQualityMenu } from "./native-quality-menu.js";
 export function createAdaptiveQuality({ video, session, send, switchSource, switchRendition, fail, report, surface, validateOriginal, onRenditionReady }) {
   let source, engine, current, pending, serial = 0, throughput = 0, measuredAt = 0, demand = {}, blockedUntil = 0;
   let preferences = { quality: "auto", bitrate: "auto" }, warning = "", retryUsed = false, loading, loader;
+  let deferred, awaitingSeek = false, refreshKey;
+  const replacements = new Map();
   const hysteresis = createQualityHysteresis();
   const menu = createNativeQualityMenu({ video, onChange: change });
   const enabled = () => Boolean(source?.mediaInfo?.qualityOptions?.length);
   const sourceSupported = () => engine && engine !== "compatibility";
   const options = () => source?.mediaInfo?.qualityOptions || [];
+  const bitrateRange = () => source?.mediaInfo?.bitrateRange || { min: 25000,
+    max: Math.max(750000, ...(source?.mediaInfo?.bitrateLimits || []), ...options().map(option => option.bitrate)), step: 1000 };
+  const sourceProfile = () => {
+    const width = Math.max(2, Math.floor((source.mediaInfo.width || 1920) / 2) * 2);
+    const height = Math.max(2, Math.floor((source.mediaInfo.height || 1080) / 2) * 2);
+    return { quality: "source", width, height, bitrate: "source", rateControl: "near-lossless",
+      estimatedBitrate: bitrateRange().max * 2, id: `${width}x${height}_source`, reason: "Source (compatible near-lossless transcode)" };
+  };
   const now = () => performance.now();
   function paint(reason) {
     const actual = current?.id === "source" ? `Original (${source?.mediaInfo?.height || "?"}p)` :
+      current?.rateControl === "near-lossless" ? `Source (${current.width}×${current.height}, compatible near-lossless transcode)` :
       current ? `${current.width}×${current.height}, ${current.bitrate / 1000000} Mbps limit` : "Preparing playback";
     video.watchpartyQualityMetrics = { preferences: { ...preferences }, rendition: current, throughputBps: throughput,
       provider: demand.provider, server: { active: demand.active, limit: demand.limit, pressure: demand.pressure, encodingRatio: demand.encodingRatio },
       reason: reason || current?.reason || "", pending: pending?.target?.id || null, warning };
-    menu.update({ enabled: enabled(), ...(pending?.settings || preferences), sourceSupported: Boolean(sourceSupported()), options: options(),
-      bitrateLimits: source?.mediaInfo?.bitrateLimits || [], label: `${preferences.quality === "auto" ? "Auto · " : ""}${actual}`,
+    menu.update({ enabled: enabled(), mediaVersion: source?.mediaVersion, ...(pending?.settings || preferences), options: options(),
+      bitrateRange: bitrateRange(), label: `${preferences.quality === "auto" ? "Auto · " : ""}${actual}`,
       status: `${actual}. ${pending ? "Preparing selected quality…" : warning || reason || current?.reason || ""}` });
   }
   function cancelPending() {
@@ -25,6 +36,32 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
     clearTimeout(pending.timer); pending.controller?.abort(); pending = null;
   }
   function clearLoading() { clearTimeout(loading?.timer); loading = null; }
+  function suspend() {
+    deferred = pending ? { target: pending.target, settings: pending.settings } : deferred;
+    cancelPending(); clearLoading(); refreshKey = undefined;
+  }
+  function seekStarted() {
+    if (!enabled()) return;
+    awaitingSeek = true;
+    suspend();
+  }
+  function refresh(snapshot = source) {
+    source = { ...source, playbackRevision: snapshot.playbackRevision, streamGeneration: snapshot.streamGeneration };
+    awaitingSeek = false;
+    const profile = pending?.target || deferred?.target || current;
+    const settings = pending?.settings || deferred?.settings || preferences;
+    if (!profile || profile.id === "source") return;
+    const replacement = replacements.get(profile.id);
+    const revision = session.playbackRevision ?? 0, generation = source.streamGeneration ?? 0;
+    // Replacement notifications precede seek acknowledgements. Wait until the
+    // sync layer accepts the latest command before preparing its fragments.
+    if (replacement && (replacement.playbackRevision > revision || replacement.streamGeneration > generation)) return;
+    const key = `${profile.id}:${revision}:${generation}:${replacement?.renditionGeneration ?? ""}`;
+    if (refreshKey === key) return;
+    clearLoading(); deferred = undefined;
+    request(profile, settings, "Following the shared playhead", true);
+    refreshKey = key;
+  }
   function beginLoading(apply) {
     clearLoading();
     const attempt = loading = { retiredPlayer: video.player };
@@ -38,7 +75,8 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
     if (loading && (!loading.retiredPlayer || video.player !== loading.retiredPlayer) && surface().readyState >= 2 && !session.sourceSwitching) clearLoading();
   }
   function profileFor(settings) {
-    if (settings.quality === "source") return { id: "source", reason: "Selected in Settings" };
+    if (settings.quality === "source") return sourceSupported() && now() >= blockedUntil ?
+      { id: "source", reason: "Selected in Settings" } : sourceProfile();
     if (settings.quality !== "auto") {
       const option = options().find(option => option.quality === settings.quality);
       if (!option) return null;
@@ -60,7 +98,8 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
   }
   function request(profile, settings = preferences, reason = profile?.reason, recover = false) {
     if (!profile || !enabled()) return;
-    if (profile.id === "source" && !sourceSupported()) { warning = "Original playback is unsupported on this device. Choose Auto."; paint(); return; }
+    refreshKey = undefined;
+    deferred = undefined;
     cancelPending();
     if (current?.id === profile.id && !recover) { preferences = { ...settings }; paint(reason); return; }
     if (profile.id === "source") {
@@ -72,17 +111,20 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
           pending = null;
           engine = choice;
           if (choice !== "native") {
-            const compatible = { quality: "auto", bitrate: settings.bitrate };
+            const compatible = settings.quality === "source" ? settings : { quality: "auto", bitrate: settings.bitrate };
             request(profileFor(compatible), compatible, "HDR playback is unavailable on this display");
             return;
           }
           beginLoading(() => switchSource(choice)); changed(profile, settings, reason);
         }).catch(() => {
           if (pending !== attempt) return;
-          pending = null; updatePlayback("compatibility");
+          pending = null; engine = "compatibility";
+          const compatible = settings.quality === "source" ? settings : { quality: "auto", bitrate: settings.bitrate };
+          request(profileFor(compatible), compatible, "Original playback is unavailable");
         });
         return;
       }
+      if (!sourceSupported()) { request(sourceProfile(), settings); return; }
       beginLoading(() => switchSource(engine)); changed(profile, settings, reason); return;
     }
     const requestId = `quality-${source.mediaVersion}-${++serial}`;
@@ -104,6 +146,12 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
   }
   function change(settings) {
     if (!enabled()) return;
+    if (settings.quality === "source") {
+      settings = { quality: "source", bitrate: "source" };
+      if (source.mediaInfo?.hdr && validateOriginal) {
+        request({ id: "source", reason: "Selected in Settings" }, settings); return;
+      }
+    }
     const profile = profileFor(settings);
     request(profile, settings);
   }
@@ -113,11 +161,14 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
     if ((message.playbackRevision ?? 0) < (session.playbackRevision ?? 0)) {
       request(attempt.target, attempt.settings, attempt.reason, true); return true;
     }
+    if (attempt.preparing) return true;
+    attempt.preparing = true;
     onRenditionReady?.(message);
     try {
       // This is the selected rendition's first real demand. Prepare just the
       // current fragment before replacing a working player; HLS reuses its cache.
-      const index = Math.floor(message.time / message.segmentSeconds);
+      const index = Math.max(0, Math.min(Math.ceil(source.duration / message.segmentSeconds) - 1,
+        Math.floor(message.time / message.segmentSeconds)));
       if (index > 0) {
         const bootstrap = await fetch(message.url.replace("master.m3u8", "segment_000000.ts"), { signal: attempt.controller?.signal });
         if (!bootstrap.ok) throw new Error("The selected quality could not initialize. Keep the current quality or try Auto.");
@@ -178,7 +229,7 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
     }
     send({ type: "quality-telemetry", mediaVersion: source.mediaVersion,
       throughputBps: throughput, bufferedSeconds: buffer, renditionId: current?.id });
-    if (document.hidden || active.paused || active.seeking || session.sourceSwitching || loading || pending || !current) { hysteresis.reset(now()); return; }
+    if (document.hidden || awaitingSeek || deferred || active.paused || active.seeking || session.sourceSwitching || loading || pending || !current) { hysteresis.reset(now()); return; }
     if (measuredAt && now() - measuredAt > 20000) { throughput = 0; measuredAt = 0; }
     const provider = demand.provider;
     const starved = provider?.samples >= 3 && Date.now() - provider.sampledAt < 15000 && provider.bps < (source.mediaInfo.bitrate || 0);
@@ -203,14 +254,17 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
   function reset(snapshot) {
     if (source) send({ type: "quality-release", mediaVersion: source.mediaVersion });
     cancelPending(); clearLoading(); loader?.off?.("hlsFragLoaded", fragmentLoaded); loader = null;
+    deferred = undefined; awaitingSeek = false; refreshKey = undefined; replacements.clear();
     source = snapshot; current = null; engine = null; throughput = 0; measuredAt = 0; demand = {};
     blockedUntil = 0; warning = ""; retryUsed = false; hysteresis.reset(now());
     if (enabled() && preferences.quality !== "auto" && preferences.quality !== "source" && !options().some(option => option.quality === preferences.quality)) preferences.quality = "auto";
+    if (enabled() && typeof preferences.bitrate === "number") {
+      preferences.bitrate = Math.max(bitrateRange().min, Math.min(bitrateRange().max, preferences.bitrate));
+    }
     paint();
   }
   function start(choice) {
     engine = choice;
-    if (preferences.quality === "source" && !sourceSupported()) preferences = { quality: "auto", bitrate: "auto" };
     request(profileFor(preferences));
   }
   function fallback(reason, recover = false) {
@@ -222,10 +276,6 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
     }
     if (/decoder|capabil/.test(reason)) engine = "compatibility";
     blockedUntil = now() + 60000;
-    if (preferences.quality === "source") {
-      if (source.mediaInfo?.hdr) preferences = { quality: "auto", bitrate: preferences.bitrate };
-      else { warning = `${reason}. Choose Auto for compatible playback.`; paint(); fail(warning); return true; }
-    }
     request(profileFor(preferences), preferences, reason); return true;
   }
   function handle(message) {
@@ -237,8 +287,19 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
     }
     if (message.type === "quality-status") { demand = message; paint(); return true; }
     if (["rendition-replaced", "rendition-error"].includes(message.type)) {
-      if (message.renditionId === current?.id) {
-        if (message.type === "rendition-replaced") request(current, preferences, "Following the shared playhead", true);
+      if (message.renditionId === current?.id || message.renditionId === pending?.target?.id || message.renditionId === deferred?.target?.id) {
+        const previous = replacements.get(message.renditionId);
+        if ((message.playbackRevision ?? Infinity) < (session.playbackRevision ?? 0) || previous &&
+            ((message.streamGeneration ?? Infinity) < previous.streamGeneration ||
+             message.streamGeneration === previous.streamGeneration && message.renditionGeneration < previous.renditionGeneration)) return true;
+        if (message.type === "rendition-replaced") {
+          if (previous?.url === message.url) return true;
+          replacements.set(message.renditionId, message);
+          const wait = awaitingSeek || message.playbackRevision > (session.playbackRevision ?? 0) ||
+            message.streamGeneration > (source.streamGeneration ?? 0);
+          suspend();
+          if (!wait) refresh();
+        }
         else fallback(message.message, true);
       }
       return true;
@@ -249,16 +310,12 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
     engine = choice;
     if (choice === "compatibility" && source?.mediaInfo?.hdr) {
       cancelPending();
-      if (preferences.quality === "source") preferences = { quality: "auto", bitrate: preferences.bitrate };
       request(profileFor(preferences), preferences, "HDR playback is unavailable on this display");
     } else paint();
   }
-  return { enabled, reset, start, fallback, handle, settleLoading, updatePlayback,
+  return { enabled, reset, start, fallback, handle, settleLoading, updatePlayback, seekStarted, refresh,
+    needsRefresh: () => awaitingSeek || Boolean(deferred),
     waiting: () => Boolean(loading?.retiredPlayer && loading.retiredPlayer === video.player),
-    managed: () => enabled() && Boolean(current || pending),
-    refresh: () => {
-      const profile = pending?.target || current;
-      if (profile && profile.id !== "source") request(profile, pending?.settings || preferences, "Following the shared playhead", true);
-    },
+    managed: () => enabled() && Boolean(current || pending || deferred),
     renditionId: () => current?.id };
 }
