@@ -25,6 +25,7 @@
 }
 
 @media (hover: hover) {
+  .room-info-bar:hover,
   .player-panel:hover,
   .chat-panel:hover {
     border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
