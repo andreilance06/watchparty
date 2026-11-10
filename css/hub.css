@@ -1,4 +1,4 @@
-@import url("./base.css");
+@import "./base.css";
 
 [hidden] { display: none !important; }
 .eyebrow { margin: 0; color: var(--accent-soft-text); font-size: .68rem; font-weight: 700; letter-spacing: .13em; }

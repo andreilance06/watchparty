@@ -42,7 +42,7 @@ test("host relay bounds concurrent reads, rejects corrupt frames, and closes pen
   const sent = [];
   const state = createSession();
   const owner = { clientId: "host" };
-  state.hostId = "host"; state.clients.set("host", { ws: owner });
+  state.hostId = "host"; state.clients.set("host", { ws: owner, role: "host" });
   const room = { state, transport: { send: (_, message) => sent.push(message), broadcast() {} },
     media: { select: (url) => { state.mediaPath = url; }, prepare() {}, reset() {} } };
   const source = createHostSource({ room, bridge, config });
@@ -80,7 +80,7 @@ test("unanswered host reads time out and late responses cannot satisfy other req
   await bridge.listen();
   t.after(() => bridge.close());
   const sent = [], owner = { clientId: "host" }, state = createSession();
-  state.hostId = "host"; state.clients.set("host", { ws: owner });
+  state.hostId = "host"; state.clients.set("host", { ws: owner, role: "host" });
   const room = { state, transport: { send: (_, message) => sent.push(message), broadcast() {} },
     media: { select: (url) => { state.mediaPath = url; }, prepare() {}, reset() {} } };
   const source = createHostSource({ room, bridge, config });
@@ -105,4 +105,33 @@ test("unanswered host reads time out and late responses cannot satisfy other req
   assert.equal(sent.filter((message) => message.type === "source-read").length, 2);
   source.reset();
   await failure;
+});
+
+
+test("media grants authorize viewers and are rechecked when a pending provider attaches", async t => {
+  const config = createConfig({ sourceReadTimeoutMs: 100 }), bridge = createSourceBridge(config);
+  await bridge.listen(); t.after(() => bridge.close());
+  const state = createSession(), owner = { clientId: "viewer" }, messages = [];
+  state.clients.set("viewer", { role: "viewer", ws: owner, permissionIdentity: "browser" });
+  const room = { state, transport: { send: (_, message) => messages.push(message), broadcast() {} },
+    media: { reset() {}, select(url) { state.mediaPath = url; }, prepare() {} } };
+  const source = createHostSource({ room, bridge, config }); t.after(() => source.reset());
+  const video = { id: "video", name: "demo.webm", size: 100 };
+  for (const type of ["source-register", "caption-provider-register", "captions-add", "caption-remove"]) {
+    await source.handleControl(owner, { type, video, requestId: type });
+    assert.equal(messages.at(-1).type, "error");
+    assert.match(messages.at(-1).message, /permission/);
+  }
+  state.viewerPermissions.set("browser", { chooseVideo: true });
+  await source.handleControl(owner, { type: "source-register", video });
+  const registration = messages.at(-1); assert.equal(registration.type, "source-registered");
+  state.viewerPermissions.set("browser", { chooseVideo: false });
+  const socket = new EventEmitter(); socket.readyState = 1;
+  socket.close = () => { socket.readyState = 3; socket.emit("close"); };
+  source.attach(socket, null);
+  socket.emit("message", Buffer.from(JSON.stringify({ type: "source-attach", sourceId: registration.sourceId, token: registration.token })), false);
+  assert.equal(socket.readyState, 3); assert.equal(state.mediaPath, null);
+  state.viewerPermissions.set("browser", { chooseVideo: true });
+  await source.handleControl(owner, { type: "source-register", video, captions: [{ id: "sub", name: "english.srt", size: 20 }] });
+  assert.equal(messages.at(-1).type, "error", "bundled captions require their own grant");
 });

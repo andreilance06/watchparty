@@ -1,0 +1,181 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>WatchParty — Project Progress Report</title><style>
+*{box-sizing:border-box}body{margin:0;background:#edf0f5;color:#202735;font:17px/1.65 Arial,Helvetica,sans-serif}main{width:1120px;margin:36px auto;padding:66px 72px;background:white;border-top:8px solid #7150e7}h1{font-size:46px;line-height:1.15;margin:0 0 14px;color:#35246a}h2{font-size:27px;line-height:1.3;margin:44px 0 18px;color:#35246a;border-bottom:1px solid #ddd7ef;padding-bottom:10px}h3{font-size:20px;line-height:1.4;margin:28px 0 12px}p{margin:14px 0}a{color:#5a3cb4;text-decoration:none}code{font:15px/1.5 Consolas,monospace;background:#f2f0f7;border-radius:3px;padding:2px 4px;overflow-wrap:anywhere}pre{background:#f5f4f8;padding:18px 22px;border:1px solid #ddd8e8;border-radius:6px;white-space:pre-wrap}pre code{padding:0;background:none}table{width:100%;border-collapse:collapse;margin:22px 0;font-size:15px;line-height:1.5}th,td{padding:12px 14px;border:1px solid #dce0e8;text-align:left;vertical-align:top}th{background:#ede8fa;color:#35246a}tbody tr:nth-child(even){background:#f9fafc}td:first-child{width:25%}img{display:block;max-width:100%;height:auto;margin:20px 0;border:1px solid #dce0e8;border-radius:6px}li{margin:8px 0}ul,ol{padding-left:26px}hr{border:0;border-top:1px solid #dce0e8;margin:32px 0}.architecture{margin:24px 0;padding:26px;background:#faf9fd;border:1px solid #ded7ee;text-align:center}.node{padding:13px 18px;border:1px solid #b5a4dd;background:#eee8fb;border-radius:8px;font-size:15px;font-weight:bold}.arrow{font-size:14px;color:#655b77;margin:9px}figcaption{font-size:13px;color:#655b77;margin-top:20px}
+</style></head><body><main><h1>WatchParty</h1>
+<h2>Technical Documentation and Project Progress Report</h2>
+<p><strong>Project title:</strong> WatchParty: A Browser-Based Synchronized Video Viewing Application<br>
+<strong>Report date:</strong> November 10, 2026<br>
+<strong>Package version:</strong> 1.0.0<br>
+<strong>Project team:</strong> Jobert Aguirre, Andrei Lance Asuncion, and Justin Mandapat<br>
+<strong>Repository:</strong> andreilance06/watchparty<br>
+<strong>Development status:</strong> Core features implemented; local validation completed for selected environments; broader release evaluation remains.</p>
+<p>This report describes the current working-tree implementation, including changes that have not yet been committed. The package version is a repository identifier and does not establish a released production version.</p>
+<hr>
+<h2>1. Project Overview</h2>
+<p>WatchParty is a web application that allows people in different locations to watch a video together through a shared room. A participant supplies a local video from their browser, and the application coordinates playback while participants communicate through chat, replies, emoji reactions, and movie polls.</p>
+<p>The application combines a React frontend with a Node.js HTTP and WebSocket backend. Its media pipeline supports direct playback, browser decoding through Movi Player and WebCodecs, and FFmpeg-based compatibility streaming. A room hub provides room discovery, invitations, and optional password protection.</p>
+<p>The project has progressed beyond a basic prototype: room management, media delivery, social features, participant permissions, responsive layouts, automated tests, and deployment configuration are present. The React migration has also been implemented. Remaining release work includes wider browser and physical-device testing, public deployment verification, and representative network/load evaluation. No completion percentage is assigned because a weighted project schedule and acceptance checklist have not been supplied.</p>
+<h2>2. Problem Statement or Project Purpose</h2>
+<p>Remote groups often need separate tools for watching videos, discussing content, and choosing what to watch next. Manually coordinating playback causes participants to see different scenes, especially after pauses or seeks. Sharing local files also introduces browser codec limitations and the delay of uploading an entire file before playback.</p>
+<p>WatchParty addresses these problems by placing synchronized viewing and group interaction in one interface. It requests portions of the provider's local file as needed and provides compatibility streaming when a browser cannot use the original media. Room permissions allow the host to manage shared controls and participant actions.</p>
+<h2>3. Project Objectives</h2>
+<table><thead><tr><th>Objective</th><th>Current progress</th></tr></thead><tbody>
+<tr><td>Coordinate playback across participants, including play/pause, seeking, and speed changes.</td><td>Implemented with server-maintained playback state and WebSocket updates.</td></tr>
+<tr><td>Share a local video without requiring an initial full-file upload.</td><td>Implemented through browser-owned files and bounded byte-range requests.</td></tr>
+<tr><td>Support varied media formats and subtitle tracks.</td><td>Multiple playback paths and SRT/VTT/ASS/SSA support implemented; device coverage remains to be expanded.</td></tr>
+<tr><td>Provide communication and shared movie selection.</td><td>Chat, replies, message reactions, floating reactions, suggestions, and voting implemented.</td></tr>
+<tr><td>Give hosts control over room access and participation.</td><td>Password-protected admission, invitations, host transfer, permissions, and blocking implemented.</td></tr>
+<tr><td>Provide a responsive and maintainable interface.</td><td>React components, shared state, light/dark themes, and responsive layouts implemented.</td></tr>
+<tr><td>Establish repeatable validation and deployment procedures.</td><td>Automated suites, production build, HTTPS proxy templates, and a VPS deployment guide available.</td></tr>
+</tbody></table>
+<p>Performance targets are a first playable frame within three seconds and an uncached seek within two seconds under suitable hardware, media, and network conditions. These are evaluation targets rather than guarantees for every file or connection.</p>
+<h2>4. Target Users</h2>
+<ul>
+<li><strong>Friends and families:</strong> Watch local videos together while chatting remotely.</li>
+<li><strong>Classmates and small study groups:</strong> View shared video material and discuss it in one room.</li>
+<li><strong>Film clubs and small communities:</strong> Suggest titles, vote on the next selection, and host a group session.</li>
+<li><strong>Hosts and delegated moderators:</strong> Manage participants, playback permissions, captions, and disruptive behavior.</li>
+</ul>
+<p>Viewers need a compatible browser and a reachable application server. The participant supplying the video must keep their browser page open and connected throughout playback.</p>
+<h2>5. Features and Functionalities</h2>
+<table><thead><tr><th>Feature</th><th>Implemented functionality</th></tr></thead><tbody>
+<tr><td>Room directory</td><td>Lists available rooms, participant counts, selected filenames, previews, and password requirements.</td></tr>
+<tr><td>Room creation and admission</td><td>Named rooms, optional passwords, display names, invitation links, and a separate player page.</td></tr>
+<tr><td>Shared playback</td><td>Room playback clock, play/pause, seek and speed synchronization, and host-controlled permissions.</td></tr>
+<tr><td>Media compatibility</td><td>Native playback, suitable WebCodecs playback, and FFmpeg/HLS fallback.</td></tr>
+<tr><td>Quality selection</td><td>Per-viewer Auto or manual resolution/bitrate preferences, with options up to 1080p when applicable.</td></tr>
+<tr><td>Captions</td><td>External SRT, VTT, ASS, and SSA files; supported embedded text-caption extraction; independent viewer selection.</td></tr>
+<tr><td>Chat</td><td>Real-time messages, quoted replies, timestamps, emoji insertion, and comment reactions.</td></tr>
+<tr><td>Floating reactions</td><td>Shared animated emoji reactions with reduced-motion handling.</td></tr>
+<tr><td>Movie polls</td><td>Suggestions, optional Wikipedia metadata/posters, votes, and published poll results.</td></tr>
+<tr><td>Participant controls</td><td>Connected-user list, 19 configurable permissions, room defaults, individual overrides, host transfer, blocking and unblocking.</td></tr>
+<tr><td>Reconnection</td><td>A 15-second grace period for unexpected host disconnects and automatic host reassignment when necessary.</td></tr>
+<tr><td>Responsive presentation</td><td>Desktop viewing lounge, mobile Chat/People tabs, light/dark themes, and fullscreen chat.</td></tr>
+</tbody></table>
+<p>Room state is held in memory. There is no persistent account system, media library, or chat-history database. Chat history is bounded, and previous chat is not replayed to newly connected viewers. Room names, filenames, and previews are visible in the directory even for password-protected rooms; admission still protects playback.</p>
+<h2>6. Technology Stack</h2>
+<p>Versions below are declared dependency ranges or pinned vendor versions from the repository, not claims about the newest available releases.</p>
+<table><thead><tr><th>Layer</th><th>Technology</th><th>Purpose</th></tr></thead><tbody>
+<tr><td>Frontend</td><td>React and React DOM <code>^19.3.1</code></td><td>Components, forms, state, context, and rendering.</td></tr>
+<tr><td>Build tooling</td><td>Vite <code>^8.3.5</code>, React Vite plugin</td><td>Development server, backend proxy, and production bundles.</td></tr>
+<tr><td>Styling</td><td>Tailwind CSS <code>^4.3.4</code>, CSS, HTML</td><td>Responsive layout, themes, player and chat presentation.</td></tr>
+<tr><td>Runtime</td><td>Node.js <code>&gt;=24.0.0</code>, JavaScript</td><td>HTTP server, room coordination, and media processing orchestration.</td></tr>
+<tr><td>Real-time transport</td><td><code>ws</code> <code>^8.18.0</code></td><td>Playback events, chat, presence, and source-file transport.</td></tr>
+<tr><td>Player</td><td>Movi Player 0.4.1, WebCodecs, WebAssembly</td><td>Browser media playback and player controls.</td></tr>
+<tr><td>Media processing</td><td>FFmpeg, ffprobe, HLS</td><td>Inspection, transcoding, previews, caption conversion, and compatibility delivery.</td></tr>
+<tr><td>Subtitle renderer</td><td>JASSUB 2.5.16</td><td>Caption rendering, including styled ASS/SSA.</td></tr>
+<tr><td>External integration</td><td>Wikipedia MediaWiki API</td><td>Optional title search, metadata, and poster attribution.</td></tr>
+<tr><td>Testing</td><td>Node test runner, Vitest, React Testing Library, jsdom</td><td>Backend/media regressions and component interaction checks.</td></tr>
+<tr><td>Deployment</td><td>Ubuntu VPS, Caddy, systemd</td><td>Documented HTTPS reverse proxy and persistent application service.</td></tr>
+<tr><td>Collaboration</td><td>Git and GitHub</td><td>Source control and feature integration.</td></tr>
+</tbody></table>
+<h2>7. System Architecture or Application Structure</h2>
+<p>WatchParty uses a single Node.js application process with separate frontend, room-control, and media responsibilities. Browser clients communicate through HTTP and WebSockets; the server coordinates each room independently.</p>
+<figure class="architecture"><div class="node">Video provider browser · Local file</div><div class="arrow">↕ Requested file bytes over WebSocket</div><div class="node">Source relay</div><div class="arrow">↕</div><div class="node">Node.js HTTP application · Media pipeline (ffprobe, FFmpeg, HLS)</div><div class="arrow">↕ Admission and media requests</div><div class="node">Participant browsers · React UI · Movi Player · JASSUB</div><div class="arrow">↕ Playback, chat, polls and presence</div><div class="node">WebSocket room control ↔ In-memory room registry and permissions</div><figcaption>Application components and principal data flows</figcaption></figure>
+<p>In public hosting, Caddy terminates HTTPS and forwards HTTP and WebSocket traffic to Node.js on loopback. The architecture requires a single application process because room state is not shared across replicas.</p>
+<table><thead><tr><th>Location</th><th>Responsibility</th></tr></thead><tbody>
+<tr><td><code>src/main.jsx</code>, <code>src/Hub.jsx</code></td><td>Frontend entry, room directory, and admission forms.</td></tr>
+<tr><td><code>src/room.jsx</code>, <code>src/Watch.jsx</code></td><td>Room context/reducer, connection state, and watch-page composition.</td></tr>
+<tr><td><code>src/Chat.jsx</code>, <code>src/Poll.jsx</code>, <code>src/Permissions.jsx</code></td><td>Communication, voting, participant and permission interfaces.</td></tr>
+<tr><td><code>src/Player.jsx</code>, <code>js/player/</code></td><td>React-to-player integration, synchronization, captions, quality, and fullscreen behavior.</td></tr>
+<tr><td><code>js/connection.js</code>, <code>js/host-files.js</code></td><td>Client transport and local-file provider.</td></tr>
+<tr><td><code>server.js</code>, <code>server/application.js</code></td><td>Startup, dependency discovery, HTTP/WebSocket composition, and shutdown.</td></tr>
+<tr><td><code>server/rooms.js</code>, <code>server/realtime.js</code>, <code>server/permissions.js</code></td><td>Room lifecycle, event handling, and authorization.</td></tr>
+<tr><td><code>server/source-relay.js</code>, <code>server/media/</code>, <code>server/http/</code></td><td>File relay, media processing, byte ranges, and endpoints.</td></tr>
+<tr><td><code>tests/</code>, <code>src/frontend.test.jsx</code></td><td>Backend/media and current React interface tests.</td></tr>
+<tr><td><code>deploy/</code>, <code>docs/</code></td><td>Hosting templates, screenshots, architecture, and validation records.</td></tr>
+<tr><td><code>dist/</code>, <code>vendor/</code></td><td>Generated production frontend and locally bundled third-party distributions.</td></tr>
+</tbody></table>
+<h2>8. UI/UX Design Screenshots or Wireframes</h2>
+<p>The following existing repository screenshots show the implemented interface with demonstration content. They illustrate layout and user flows; they are not new screenshots captured for this report or evidence of live public hosting.</p>
+<h3>Figure 1. Room selection</h3>
+<p><img alt="Room hub showing room cards, previews, and room creation and joining controls" src="screenshots/room-selection.png"></p>
+<p>The hub groups discovery and admission in one page. Room cards show context before entry, while invitations provide a direct route to a particular room.</p>
+<h3>Figure 2. Desktop watch room</h3>
+<p><img alt="Desktop WatchParty room with a video, participants, movie poll, and chat" src="screenshots/desktop-room.png"></p>
+<p>The desktop layout places video beside the social lounge. Connection status, invitations, room settings, participants, polls, and chat remain visible around the viewing area.</p>
+<h3>Figure 3. Mobile watch room</h3>
+<p><img src="screenshots/mobile-room.png" alt="Mobile WatchParty room with video above the social lounge and Chat and People tabs" width="390"></p>
+<p>The narrow layout stacks the video above the lounge and uses tabs to manage limited space. The recorded React migration checks include mobile and tablet emulation; physical-device testing remains necessary.</p>
+<h3>Figure 4. Viewer permission controls</h3>
+<p><img alt="Permission dialog with grouped controls for room defaults" src="screenshots/permissions.png"></p>
+<p>Grouped switches allow hosts to configure viewer capabilities. Individual overrides can inherit room defaults, reducing repetitive configuration.</p>
+<h2>9. Implementation Details</h2>
+<h3>Room admission and state</h3>
+<p>The room hub uses HTTP APIs to list, create, and join rooms. After admission, <code>RoomProvider</code> owns the control WebSocket and updates a reducer with identity, role, participants, permissions, polls, and chat. Browser identities use server-verified cookies rather than registered user accounts. Identities and admission are scoped to the site address, so localhost and a public deployment are separate environments.</p>
+<p>The server maintains playback time, paused state, speed, and update timestamps per room. It validates permissions before accepting shared actions and broadcasts accepted changes to participants. Room defaults and individual overrides determine each viewer's effective permissions.</p>
+<h3>Browser-owned media delivery</h3>
+<p>Selecting a file registers the browser as its provider. The server requests bounded ranges instead of waiting for a full upload. Original playback receives authenticated byte-range responses; compatibility playback obtains encoded HLS output. Host control and file ownership are separate: transferring hosting does not transfer the local file, and the original provider must remain connected.</p>
+<p>The application discovers usable FFmpeg and ffprobe executables at startup. ffprobe supplies structured media metadata, while FFmpeg performs conversions, thumbnail extraction, and encoding. Shared encoder budgeting limits simultaneous encoders; the default limit is two.</p>
+<h3>Playback, captions, and asynchronous work</h3>
+<p>The player chooses an appropriate playback path based on browser and media support, with compatibility streaming available when required. Adaptive quality uses observed media transfer, buffering, provider throughput, and encoder pressure. Quality and volume are local preferences, while authorized playback controls affect the room.</p>
+<p>Session identifiers, media versions, stream generations, and cancellation guard against stale requests after source changes or rapid seeks. Caption extraction is selective where supported, and JASSUB renders captions inside the player. Bitmap subtitles and OCR are outside the implemented caption support.</p>
+<h3>Frontend lifecycle and build</h3>
+<p>React manages the surrounding interface while a stable media adapter owns timing-sensitive player operations. Cleanup releases listeners, timers, requests, relays, and subtitle workers. Fullscreen portals preserve chat drafts and scroll position. Vite builds the frontend into <code>dist/</code>, copies vendor assets, and loads the watch page as a separate chunk.</p>
+<h2>10. Testing and Evaluation</h2>
+<h3>Checks performed for this report — November 10, 2026</h3>
+<table><thead><tr><th>Check</th><th>Result</th></tr></thead><tbody>
+<tr><td><code>npm.cmd run build</code></td><td>Passed; 48 modules transformed and production assets generated.</td></tr>
+<tr><td><code>npm.cmd run test:ui</code></td><td>Passed; 12 tests in one test file.</td></tr>
+<tr><td><code>npm.cmd test</code></td><td>Passed; 380 tests, zero failures, cancellations, or skips.</td></tr>
+</tbody></table>
+<p>The React suite covers admission and validation, retry feedback, storage failures, chat acknowledgments and draft retention, replies/reactions, movie-search fallback, voting, permissions, bounded history, and connection cleanup. Backend/media tests cover room isolation, authorization, source ranges, captions, playback, transcoding, seeking, quality, and related regressions.</p>
+<h3>Previously recorded evaluation</h3>
+<p><a href="react-frontend.md">React migration validation</a> records 380 backend/media tests and 12 React tests passing on November 5, 2026. Its two-session desktop Chrome checks verified room admission, chat, video loading, captions, permissions, host transfer, fullscreen draft retention, and responsive emulation.</p>
+<p><a href="webcodecs-validation.md">WebCodecs validation</a>, dated October 21, 2026, reports these three-run medians on a single local Windows/Chrome setup:</p>
+<table><thead><tr><th>Playback path</th><th>First frame</th><th>Seek after 30 seconds</th></tr></thead><tbody>
+<tr><td>Native MP4</td><td>166 ms</td><td>52 ms</td></tr>
+<tr><td>WebCodecs MKV</td><td>404 ms</td><td>1,965 ms</td></tr>
+<tr><td>Compatibility HLS</td><td>1,167 ms</td><td>209 ms</td></tr>
+</tbody></table>
+<p>All three paths met the stated timing targets in that experiment. However, original-file playback had already downloaded the short sample before those seeks, so these figures do not establish uncached seek performance. They also do not establish WAN or mobile performance. The validation document records sample, hardware, measurement, and audio limitations.</p>
+<p><a href="seek-validation.md">Seek validation</a> additionally records rapid-seek testing, including bursts of 20 seeks, stale-response handling, held-frame behavior, and actual Chrome/FFmpeg integration.</p>
+<h3>Evaluation still required</h3>
+<ul>
+<li>Test visible playback and audible sound on desktop Firefox/Safari, Android Chrome, and physical iPhone/iPad Safari devices.</li>
+<li>Exercise real network conditions, including limited provider upload, latency, disconnections, and multiple viewers.</li>
+<li>Confirm public HTTPS, cookies, WebSocket upgrades, media ranges, and invitations on the deployed release.</li>
+<li>Conduct representative user evaluation of admission, captions, chat, permissions, and mobile navigation.</li>
+</ul>
+<p>Automated DOM tests cannot establish visible decoding quality, audible output, or user satisfaction. No formal usability study or supported audience-capacity result is recorded in the reviewed documentation.</p>
+<h2>11. Deployment Information</h2>
+<h3>Local operation</h3>
+<p>Prerequisites are Node.js 24 or newer, npm, a compatible browser, and usable FFmpeg/ffprobe executables. Bundled executable packages provide fallbacks.</p>
+<pre><code>npm ci
+npm run dev</code></pre>
+<p>Development runs the Vite frontend at <code>http://localhost:5173</code> and the backend at port 3000. For a production build served locally:</p>
+<pre><code>npm run build
+npm start</code></pre>
+<p>Open <code>http://localhost:3000</code>. Windows PowerShell users can use <code>npm.cmd</code> if execution policy blocks <code>npm.ps1</code>.</p>
+<h3>Public hosting configuration</h3>
+<p>The repository documents an Ubuntu 24.04 VPS deployment for <code>https://ypothesi.space</code>, with Caddy for HTTPS and systemd for process management. Templates include <code>deploy/Caddyfile.public</code>, <code>deploy/watchparty.service</code>, and <code>deploy/watchparty.env.example</code>.</p>
+<p>The example production environment binds Node.js to <code>127.0.0.1:3000</code>, sets <code>TRUST_PROXY=loopback</code> and <code>PUBLIC_ORIGIN=https://ypothesi.space</code>, and limits encoders to two. The deployment guide includes release creation, checks, logging, updates, and rollback.</p>
+<p><strong>Deployment status:</strong> Configuration and procedures are available. Public DNS, certificates, current service availability, and the deployed application revision were not checked for this report. Local validation does not establish production deployment success.</p>
+<p>HTTPS is required for relevant secure-context browser capabilities on remote devices. Run one Node process; restarting it clears in-memory rooms and identities. The video provider's browser must remain connected even when the application server is hosted remotely.</p>
+<h2>12. Challenges Encountered and Solutions</h2>
+<p>These technical challenges and responses are evidenced by the current implementation and repository validation notes.</p>
+<table><thead><tr><th>Challenge</th><th>Implemented solution</th><th>Remaining consideration</th></tr></thead><tbody>
+<tr><td>Different browser codec capabilities</td><td>Native/WebCodecs playback plus FFmpeg/HLS compatibility paths.</td><td>Real-device decoding support and encoding capacity vary.</td></tr>
+<tr><td>Slow startup caused by full-file transfer</td><td>Browser-owned file relay with bounded range reads and caches.</td><td>Provider upload and connection stability still limit delivery.</td></tr>
+<tr><td>Old responses overwriting recent seeks or files</td><td>Generation/version checks, request cancellation, accepted-seek acknowledgments, and regression tests.</td><td>Continue testing against actual player upgrades.</td></tr>
+<tr><td>Flicker or lost time labels during seeks</td><td>Bounded held-frame overlay and isolated player presentation hooks.</td><td>Hooks depend on the pinned Movi integration.</td></tr>
+<tr><td>Expensive embedded-caption discovery</td><td>Selective container reads, lazy extraction, and separate caption metrics.</td><td>Unindexed containers and unsupported subtitle types remain limited.</td></tr>
+<tr><td>Conflicting controls and disruptive participants</td><td>Server-side permissions, room defaults, per-user overrides, and moderation.</td><td>State is session-based and resets with the room/server.</td></tr>
+<tr><td>Host interruption or refresh</td><td>Reconnect grace period, reassignment, and verified creator restoration.</td><td>Losing the active file provider ends the selected video.</td></tr>
+<tr><td>React integration with an imperative media player</td><td>Stable adapter state, cleanup ownership, and lifecycle tests.</td><td>Vendor hooks require verification on upgrades.</td></tr>
+<tr><td>Fullscreen moving chat out of its original layout</td><td>Stable portals retain composer state and scroll position.</td><td>Native video Picture-in-Picture cannot include the separate chat/caption surfaces.</td></tr>
+</tbody></table>
+<p>The next priorities are cross-browser and physical-device validation, production verification, realistic bandwidth/load measurements, and user feedback. Persistent rooms or chat and multi-process operation would require additional architecture if adopted as future requirements.</p>
+<h2>13. References</h2>
+<ol>
+<li><a href="../README.md">Project README</a> — purpose, features, team contributions, setup, and operating limitations.</li>
+<li><a href="../package.json">Package manifest</a> — declared dependencies, runtime requirement, and scripts.</li>
+<li><a href="react-frontend.md">React frontend architecture and migration validation</a> — components, lifecycle, build, and recorded checks.</li>
+<li><a href="rooms.md">Room API and behavior</a> — room admission, shared actions, and protocol behavior.</li>
+<li><a href="webcodecs-validation.md">WebCodecs validation</a> — local playback measurements and HTTPS checks.</li>
+<li><a href="seek-validation.md">Seek presentation and ffprobe validation</a> — seek regressions and media inspection.</li>
+<li><a href="deployment.md">Deployment guide</a> — VPS provisioning, release installation, verification, and rollback.</li>
+<li><a href="https.md">HTTPS guide</a> — secure-context and reverse-proxy setup.</li>
+<li><a href="screenshots/">Screenshot directory</a> — existing UI captures used in this report.</li>
+<li><a href="../vendor/MOVI_PLAYER_LICENSE.txt">Movi Player license</a> and <a href="../vendor/jassub/LICENSE.txt">JASSUB license</a> — bundled third-party acknowledgments.</li>
+</ol>
+<p>All implementation and evaluation claims in this report are based on the local project files and the checks identified above. The report does not rely on a live external-service audit.</p></main></body></html>

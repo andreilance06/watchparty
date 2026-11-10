@@ -111,10 +111,10 @@ test("the root serves a separate hub, player bookmarks redirect, and the directo
   assert.equal((await (await fetch(base + "/api/rooms")).json()).rooms[1].participantCount, 1);
   assert.equal(room.state.clients.size, 1);
   const hub = await (await fetch(base)).text();
-  assert.match(hub, /src="\/js\/hub\.js"/);
+  assert.match(hub, /src="\/assets\/[^\"]+\.js"/);
   assert.doesNotMatch(hub, /movi-player|js\/app\.js|access code/i);
   const player = await (await fetch(base + created.body.room.watchPath)).text();
-  assert.match(player, /<movi-player/);
+  assert.equal(player, hub, "hub and watch load the same React entry; the URL selects the page");
   assert.doesNotMatch(player, /id="roomEntry"|id="roomGrid"|access code/i);
   const old = await fetch(base + `/?roomId=${room.id}`, { redirect: "manual" });
   assert.equal(old.status, 302);
@@ -166,7 +166,7 @@ test("room creators retain hosting and all features stay inside their room", asy
   assert.equal(app.rooms.get(two.body.room.id).state.videoSuggestions.length, 0);
   assert.equal(app.rooms.get(two.body.room.id).state.videoVotes.size, 0);
   viewer.send({ type: "source-register", video: { id: "video", name: "movie.mkv", size: 100 } });
-  assert.match((await viewer.next("error")).message, /Only the room host/);
+  assert.match((await viewer.next("error")).message, /permission/);
   host.ws.close();
   await viewer.next("host-left");
   assert.equal((await viewer.next("role")).role, "host");

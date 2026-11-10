@@ -26,18 +26,30 @@ test("HTTP modules, chat names, host-only file sharing, and host handoff work to
   const html = await (await fetch(base + "/watch")).text();
   const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
   assert.equal(new Set(ids).size, ids.length, "HTML IDs must be unique");
-  assert.equal((html.match(/class="vote-panel"/g) || []).length, 1);
-  const modules = ["js/app.js", "js/chat.js", "js/emoji-picker.js", "js/party.js", "js/voting.js", "js/room-controls.js", "js/hub.js", "js/theme.js", "js/connection.js", "js/player/controller.js", "js/player/sync.js", "js/player/fullscreen.js", "js/player/subtitles.js"];
-  for (const file of modules) {
-    const response = await fetch(`${base}/${file}`);
+  assert.match(html, /id="root"/);
+  assert.match(html, /src="\/assets\/[^\"]+\.js"/);
+  const scripts = [...html.matchAll(/src="([^\"]+\.js)"/g)].map(match => match[1]);
+  for (const file of scripts) {
+    const response = await fetch(`${base}${file}`);
     assert.equal(response.status, 200, file);
     assert.match(response.headers.get("content-type"), /javascript/);
   }
-  for (const file of ["base", "layout", "player", "chat", "voting", "hub", "responsive"]) {
-    const response = await fetch(`${base}/css/${file}.css`, { method: "HEAD" });
+  const styles = [...html.matchAll(/href="([^\"]+\.css)"/g)].map(match => match[1]);
+  assert.ok(styles.length);
+  for (const file of styles) {
+    const response = await fetch(`${base}${file}`, { method: "HEAD" });
     assert.equal(response.status, 200, file);
     assert.match(response.headers.get("content-type"), /text\/css/);
     assert.equal(await response.text(), "");
+    assert.match(response.headers.get("cache-control"), /immutable/);
+  }
+  for (const file of ["/js/app.js", "/src/main.jsx", "/api/missing", "/assets/missing.js"]) {
+    assert.equal((await fetch(base + file)).status, 404, file);
+  }
+  for (const file of ["/vendor/movi.wasm", "/vendor/jassub/worker.js", "/vendor/jassub/jassub-worker.wasm"]) {
+    const response = await fetch(base + file, { method: "HEAD" });
+    assert.equal(response.status, 200, file);
+    assert.match(response.headers.get("content-type"), file.endsWith(".wasm") ? /application\/wasm/ : /javascript/);
   }
   const logo = await fetch(`${base}/assets/images/logo/logo_watchparty.png`);
   assert.equal(logo.status, 200);
@@ -133,7 +145,7 @@ test("HTTP modules, chat names, host-only file sharing, and host handoff work to
   });
   assert.equal(denied.status, 410);
   viewer.send({ type: "source-register", video: { id: "file", name: "movie.mkv", size: 100 }, captions: [] });
-  assert.match((await viewer.next("error")).message, /Only the room host/);
+  assert.match((await viewer.next("error")).message, /permission/);
   host.ws.close();
   await viewer.next("host-left");
   assert.equal((await viewer.next("role")).role, "host");

@@ -6,7 +6,7 @@ const QUICK_REACTIONS = [
   ["\ud83d\udc4f", "applause"], ["\ud83c\udf89", "celebration"]
 ];
 
-export function createMessageMenu({ menu, onReply, onReact, beforeOpen }) {
+export function createMessageMenu({ menu, onReply, onReact, beforeOpen, canReply = () => true, canReact = () => true }) {
   let active = null, press = null, focusIndex = 0, suppressClickUntil = 0, suppressedArticle = null;
   let expanded = false, openingPoint = null;
   const reactions = [];
@@ -27,7 +27,7 @@ export function createMessageMenu({ menu, onReply, onReact, beforeOpen }) {
     button.tabIndex = -1;
     button.addEventListener("click", () => {
       const comment = active;
-      if (!comment) return;
+      if (!comment || button.disabled) return;
       const stayOpen = keepOpen || expanded && button.classList.contains("message-menu-reaction");
       if (!stayOpen) close(true);
       action(comment);
@@ -63,7 +63,7 @@ export function createMessageMenu({ menu, onReply, onReact, beforeOpen }) {
   const reply = addItem(menu, "\u21a9  Reply", "message-menu-action", onReply);
 
   function visibleItems() {
-    return [...quick.children, ...(expanded ? [...extra.children] : []), reply];
+    return [...quick.children, ...(expanded ? [...extra.children] : []), reply].filter(item => !item.disabled);
   }
 
   function setExpanded(next) {
@@ -84,7 +84,9 @@ export function createMessageMenu({ menu, onReply, onReact, beforeOpen }) {
 
   function refresh(comment = active) {
     if (!active || active !== comment) return;
+    reply.disabled = !canReply(); more.disabled = !canReact();
     for (const { button, emoji, label } of reactions) {
+      button.disabled = !canReact();
       const selected = comment.myReaction === emoji;
       button.classList.toggle("selected", selected);
       button.setAttribute("aria-label", selected ? `Remove your ${label} reaction` : `React with ${label}`);
@@ -93,9 +95,10 @@ export function createMessageMenu({ menu, onReply, onReact, beforeOpen }) {
 
   function focusItem(index, reveal = true) {
     const items = visibleItems();
+    if (!items.length) return;
     focusIndex = (index + items.length) % items.length;
     items.forEach((item, i) => { item.tabIndex = i === focusIndex ? 0 : -1; });
-    items[focusIndex].focus({ preventScroll: true });
+    items[focusIndex]?.focus({ preventScroll: true });
     if (reveal && items[focusIndex].parentNode === extra) {
       const box = extra.getBoundingClientRect(), target = items[focusIndex].getBoundingClientRect();
       if (target.top < box.top) extra.scrollTop -= box.top - target.top;
@@ -151,6 +154,7 @@ export function createMessageMenu({ menu, onReply, onReact, beforeOpen }) {
     if (restoreFocus && comment?.article.isConnected) comment.article.focus({ preventScroll: true });
   }
   function open(comment, point) {
+    if (!canReply() && !canReact()) { close(); return; }
     cancelPress();
     beforeOpen();
     close();
@@ -164,7 +168,7 @@ export function createMessageMenu({ menu, onReply, onReact, beforeOpen }) {
   }
   function dismissOnLayout(event) {
     cancelPress();
-    if (!menu.contains(event.target)) close();
+    if (event.target === window || event.target === window.visualViewport || !menu.contains(event.target)) close();
   }
   window.addEventListener("scroll", dismissOnLayout, true);
   window.addEventListener("resize", dismissOnLayout);

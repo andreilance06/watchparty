@@ -9,7 +9,7 @@ async function setup(t, batchReads) {
   const config = createConfig({ sourceChunkBytes: 16, sourceMaxReads: 1, sourceReadTimeoutMs: 500 });
   const bridge = createSourceBridge(config); await bridge.listen(); t.after(() => bridge.close());
   const messages = [], owner = { clientId: "host" }, state = createSession();
-  state.hostId = "host"; state.clients.set("host", { ws: owner });
+  state.hostId = "host"; state.clients.set("host", { ws: owner, role: "host" });
   let reader;
   const room = { state, transport: { send: (_ws, message) => messages.push(message), broadcast() {} },
     media: { select(url) { state.mediaPath = url; }, prepare(_url, _captions, input) { reader = input; }, reset() {} } };

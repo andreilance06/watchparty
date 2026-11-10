@@ -65,6 +65,10 @@
           </div>
           <p id="nameStatus" class="control-help" role="status" aria-live="polite"></p>
         </form>
+        <div id="roomSettingsSection" class="room-menu-settings" hidden>
+          <h2>Room settings</h2>
+          <button id="viewerPermissionsButton" class="room-menu-action" type="button" hidden>Viewer permissions</button>
+        </div>
         <div class="room-menu-leave">
           <button id="roomActionButton" class="room-action-button" type="button">Leave room</button>
           <span id="roomActionStatus" class="room-action-status" role="status" aria-live="polite"></span>
@@ -226,6 +230,12 @@
     </aside>
   </main>
 
+  <dialog id="viewerPermissionsDialog" class="permissions-dialog" aria-labelledby="viewerPermissionsTitle">
+    <div class="permissions-dialog-heading"><div><p class="eyebrow">ROOM SETTINGS</p><h2 id="viewerPermissionsTitle">Viewer permissions</h2></div><button id="closeViewerPermissions" type="button" aria-label="Close viewer permissions">Close</button></div>
+    <p>Defaults apply to everyone without an individual override. Select a participant to customize their permissions.</p>
+    <div id="roomPermissionFields"></div>
+    <p id="roomPermissionStatus" role="status" aria-live="polite"></p>
+  </dialog>
   <footer class="site-footer">
     <span>WatchParty</span>
     <span>•</span>

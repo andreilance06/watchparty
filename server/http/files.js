@@ -41,7 +41,8 @@ function serveStatic(req, res, url, publicDirectory) {
     }
     res.writeHead(200, {
       "Content-Type": MIME_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream",
-      "Cache-Control": "no-store"
+      "Cache-Control": /[.-][\w-]{8,}\.(?:js|css)$/.test(requested) && requested.startsWith("assets/")
+        ? "public, max-age=31536000, immutable" : "no-store"
     });
     if (req.method === "HEAD") res.end(); else res.end(data);
   });

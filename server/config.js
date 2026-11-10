@@ -12,7 +12,7 @@ function createConfig(overrides = {}) {
   const config = {
     port: Number(process.env.PORT) || 3000,
     host: process.env.HOST || "0.0.0.0",
-    publicDirectory: path.resolve(__dirname, ".."),
+    publicDirectory: path.resolve(__dirname, "../dist"),
     segmentSeconds: 2,
     maxSegmentsAhead: 2,
     maxEncoders: process.env.WATCHPARTY_MAX_ENCODERS === undefined ? 2 : Number(process.env.WATCHPARTY_MAX_ENCODERS),

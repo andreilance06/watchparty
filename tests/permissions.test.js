@@ -6,13 +6,13 @@ const http = require("node:http");
 const WebSocket = require("ws");
 const { createSession } = require("../server/state");
 const { createMessageHandler } = require("../server/messages");
-const { DEFAULT_PERMISSIONS, permissionsFor, promoteHost } = require("../server/permissions");
+const { DEFAULT_PERMISSIONS, HOST_PERMISSIONS, permissionsFor, promoteHost } = require("../server/permissions");
 const { createApplication } = require("../server/application");
 const { CPU_ENCODER } = require("../server/encoders");
 const { connectPeer } = require("./helpers/peer");
 const { createBrowserDouble } = require("./helpers/browser");
 const flush = () => new Promise(resolve => setImmediate(resolve));
-const all = { playPause: true, seek: true, playbackRate: true };
+const all = { ...DEFAULT_PERMISSIONS, playPause: true, seek: true, playbackRate: true };
 
 function handlerFixture() {
   const state = createSession(), sent = [], broadcasts = [];
@@ -35,7 +35,7 @@ test("only the current host may edit valid permissions for a connected viewer", 
   const f = handlerFixture();
   for (const [id, target, permissions] of [
     ["viewer", "viewer", all], ["host", "host", all], ["host", "missing", all],
-    ["host", "viewer", { ...all, seek: "true" }], ["host", "viewer", { seek: true }],
+    ["host", "viewer", { ...all, seek: "true" }], ["host", "viewer", {}],
     ["host", "viewer", { ...all, admin: true }]
   ]) {
     f.message(id, { type: "set-viewer-permissions", clientId: target, permissions });
@@ -43,9 +43,10 @@ test("only the current host may edit valid permissions for a connected viewer", 
     assert.equal(f.state.viewerPermissions.size, 0);
   }
   f.grant(all);
-  assert.deepEqual(f.broadcasts.at(-1), { type: "permissions-updated", clientId: "viewer", permissions: all });
+  assert.deepEqual(f.broadcasts.at(-1).permissions, all);
+  assert.deepEqual(f.broadcasts.at(-1).permissionOverrides, all);
   assert.deepEqual(permissionsFor(f.state, f.state.clients.get("other"), "other"), DEFAULT_PERMISSIONS);
-  assert.deepEqual(permissionsFor(f.state, f.state.clients.get("host"), "host"), all);
+  assert.deepEqual(permissionsFor(f.state, f.state.clients.get("host"), "host"), HOST_PERMISSIONS);
 });
 
 test("viewer commands change only the authorized part of shared playback", () => {
@@ -246,10 +247,10 @@ test("participant dropdown confirms permission updates and restores focus on dis
   assert.equal(trigger.getAttribute("aria-expanded"), "true");
   assert.equal(el("participantDropdown").parentNode, b.document.body);
   const switches = () => el("participantDetails").children.filter(child => child.className === "permission-switch").map(label => label.children[1]);
-  assert.deepEqual(switches().map(input => input.checked), [true, false, false]);
+  assert.deepEqual(switches().map(input => input.checked), Object.values(DEFAULT_PERMISSIONS));
   switches()[1].checked = true; switches()[1].dispatch("change");
   assert.equal(socket.sent.at(-1).type, "set-viewer-permissions");
-  assert.deepEqual(socket.sent.at(-1).permissions, { ...DEFAULT_PERMISSIONS, seek: true });
+  assert.deepEqual(socket.sent.at(-1).permissions, { seek: true });
   assert.equal(switches()[1].checked, false);
   assert.ok(switches().every(input => input.disabled));
   socket.receive({ type: "permissions-updated", clientId: "viewer", permissions: { ...DEFAULT_PERMISSIONS, seek: true } });
@@ -402,4 +403,129 @@ test("HLS user seeks respect permissions while internal recovery stays local", a
   video.player.seek(30);
   assert.deepEqual(seeks, [8, 30]);
   assert.equal(socket.sent.at(-1).syncMode, "seek"); assert.equal(socket.sent.at(-1).time, 30);
+});
+
+
+test("browser and server catalogs agree on all nineteen capabilities", async () => {
+  const browser = createBrowserDouble();
+  const frontend = await browser.load("js/permissions.js");
+  assert.deepEqual(JSON.parse(JSON.stringify(frontend.DEFAULT_PERMISSIONS)), DEFAULT_PERMISSIONS);
+  assert.equal(Object.keys(DEFAULT_PERMISSIONS).length, 19);
+});
+
+test("room defaults, overrides and resets propagate across browser tabs without crossing rooms", () => {
+  const f = handlerFixture();
+  f.state.clients.set("tab", { role: "viewer", permissionIdentity: "browser:viewer" });
+  f.message("host", { type: "set-room-permissions", permissions: { sendChat: false, seek: true }, requestId: "defaults" });
+  assert.equal(permissionsFor(f.state, f.state.clients.get("viewer"), "viewer").sendChat, false);
+  f.grant({ sendChat: true, seek: false });
+  f.message("host", { type: "set-room-permissions", permissions: { seek: false, vote: false } });
+  assert.equal(permissionsFor(f.state, f.state.clients.get("tab"), "tab").sendChat, true);
+  f.grant({ sendChat: null });
+  assert.equal(permissionsFor(f.state, f.state.clients.get("tab"), "tab").sendChat, false);
+  f.message("host", { type: "reset-viewer-permissions", clientId: "viewer", requestId: "reset" });
+  assert.equal(f.state.viewerPermissions.size, 0);
+  assert.equal(f.broadcasts.at(-1).requestId, "reset");
+  const other = handlerFixture();
+  assert.equal(permissionsFor(other.state, other.state.clients.get("viewer"), "viewer").sendChat, true);
+  for (const permissions of [{ seek: true, admin: true }, { sendChat: null }, [], {}, { vote: 1 }]) {
+    const before = { ...f.state.roomPermissions };
+    f.message("host", { type: "set-room-permissions", permissions });
+    assert.equal(f.sent.at(-1).type, "error");
+    assert.deepEqual(f.state.roomPermissions, before);
+  }
+  f.message("viewer", { type: "set-room-permissions", permissions: { sendChat: true } });
+  assert.equal(f.sent.at(-1).type, "error");
+  promoteHost(f.state, "viewer");
+  assert.deepEqual(permissionsFor(f.state, f.state.clients.get("viewer"), "viewer"), HOST_PERMISSIONS);
+});
+
+test("interaction actions reject revoked permissions before mutating state and accept grants", () => {
+  const scenarios = [
+    ["sendChat", { type: "chat", message: "Hello", requestId: "draft" }],
+    ["replyChat", { type: "chat", message: "Reply", replyToId: "original", requestId: "reply" }],
+    ["reactMessages", { type: "comment-reaction", commentId: "12345678-1234-1234-1234-123456789012", emoji: "\u2764\ufe0f" }],
+    ["globalReactions", { type: "reaction", emoji: "\u2764\ufe0f" }],
+    ["changeName", { type: "set-name", name: "New name" }],
+    ["startPoll", { type: "start-video-poll" }],
+    ["finishPoll", { type: "finish-video-poll", pollId: "poll" }],
+    ["suggestTitles", { type: "suggest-video", pollId: "poll", title: "Arrival" }],
+    ["vote", { type: "vote-video", pollId: "poll", suggestionId: 1 }]
+  ];
+  for (const [key, action] of scenarios) {
+    const f = handlerFixture();
+    f.state.poll = { id: "poll", status: "open" };
+    f.state.videoSuggestions = [{ id: 1, title: "A", ownerId: "other" }];
+    f.state.comments.set("original", { commentId: "original", name: "Other", message: "Original" });
+    f.state.commentReactions.set("12345678-1234-1234-1234-123456789012", new Map());
+    if (key === "startPoll") f.state.poll.status = "idle";
+    f.grant({ [key]: false });
+    const before = f.broadcasts.length;
+    f.message("viewer", action);
+    assert.equal(f.sent.at(-1).code, "PERMISSION_DENIED", key);
+    assert.equal(f.sent.at(-1).requestId, action.requestId);
+    assert.equal(f.broadcasts.length, before, key);
+    f.grant({ [key]: true });
+    f.message("viewer", action);
+    assert.notEqual(f.sent.at(-1).code, "PERMISSION_DENIED", key);
+  }
+});
+
+test("suggestions without voting grants do not cast votes and removal honors both permissions", () => {
+  const f = handlerFixture();
+  f.state.poll = { id: "poll", status: "open" };
+  f.grant({ vote: false });
+  f.message("viewer", { type: "suggest-video", pollId: "poll", title: "Arrival" });
+  assert.equal(f.state.videoSuggestions.length, 1);
+  assert.equal(f.state.videoVotes.size, 0);
+  const action = { type: "remove-video-suggestion", pollId: "poll", suggestionId: 1 };
+  f.grant({ removeOwnSuggestions: false }); f.message("viewer", action);
+  assert.equal(f.state.videoSuggestions.length, 1);
+  f.grant({ removeAnySuggestion: true }); f.message("viewer", action);
+  assert.equal(f.state.videoSuggestions.length, 0);
+});
+
+test("room permissions UI submits patches, waits for acknowledgement and restores inheritance", async () => {
+  const b = createBrowserDouble(); await b.load("js/app.js");
+  const socket = b.sockets[0], el = id => b.elements.get(id);
+  socket.open(); socket.receive({ type: "role", role: "host", clientId: "host" });
+  assert.equal(el("roomSettingsSection").hidden, false);
+  const input = el("roomPermissionFields").children.find(child => child.className === "permission-switch").children[1];
+  input.checked = false; input.dispatch("change");
+  const command = socket.sent.at(-1);
+  assert.equal(command.type, "set-room-permissions");
+  assert.deepEqual(command.permissions, { playPause: false });
+  assert.equal(input.checked, true); assert.equal(input.disabled, true);
+  socket.receive({ type: "permissions-updated", clientId: "host", requestId: command.requestId, roomPermissions: { ...DEFAULT_PERMISSIONS, playPause: false }, permissions: HOST_PERMISSIONS });
+  assert.equal(input.checked, false); assert.equal(input.disabled, false);
+  socket.receive({ type: "role", role: "viewer", clientId: "viewer", permissions: { ...DEFAULT_PERMISSIONS, sendChat: false, changeName: false } });
+  assert.equal(el("viewerPermissionsButton").hidden, true);
+  assert.equal(el("roomSettingsSection").hidden, true);
+  assert.equal(el("displayNameInput").disabled, true);
+  el("chatInput").value = "Retain my draft"; el("chatForm").dispatch("submit");
+  assert.equal(el("chatInput").value, "Retain my draft");
+  assert.equal(socket.sent.at(-1).type, "set-room-permissions");
+});
+
+
+test("a revoked display-name grant cannot be bypassed by public reconnection or private readmission", async t => {
+  const f = await serverFixture(t);
+  const host = await f.connect();
+  const identity = (await f.api("/api/viewer-identity")).cookie;
+  let viewer = await f.connect("/", identity, "Original");
+  host.send({ type: "set-viewer-permissions", clientId: viewer.role.clientId, permissions: { changeName: false } });
+  await viewer.next("permissions-updated");
+  await f.close(viewer);
+  viewer = await f.connect("/", identity, "Forged");
+  assert.equal(viewer.role.name, "Original");
+  const created = await f.api("/api/rooms", { name: "Names" });
+  const privateHost = await f.connect(created.body.endpoints.websocket, created.cookie, "Owner");
+  let membership = await f.api("/api/rooms/join", { roomId: created.body.room.id, displayName: "Private original" }, identity);
+  let privateViewer = await f.connect(membership.body.endpoints.websocket, `${membership.cookie}; ${identity}`, "Ignored");
+  await f.grant(privateHost, privateViewer, { changeName: false });
+  await f.api(`/rooms/${created.body.room.id}/api/leave`, {}, `${membership.cookie}; ${identity}`);
+  await f.close(privateViewer);
+  membership = await f.api("/api/rooms/join", { roomId: created.body.room.id, displayName: "Forged private name" }, identity);
+  privateViewer = await f.connect(membership.body.endpoints.websocket, `${membership.cookie}; ${identity}`, "Forged again");
+  assert.equal(privateViewer.role.name, "Private original");
 });

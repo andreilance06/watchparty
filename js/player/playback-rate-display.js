@@ -3,7 +3,8 @@ const CONTROL_ID = "watchparty-playback-rate";
 // Keep sync corrections out of Movi's large OSD without changing its bundle.
 export function createPlaybackRateDisplay(video) {
   let silent = false, label;
-  const showOSD = video.showOSD?.bind(video);
+  const originalShowOSD = video.showOSD;
+  const showOSD = originalShowOSD?.bind(video);
   video.showOSD = (icon, text, ...args) => {
     if (silent && text === `${video.playbackRate}x`) return;
     return showOSD?.(icon, text, ...args);
@@ -25,6 +26,7 @@ export function createPlaybackRateDisplay(video) {
   video.addEventListener("ratechange", update);
   update();
   return {
+    destroy() { video.removeEventListener("ratechange", update); video.showOSD = originalShowOSD; video.removeControl?.(CONTROL_ID); },
     apply(rate) {
       silent = true;
       try { video.playbackRate = rate; }

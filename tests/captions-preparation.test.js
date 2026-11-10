@@ -13,7 +13,7 @@ async function setup(options) {
   const { createSubtitles } = await browser.load('js/player/subtitles.js');
   const video = browser.elements.get('video'), errors = [];
   const subtitles = createSubtitles({ elements: { video }, report: error => errors.push(error) });
-  const notice = () => video.overlays.get('watchparty-caption-status')?.content.querySelector('.watchparty-caption-status-text').textContent;
+  const notice = () => video.overlays.get('watchparty-playback-status')?.content.querySelector('.watchparty-caption-status-text').textContent;
   subtitles.setAvailability({ hasVideo: true });
   const menuStatus = () => video.shadowRoot.querySelector('.movi-subtitle-track-list').querySelector('.watchparty-caption-status-text').textContent;
   return { browser, video, subtitles, errors, notice, menuStatus };
@@ -30,9 +30,9 @@ test('caption status waits for content, fonts, and the worker while playback sta
   };
   b.subtitles.setTracks([{ id: 'one', url: '/one.ass', fonts: ['/font.ttf'] }], { reset: true, key: 'one' });
   assert.equal(b.notice(), 'Loading captions and fonts…');
-  assert.equal(b.video.overlays.get('watchparty-caption-status').interactive, false);
+  assert.equal(b.video.overlays.get('watchparty-playback-status').interactive, false);
   assert.equal(b.menuStatus(), 'Loading captions and fonts…');
-  const notice = b.video.overlays.get('watchparty-caption-status').content;
+  const notice = b.video.overlays.get('watchparty-playback-status').content;
   const root = b.video.shadowRoot;
   const list = root.querySelector('.movi-subtitle-track-list');
   const context = root.querySelector('.movi-context-menu-submenu-subtitle');
@@ -54,7 +54,7 @@ test('caption status waits for content, fonts, and the worker while playback sta
   assert.equal(b.notice(), 'Starting caption renderer…', 'worker still initializing');
   assert.equal(b.menuStatus(), 'Starting caption renderer…');
   assert.equal(context.querySelector('.watchparty-caption-status-text').textContent, b.menuStatus());
-  assert.equal(b.video.overlays.get('watchparty-caption-status').content, notice);
+  assert.equal(b.video.overlays.get('watchparty-playback-status').content, notice);
   assert.equal(notice.querySelector('.movi-subtitle-pending'), spinner);
   assert.equal(list.querySelector('[role="status"]'), footer);
   assert.equal(root.querySelector('.movi-subtitle-track-btn'), button);
@@ -115,7 +115,7 @@ test('caption failures leave playback available and a failed track can be retrie
   await flush();
   assert.equal(b.notice(), 'Could not prepare captions');
   assert.equal(b.menuStatus(), 'Could not prepare captions');
-  assert.equal(b.video.overlays.get('watchparty-caption-status').content.querySelector('.movi-subtitle-pending'), null);
+  assert.equal(b.video.overlays.get('watchparty-playback-status').content.querySelector('.movi-subtitle-pending'), null);
   assert.equal(b.video.shadowRoot.querySelector('.movi-subtitle-track-list').querySelector('.movi-subtitle-pending'), null);
   assert.match(b.errors[0], /Could not load captions/);
   await b.video.play(); assert.equal(b.video.paused, false);

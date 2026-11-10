@@ -8,6 +8,7 @@ export function createJassubAdapter({ video, report, loadContent, onState = () =
   let selected = null, destroyed = false, signature = "", lastHook = -Infinity;
   let status = "off";
   const fonts = new Map();
+  const fontRequests = new AbortController();
   const surface = document.createElement("div");
   Object.assign(surface.style, { position: "relative", width: "100%", height: "100%", pointerEvents: "none" });
   const observer = globalThis.ResizeObserver ? new ResizeObserver(() => refresh()) : null;
@@ -52,7 +53,7 @@ export function createJassubAdapter({ video, report, loadContent, onState = () =
   }
   function refresh() { signature = ""; layout(); renderer?.resize(true).catch(() => {}); }
   function loadFont(url) {
-    if (!fonts.has(url)) fonts.set(url, fetch(url).then(async (response) => {
+    if (!fonts.has(url)) fonts.set(url, fetch(url, { signal: fontRequests.signal }).then(async (response) => {
       if (!response.ok) throw new Error("Font is unavailable.");
       return new Uint8Array(await response.arrayBuffer());
     }).catch((error) => { fonts.delete(url); throw error; }));
@@ -115,6 +116,7 @@ export function createJassubAdapter({ video, report, loadContent, onState = () =
     setDelay(value) { delay = value; signature = ""; },
     clear() { signature = ""; },
     async destroy() {
+      fontRequests.abort(); fonts.clear();
       if (destroyed) return;
       destroyed = true; generation++; selected = null;
       fonts.clear();

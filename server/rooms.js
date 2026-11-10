@@ -80,6 +80,8 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
     for (const client of room.state.clients.values()) client.ws.terminate();
     room.members.clear();
     room.state.viewerPermissions.clear();
+    room.state.viewerNames.clear();
+    room.state.roomPermissions = {};
     room.state.blockedParticipants.clear();
     for (const responses of room.activeResponses.values()) for (const response of responses) response.destroy();
     room.activeResponses.clear();

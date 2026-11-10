@@ -1,6 +1,7 @@
 // Isolate the same pinned Movi Settings hooks used by native-caption-menu.
 // The vendor bundle and decoder APIs remain untouched.
 export function createNativeQualityMenu({ video, onChange }) {
+  const hooks = [];
   let state = {}, qualitySelect, bitrateSlider, bitrateAuto, bitrateLabel, auto, status, container;
   let dragging = false, lastManual, previousResolution = "auto";
   let pointerId = null, suppressChange = false;
@@ -181,8 +182,11 @@ export function createNativeQualityMenu({ video, onChange }) {
     if (status.textContent !== (state.status || "")) status.textContent = state.status || "";
   }
   function hook(name, replacement) {
-    const original = video[name]?.bind(video);
-    video[name] = (...args) => replacement(original, ...args);
+    const method = video[name];
+    const original = method?.bind(video);
+    const wrapped = (...args) => replacement(original, ...args);
+    video[name] = wrapped;
+    hooks.push(() => { if (video[name] === wrapped) video[name] = method; });
   }
   hook("updateQualityMenu", original => state.enabled ? render() : original?.());
   hook("settingsRowAvailable", (original, selector, items) => selector === ".movi-quality-container" && state.enabled ? true : original?.(selector, items));
@@ -216,7 +220,7 @@ export function createNativeQualityMenu({ video, onChange }) {
     if (state.enabled && video._settingsPage === "quality" && video.shadowRoot?.querySelector(".movi-settings-menu.is-open")) video.showControls?.();
     else original?.();
   });
-  return { update(next) {
+  return { destroy() { endDrag(); for (const restore of hooks.splice(0).reverse()) restore(); container?.remove(); }, update(next) {
     if (next.mediaVersion !== state.mediaVersion || !next.enabled) {
       if (dragging || pointerId != null) suppressChange = true;
       endDrag();

@@ -1,3 +1,4 @@
+import { can } from "./permissions.js";
 import { createClientId } from "./utils/client-id.js";
 
 // File objects stay in this browser. The server can request only declared ranges.
@@ -8,7 +9,8 @@ export function createHostFiles({ send, report }) {
   let activeReads = 0;
   let relay, sourceId = null, role = "viewer", generation = 0;
   let activeSourceId = null;
-  let picker = null;
+  let picker = null, permissions;
+  const allowed = key => can({ role, permissions }, key);
   const captionPattern = /\.(srt|vtt|ass|ssa)$/i;
 
   function clear(closeRelay = true) {
@@ -61,7 +63,8 @@ export function createHostFiles({ send, report }) {
   }
 
   function pick(accept, onFiles) {
-    if (role !== "host") return Promise.resolve();
+    const permission = onFiles === selectFiles ? "chooseVideo" : "addCaptions";
+    if (!allowed(permission)) return Promise.resolve();
     if (picker) return picker.promise;
     const current = generation, target = activeSourceId;
     let resolve, focusTimer;
@@ -70,7 +73,7 @@ export function createHostFiles({ send, report }) {
     input.type = "file"; input.multiple = true; input.accept = accept;
     input.hidden = true;
     document.body.appendChild(input);
-    const stillCurrent = () => current === generation && target === activeSourceId && role === "host";
+    const stillCurrent = () => current === generation && target === activeSourceId && allowed(permission);
     function finish(chosen = []) {
       clearTimeout(focusTimer);
       window.removeEventListener("focus", refocused);
@@ -80,7 +83,7 @@ export function createHostFiles({ send, report }) {
       if (picker?.promise === promise) picker = null;
       if (!stillCurrent() || !chosen.length) { resolve(); return; }
       Promise.resolve().then(() => { if (stillCurrent()) return onFiles(chosen); })
-        .catch(error => { if (role === "host" && (onFiles === selectFiles || stillCurrent())) report(error.message); }).finally(resolve);
+        .catch(error => { if (allowed(permission) && (onFiles === selectFiles || stillCurrent())) report(error.message); }).finally(resolve);
     }
     const change = () => finish([...(input.files || [])]);
     const cancel = () => finish();
@@ -101,6 +104,7 @@ export function createHostFiles({ send, report }) {
     const videos = chosen.filter((file) => !captionPattern.test(file.name));
     const captions = chosen.filter((file) => captionPattern.test(file.name));
     if (videos.length !== 1 || captions.length > 8) throw new Error("Choose one video and up to eight caption files.");
+    if (captions.length && !allowed("addCaptions")) throw new Error("You do not have permission to add captions.");
     if (chosen.some((file) => !file.size)) throw new Error("Selected files must not be empty.");
     const previous = relay;
     // Let registration invalidate the old source before closing its data socket.
@@ -170,7 +174,7 @@ export function createHostFiles({ send, report }) {
       else {
         const current = generation, target = activeSourceId;
         const registered = await request({ type: "caption-provider-register", sourceId: target, files: declared });
-        if (current !== generation || activeSourceId !== target || role !== "host") throw new Error("The source or host changed.");
+        if (current !== generation || activeSourceId !== target || !allowed("addCaptions")) throw new Error("The source or host changed.");
         const opened = openRelay(registered, current, true); captionRelay = opened.socket;
         await opened.ready;
         await request({ type: "captions-add", sourceId: target, providerId: registered.providerId, files: declared });
@@ -198,6 +202,7 @@ export function createHostFiles({ send, report }) {
 
   return {
     handleMessage, disconnect: clear,
+    setPermissions(value) { if (JSON.stringify(permissions) !== JSON.stringify(value)) picker?.cancel(); permissions = value; },
     setRole(next) { if (next !== role) picker?.cancel(); role = next; },
     setSession(state) {
       if (state.sourceId === undefined) return;
@@ -208,7 +213,7 @@ export function createHostFiles({ send, report }) {
     chooseVideo: () => pick("video/*,.mkv,.webm,.mp4,.m4v,.mov,.3gp,.3g2,.avi,.ogm,.ogv,.ogg,.ts,.mts,.m2ts,.mpg,.mpeg,.flv,.wmv,.srt,.vtt,.ass,.ssa", selectFiles),
     chooseCaptions: () => pick(".srt,.vtt,.ass,.ssa", addFiles),
     async removeCaption(trackId) {
-      if (!trackId || !activeSourceId || role !== "host") return;
+      if (!trackId || !activeSourceId || !allowed("removeCaptions")) return;
       try { await request({ type: "caption-remove", sourceId: activeSourceId, trackId }); } catch (error) { report(error.message); }
     }
   };

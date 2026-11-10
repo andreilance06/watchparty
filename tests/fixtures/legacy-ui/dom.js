@@ -1,5 +1,6 @@
 export function getElements(root = document) {
   const ids = [
+    "roomSettingsSection", "viewerPermissionsButton", "viewerPermissionsDialog", "closeViewerPermissions", "roomPermissionFields", "roomPermissionStatus",
     "socialTabs", "chatTab", "peopleTab", "socialPeople", "socialChat", "socialChatUnread",
     "roomMenuToggle", "roomMenu", "chatMenuToggle", "chatMenu", "nameStatus",
     "participantDropdown", "participantDetails", "participantStatus",

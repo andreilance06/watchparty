@@ -197,7 +197,7 @@ test("frontend modules initialize and route playback, captions, fullscreen, chat
   await flush();
   assert.equal(el("videoPlaceholder").hidden, true);
   assert.equal(el("video").currentTime, 8);
-  assert.equal(captionItems(el("video")).length, 3);
+  assert.equal(captionItems(el("video")).length, 4);
   assert.equal(browser.elements.has("addCaptionsButton"), false);
   assert.equal(browser.elements.has("removeCaptionButton"), false);
   assert.ok(browser.renderers[0].options.subContent.includes("[Events]"));

@@ -1,3 +1,4 @@
+import { createRoomPermissions } from "./room-permissions.js";
 import { getElements, setConnectionStatus } from "./dom.js";
 import { createClientState } from "./state.js";
 import { createConnection } from "./connection.js";
@@ -68,6 +69,7 @@ const connection = createConnection({
     chat.setConnected(connected);
     participants.setConnected(connected);
     voting.setConnected(connected);
+    roomPermissions.setConnected(connected);
   }
 });
 stopCurrentConnection = connection.dispose;
@@ -80,8 +82,10 @@ files = createHostFiles({ send: connection.send, report: chat.addSystemMessage }
 const player = createPlayer({ elements, state, send: connection.send, report: chat.addSystemMessage, files, attention });
 const voting = createVoting({ elements, state, send: connection.send, report: chat.addSystemMessage });
 const participants = createParticipants({ elements, state, send: connection.send });
+const roomPermissions = createRoomPermissions({ elements, state, send: connection.send });
 
 function handleMessage(message) {
+  roomPermissions.receive(message);
   if (files.handleMessage(message)) return;
   if (player.handleQuality(message)) return;
   switch (message.type) {
@@ -90,7 +94,7 @@ function handleMessage(message) {
       if (message.name) chat.acceptName(message.name);
       if (message.nameRejected) chat.addSystemMessage(`“${message.nameRejected}” is already in use. You joined as ${state.clientName}.`);
       player.applyRole(message.role);
-      player.applyPermissions(message.permissions);
+      applyPermissions(message.permissions);
       participants.refresh();
       voting.refresh();
       elements.viewerCount.textContent = `${message.viewerCount} online`;
@@ -113,7 +117,7 @@ function handleMessage(message) {
     case "session-state": player.applySessionState(message); participants.setSourceOwner(message.sourceOwnerId); break;
     case "permissions-updated":
       participants.updated(message);
-      if (message.clientId === state.clientId) player.applyPermissions(message.permissions);
+      if (message.clientId === state.clientId) applyPermissions(message.permissions);
       break;
     case "playback-rejected":
       player.rejectPlayback(message);
@@ -134,7 +138,7 @@ function handleMessage(message) {
     case "participant-action-complete": participants.complete(message); break;
     case "error":
       if (message.action === "chat") chat.rejectSend(message);
-      if (["set-viewer-permissions", "block-participant", "unblock-participant", "transfer-host"].includes(message.action)) participants.fail(message);
+      if (["set-viewer-permissions", "reset-viewer-permissions", "block-participant", "unblock-participant", "transfer-host"].includes(message.action)) participants.fail(message);
       chat.addSystemMessage(message.message); break;
   }
 }
@@ -147,9 +151,16 @@ function showBlocked() {
   location.href = "/?blocked=1";
 }
 
+function applyPermissions(value) {
+  const changed = JSON.stringify(state.permissions) !== JSON.stringify(value);
+  player.applyPermissions(value);
+  if (changed) { chat.refreshPermissions(); voting.refresh(); participants.refresh(); }
+  roomPermissions.refresh();
+}
+
 function applyParticipantPermissions(participants = []) {
   const current = participants.find(person => person.clientId === state.clientId);
-  if (current?.permissions) player.applyPermissions(current.permissions);
+  if (current?.permissions) applyPermissions(current.permissions);
 }
 
 if (!admissionBlocked) connection.connect();

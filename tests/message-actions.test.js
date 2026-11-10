@@ -328,3 +328,23 @@ test("expansion repositions the same menu to fit near the bottom of the viewport
   menu.querySelector('[aria-label="More reactions"]').click();
   assert.equal(menu.style.top, "692px");
 });
+
+
+test("window and visual viewport layout events dismiss menus without treating them as DOM nodes", async () => {
+  const { window, el, add } = await setup();
+  const article = add("layout");
+  article.dispatch("contextmenu", { clientX: 50, clientY: 50 });
+  const menu = el("messageMenu"), contains = menu.contains;
+  menu.contains = target => { assert.notEqual(target, window); return contains.call(menu, target); };
+  window.dispatch("resize", { target: window });
+  assert.equal(menu.hidden, true);
+});
+
+
+test("message menus stay closed when every action has been revoked", async () => {
+  const { el, add, socket } = await setup();
+  const article = add("no-actions");
+  socket.receive({ type: "role", role: "viewer", clientId: "me", permissions: { sendChat: false, reactMessages: false } });
+  article.dispatch("contextmenu", { clientX: 50, clientY: 50 });
+  assert.equal(el("messageMenu").hidden, true);
+});

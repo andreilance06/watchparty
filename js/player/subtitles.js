@@ -1,56 +1,37 @@
 import { createJassubAdapter } from "./jassub-adapter.js";
 import { createNativeCaptionMenu } from "./native-caption-menu.js";
-import { updateCaptionStatus } from "./caption-status.js";
+import { captionStatusText } from "./caption-status.js";
+import { createPlaybackStatus } from "./playback-status.js";
 
-const STATUS_ID = "watchparty-caption-status";
-
-export function createSubtitles({ elements, report, onAddCaptions = () => {} }) {
+export function createSubtitles({ elements, report, onAddCaptions = () => {}, onRemoveCaption = () => {}, playbackStatus }) {
   const { video } = elements;
+  const statusCard = playbackStatus || createPlaybackStatus(video);
   let tracks = [], selected = null, adapter, sourceKey = "", initialized = false, pictureAvailable = false;
-  let hasVideo = false, canAdd = false, status = "off", phase = null, noticeTimer, notice, noticeVisible = false;
+  let hasVideo = false, canAdd = false, canRemove = false, status = "off", phase = null;
   let registeredPlayer;
   const contents = new Map();
-  const menu = createNativeCaptionMenu({ video, onSelect: select, onAdd: onAddCaptions, report });
+  const contentRequests = new Set();
+  const menu = createNativeCaptionMenu({ video, onSelect: select, onAdd: onAddCaptions, onRemove: onRemoveCaption, report });
 
-  function clearNotice() {
-    clearTimeout(noticeTimer); noticeTimer = undefined;
-    video.hideOverlay?.(STATUS_ID);
-    noticeVisible = false;
-  }
+  function clearNotice() { statusCard.clear("captions"); }
   function preparationState(next, nextPhase = null) {
-    status = next;
-    phase = nextPhase;
-    clearTimeout(noticeTimer); noticeTimer = undefined;
+    status = next; phase = nextPhase;
     if (next === "off") clearNotice();
-    if (next !== "off") {
-      if (!notice) {
-        notice = document.createElement("div");
-        notice.setAttribute("role", "status");
-        notice.setAttribute("aria-live", "polite");
-        Object.assign(notice.style, { position: "absolute", top: "12px", left: "12px", maxWidth: "calc(100% - 48px)",
-          padding: "8px 12px", font: "inherit", fontSize: "13px", color: "var(--movi-controls-color)",
-          background: "var(--movi-glass-bg)", border: "1px solid var(--movi-glass-border)",
-          borderRadius: "var(--movi-radius-surface)", boxShadow: "var(--movi-shadow-lg)" });
-      }
-      updateCaptionStatus(notice, { status, phase, tracks });
-      if (!noticeVisible) {
-        video.showOverlay?.({ id: STATUS_ID, content: notice, placement: "fill", interactive: false });
-        noticeVisible = true;
-      }
-      if (next !== "preparing") noticeTimer = setTimeout(clearNotice, 3000);
-    }
+    else statusCard.set("captions", { text: captionStatusText({ status, phase, tracks }), pending: next === "preparing" });
     updateUi();
   }
 
   function loadContent(url) {
     if (!contents.has(url)) {
-      const pending = fetch(url).then(async (response) => {
+      const controller = new AbortController(); contentRequests.add(controller);
+      const pending = fetch(url, { signal: controller.signal }).then(async (response) => {
         if (!response.ok) throw new Error((await response.text?.()) || "This caption track could not be extracted. Add an external SRT, VTT, ASS, or SSA subtitle file.");
         if (tracks.some(track => track.id === selected && track.url === url)) {
           try { video.watchpartyCaptionMetrics = JSON.parse(response.headers?.get("X-WatchParty-Caption-Metrics") || "null"); } catch {}
         }
         return response.text();
-      }).catch((error) => { if (contents.get(url) === pending) contents.delete(url); throw error; });
+      }).catch((error) => { if (contents.get(url) === pending) contents.delete(url); throw error; })
+        .finally(() => contentRequests.delete(controller));
       contents.set(url, pending);
     }
     return contents.get(url);
@@ -80,7 +61,7 @@ export function createSubtitles({ elements, report, onAddCaptions = () => {} }) 
     return adapter;
   }
   function updateUi() {
-    menu.update({ tracks, selectedId: selected, status, phase, hasVideo, canAdd });
+    menu.update({ tracks, selectedId: selected, status, phase, hasVideo, canAdd, canRemove });
   }
   function select(id) {
     selected = tracks.some((track) => track.id === id) ? id : null;
@@ -134,9 +115,11 @@ export function createSubtitles({ elements, report, onAddCaptions = () => {} }) 
     setAvailability(value) {
       hasVideo = value.hasVideo ?? hasVideo;
       canAdd = value.canAdd ?? canAdd;
+      canRemove = value.canRemove ?? canRemove;
       updateUi();
     },
     destroy() {
+      for (const controller of contentRequests) controller.abort(); contentRequests.clear(); contents.clear();
       clearNotice(); menu.destroy(); adapter?.destroy();
       for (const type of ["loadedmetadata", "trackschange"]) video.removeEventListener(type, ready);
       for (const type of ["loadeddata", "watchparty-picture-ready"]) video.removeEventListener(type, pictureReady);

@@ -144,10 +144,10 @@ function createRequestHandler({ registry, config, movieSearch }) {
         res.end(); return;
       }
       if (url.pathname === "/watch") {
-        const watchUrl = new URL(url); watchUrl.pathname = "/watch.html";
+        const watchUrl = new URL(url); watchUrl.pathname = "/index.html";
         serveStatic(req, res, watchUrl, config.publicDirectory); return;
       }
-      if (url.pathname !== "/" && !/^\/(?:index\.html|(?:js|css|vendor|images|assets)\/)/.test(url.pathname)) throw failure(404, "Not found.");
+      if (url.pathname !== "/" && !/^\/(?:index\.html|(?:vendor|assets)\/)/.test(url.pathname)) throw failure(404, "Not found.");
       serveStatic(req, res, url, config.publicDirectory);
     } catch (error) {
       if (!res.headersSent && !res.destroyed) json(res, error.status || 500, { error: error.status ? error.message : "Server error.", ...(error.code === "ROOM_BLOCKED" ? { code: error.code } : {}) });

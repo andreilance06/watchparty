@@ -1,0 +1,25 @@
+@layer theme, legacy, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@import "../css/style.css" layer(legacy);
+@import "../css/hub.css" layer(legacy);
+
+@theme inline {
+  --color-background: var(--bg);
+  --color-panel: var(--surface);
+  --color-content: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --font-sans: var(--font-readable);
+}
+
+@layer components {
+  .chat-slot, .chat-portal { @apply flex min-h-0 min-w-0 flex-1 flex-col; }
+  .people-slot { @apply contents; }
+  .overlay-portal { @apply contents; }
+  .hub-directory-status { @apply my-4 text-sm text-muted; }
+  .permissions-dialog { @apply max-h-[calc(100dvh-2rem)] overflow-y-auto; }
+  .movie-search-poster > img { @apply h-full w-full object-cover; }
+  .room-info { grid-area: room; }
+  [hidden] { display: none !important; }
+}

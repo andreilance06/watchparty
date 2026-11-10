@@ -118,7 +118,7 @@ test("public host refresh restores verified identity while other clients cannot 
   viewer.send({ type: "join", clientId: host.role.clientId, role: "host", name: "Impostor" });
   assert.equal((await viewer.next("role")).role, "viewer");
   viewer.send({ type: "start-video-poll" });
-  assert.match((await viewer.next("error")).message, /current host/);
+  assert.match((await viewer.next("error")).message, /permissions/);
   const returned = await f.connect(cookie, "/", "Host returned");
   assert.equal(returned.role.role, "host");
   assert.notEqual(returned.role.clientId, host.role.clientId);
@@ -269,5 +269,5 @@ test("participant controls allow returning hosting to the creator without offeri
   socket.receive({ type: "presence", count: 2, participants: [{ clientId: "creator", name: "Creator", role: "viewer", isCreator: true, suppliesVideo: true }] });
   b.elements.get("participantList").children[0].children[0].click();
   const actions = b.elements.get("participantDetails").children.at(-1);
-  assert.deepEqual(actions.children.map(button => button.textContent), ["Transfer host"]);
+  assert.deepEqual(actions.children.map(button => button.textContent), ["Reset all overrides", "Transfer host"]);
 });

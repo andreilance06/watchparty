@@ -8,6 +8,8 @@ The supplied Movi bundle works without COOP/COEP headers or SharedArrayBuffer: i
 
 ## Public hostname
 
+For a separate hosted server at **https://ypothesi.space**, use the [Ubuntu VPS deployment guide](deployment.md). It installs Node and Caddy as services and covers DNS, verification, updates, and rollback. Parties created on localhost remain separate from parties on that server; create public parties on the public site before copying their invitations.
+
 Obtain a domain/subdomain, point its DNS at the server, and forward TCP ports 80 and 443 to Caddy. If your connection is behind CGNAT, a public reverse proxy or VPN with inbound connectivity is needed instead; DNS alone does not provide an inbound route. Caddy obtains/renews the public certificate. Do not expose Node's port directly.
 
 In PowerShell, start Node with:

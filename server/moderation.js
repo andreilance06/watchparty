@@ -1,4 +1,4 @@
-const { permissionKey, permissionsFor } = require("./permissions");
+const { permissionKey, permissionsFor, can } = require("./permissions");
 const { participants } = require("./participants");
 const { sessionState } = require("./state");
 
@@ -10,7 +10,10 @@ function createModeration(room, scheduleExpiry) {
     const reply = payload => transport.send(ws, { requestId: message.requestId, action: message.type, clientId: message.clientId, ...payload });
     try {
       const host = state.clients.get(ws.clientId);
-      if (!host || host.ws !== ws || host.role !== "host" || state.hostId !== ws.clientId) throw new Error("Only the current host can manage participants.");
+      if (!host || host.ws !== ws) throw new Error("Reconnect before managing participants.");
+      const isHost = host.role === "host" && state.hostId === ws.clientId;
+      const required = { "block-participant": "blockViewers", "unblock-participant": "unblockViewers" }[message.type];
+      if (!isHost && (!required || !can(state, ws.clientId, required))) throw new Error("You do not have permission to manage this participant.");
       if (typeof message.clientId !== "string" || typeof message.requestId !== "string" || !message.requestId || message.requestId.length > 100) throw new Error("Invalid participant request.");
       if (message.type === "unblock-participant") {
         const record = [...state.blockedParticipants].find(([, value]) => value.clientId === message.clientId);
@@ -20,10 +23,12 @@ function createModeration(room, scheduleExpiry) {
         const target = state.clients.get(message.clientId);
         if (!target || target.role !== "viewer" || target.ws.readyState !== 1 || message.clientId === ws.clientId) throw new Error("Choose a connected viewer.");
         const key = permissionKey(target, message.clientId);
+        if (message.type === "block-participant" && [...state.clients].some(([id, peer]) => peer.role === "host" && permissionKey(peer, id) === key)) throw new Error("The host browser cannot be blocked.");
         if (message.type === "transfer-host") {
           room.hosting.assign(message.clientId, { announce: false });
           transport.broadcast(sessionState(state, "host-transfer"));
         } else {
+          if (!isHost && (can(state, message.clientId, "blockViewers") || can(state, message.clientId, "unblockViewers"))) throw new Error("Moderators cannot block other moderators.");
           if (room.hosting.isCreator(message.clientId)) throw new Error("The room creator cannot be blocked.");
           if (key === permissionKey(host, ws.clientId)) throw new Error("You cannot block your own browser.");
           state.blockedParticipants.set(key, { clientId: message.clientId, name: target.name,

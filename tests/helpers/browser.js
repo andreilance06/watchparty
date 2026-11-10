@@ -94,7 +94,7 @@ class ElementDouble extends EventTargetDouble {
 function createBrowserDouble({ storageFailure, rendererReady,
   assessPlayback = async () => ({ playable: true, smooth: true, video: { decoder: "hardware" } }) } = {}) {
   const elements = new Map();
-  const html = fs.readFileSync(path.join(root, "watch.html"), "utf8");
+  const html = fs.readFileSync(path.join(root, "tests/fixtures/legacy-ui/watch.html"), "utf8");
   for (const match of html.matchAll(/id="([^"]+)"/g)) {
     const element = new ElementDouble(); element.id = match[1]; element.connected = true;
     elements.set(match[1], element);
@@ -188,7 +188,7 @@ function createBrowserDouble({ storageFailure, rendererReady,
     async manualRender(frame) { this.lastFrame = frame; }
   }
   const context = vm.createContext({
-    console, document, window, URL, URLSearchParams, Blob, Uint8Array, DataView, performance,
+    console, document, window, URL, URLSearchParams, Blob, Uint8Array, DataView, performance, AbortController,
     Event: class { constructor(type) { this.type = type; } },
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options?.detail; } },
     WebSocket: WebSocketDouble, location: { protocol: "http:", host: "localhost:3000", search: "", href: undefined },
@@ -208,6 +208,7 @@ function createBrowserDouble({ storageFailure, rendererReady,
     queueMicrotask,
     setTimeout: (fn, delay) => { const id = nextId++; timers.set(id, { fn, delay }); return id; },
     clearTimeout: (id) => timers.delete(id),
+    clearInterval: (id) => timers.delete(id),
     setInterval: (fn, delay) => { const id = nextId++; timers.set(id, { fn, delay, interval: true }); return id; },
     fetch: async (url, options) => { requests.push({ url, options }); return { ok: true, json: async () => ({}),
       text: async () => "[Script Info]\n[Events]\n", arrayBuffer: async () => new ArrayBuffer(1) }; }
@@ -224,7 +225,7 @@ function createBrowserDouble({ storageFailure, rendererReady,
     }, { context, identifier: filename });
     else if (filename === path.join(root, "vendor/jassub/jassub.js")) {
       module = new vm.SyntheticModule(["default"], function () { this.setExport("default", SubtitleRendererDouble); }, { context, identifier: filename });
-    } else module = new vm.SourceTextModule(fs.readFileSync(filename, "utf8"), { context, identifier: filename });
+    } else module = new vm.SourceTextModule(fs.readFileSync(fs.existsSync(filename) ? filename : path.join(root, "tests/fixtures/legacy-ui", path.basename(filename)), "utf8"), { context, identifier: filename });
     modules.set(filename, module); return module;
   }
   async function load(relative) {

@@ -1,0 +1,27 @@
+[Unit]
+Description=WatchParty server
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=watchparty
+Group=watchparty
+WorkingDirectory=/opt/watchparty/current
+Environment=NODE_ENV=production
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=/etc/watchparty/watchparty.env
+ExecStart=/usr/local/bin/node /opt/watchparty/current/server.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=watchparty
+
+[Install]
+WantedBy=multi-user.target

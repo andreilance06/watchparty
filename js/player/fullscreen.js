@@ -1,4 +1,6 @@
+import { createLifecycle } from "../utils/lifecycle.js";
 export function createFullscreen({ elements, getHostPaused, afterResize, attention }) {
+  const life = createLifecycle();
   const { video, videoShell, fullscreenButton, syncStatus, chatConversation, chatMessages,
     fullscreenChat, fullscreenChatToggle, floatingReactions, reactionFeed, emojiPicker, messageMenu } = elements;
   let previousBodyOverflow = "";
@@ -23,7 +25,7 @@ export function createFullscreen({ elements, getHostPaused, afterResize, attenti
     if (chatMessages.getBoundingClientRect().height) chatScrollTop = chatMessages.scrollTop;
   }
 
-  fullscreenChatToggle.addEventListener("click", () => {
+  life.listen(fullscreenChatToggle, "click", () => {
     document.dispatchEvent(new Event("watchparty-fullscreen-change"));
     rememberChatScroll();
     chatVisible = !chatVisible;
@@ -37,9 +39,9 @@ export function createFullscreen({ elements, getHostPaused, afterResize, attenti
     videoShell.style.setProperty("--chat-viewport-top", `${viewport?.offsetTop || 0}px`);
     videoShell.classList.toggle("chat-compact-viewport", (viewport?.height || window.innerHeight) < 360);
   }
-  window.visualViewport?.addEventListener("resize", updateViewport);
-  window.visualViewport?.addEventListener("scroll", updateViewport);
-  window.addEventListener("resize", updateViewport);
+  life.listen(window.visualViewport, "resize", updateViewport);
+  life.listen(window.visualViewport, "scroll", updateViewport);
+  life.listen(window, "resize", updateViewport);
 
   function fullscreenElement() {
     return document.fullscreenElement || document.webkitFullscreenElement || null;
@@ -96,7 +98,7 @@ export function createFullscreen({ elements, getHostPaused, afterResize, attenti
     updateFullscreenUi();
   }
   
-  fullscreenButton.addEventListener("click", async () => {
+  life.listen(fullscreenButton, "click", async () => {
     try {
       // Firefox Mobile blocks remote play() calls with sound until the viewer
       // performs a gesture. This click supplies that gesture without exposing
@@ -113,16 +115,16 @@ export function createFullscreen({ elements, getHostPaused, afterResize, attenti
   
   // Keep the responsive shell and player together, including the mobile
   // pseudo-fullscreen fallback. The caption surface now lives inside Movi.
-  video.addEventListener("movi-fullscreen-request", (event) => {
+  life.listen(video, "movi-fullscreen-request", (event) => {
     event.preventDefault();
     toggleFullscreenSurface().catch(() => {
       syncStatus.textContent = "Fullscreen is not available in this browser";
     });
   });
 
-  document.addEventListener("fullscreenchange", updateFullscreenUi);
-  document.addEventListener("webkitfullscreenchange", updateFullscreenUi);
-  document.addEventListener("keydown", (event) => {
+  life.listen(document, "fullscreenchange", updateFullscreenUi);
+  life.listen(document, "webkitfullscreenchange", updateFullscreenUi);
+  life.listen(document, "keydown", (event) => {
     if (event.key === "Escape" && !event.defaultPrevented && videoShell.classList.contains("pseudo-fullscreen")) {
       videoShell.classList.remove("pseudo-fullscreen");
       document.body.style.overflow = previousBodyOverflow;
@@ -130,5 +132,9 @@ export function createFullscreen({ elements, getHostPaused, afterResize, attenti
     }
   });
 
-  return { toggle: toggleFullscreenSurface, updateUi: updateFullscreenUi };
+  return { toggle: toggleFullscreenSurface, updateUi: updateFullscreenUi, destroy() {
+    life.dispose();
+    for (const { node, anchor } of slots) { if (anchor.parentNode) anchor.parentNode.insertBefore(node, anchor); anchor.remove(); }
+    if (videoShell.classList.contains("pseudo-fullscreen")) { videoShell.classList.remove("pseudo-fullscreen"); document.body.style.overflow = previousBodyOverflow; }
+  } };
 }

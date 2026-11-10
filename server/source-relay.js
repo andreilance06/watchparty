@@ -78,7 +78,8 @@ function validateFile(file, caption = false) {
 function createHostSource({ room, bridge, config }) {
   let active = null;
   const send = (ws, payload) => room.transport.send(ws, payload);
-  const isHost = (ws) => room.state.hostId === ws.clientId && room.state.clients.get(ws.clientId)?.ws === ws;
+  const { can } = require("./permissions");
+  const allowed = (ws, key) => room.state.clients.get(ws.clientId)?.ws === ws && can(room.state, ws.clientId, key);
   const connectedOwner = provider => room.state.clients.get(provider.owner.clientId)?.ws === provider.owner;
 
   function reset() {
@@ -307,6 +308,8 @@ function createHostSource({ room, bridge, config }) {
               message.token !== selected.token || (member && member.id !== selected.owner.clientId) || !connectedOwner(selected)) {
             throw new Error("Invalid source attachment.");
           }
+          if (!allowed(selected.owner, selected === candidate ? "chooseVideo" : "addCaptions") ||
+              selected === candidate && candidate.captionIds.length && !allowed(selected.owner, "addCaptions")) throw new Error("Permission changed before attachment.");
           source = candidate;
           provider = selected;
           provider.ws = ws;
@@ -373,10 +376,12 @@ function createHostSource({ room, bridge, config }) {
     if (!["source-register", "caption-provider-register", "captions-add", "caption-remove"].includes(message.type)) return false;
     const reply = (payload) => send(ws, { requestId: message.requestId, ...payload });
     try {
-      if (!isHost(ws)) throw new Error("Only the room host can manage files and captions.");
+      const permission = message.type === "source-register" ? "chooseVideo" : message.type === "caption-remove" ? "removeCaptions" : "addCaptions";
+      if (!allowed(ws, permission)) throw new Error("You do not have permission to manage these files or captions.");
       if (message.type === "source-register") {
         const video = validateFile(message.video);
         if (!Array.isArray(message.captions || []) || (message.captions || []).length > 8) throw new Error("Select at most eight caption files.");
+        if (message.captions?.length && !allowed(ws, "addCaptions")) throw new Error("You do not have permission to add captions.");
         const captions = (message.captions || []).map((file) => validateFile(file, true));
         const files = new Map([video, ...captions].map((file) => [file.id, file]));
         if (files.size !== captions.length + 1) throw new Error("File IDs must be unique.");
@@ -414,13 +419,13 @@ function createHostSource({ room, bridge, config }) {
           if (provider !== source) {
             if (files.length !== provider.fileIds.length || files.some(file => !provider.fileIds.includes(file.id) || file.size !== source.files.get(file.id)?.size || file.name !== source.files.get(file.id)?.name)) throw new Error("Caption registration changed.");
             await provider.ready;
-            if (active !== source || !isHost(ws)) throw new Error("The source or host changed.");
+            if (active !== source || !allowed(ws, "addCaptions")) throw new Error("The source or host changed.");
           } else {
             if (new Set(files.map((file) => file.id)).size !== files.length || files.some((file) => source.files.has(file.id))) throw new Error("File IDs must be unique.");
             if (source.files.size + files.length > 25) throw new Error("Too many pending caption files.");
             files.forEach((file) => source.files.set(file.id, file));
           }
-          try { await room.media.addCaptions(files.map((file) => descriptor(source, file))); }
+          try { await room.media.addCaptions(files.map((file) => descriptor(source, file)), () => active === source && allowed(ws, "addCaptions")); }
           finally {
             if (provider !== source) retireProvider(source, provider);
             for (const file of files) {
@@ -431,7 +436,7 @@ function createHostSource({ room, bridge, config }) {
             }
           }
         } else {
-          const track = await room.media.removeCaption(message.trackId);
+          const track = await room.media.removeCaption(message.trackId, () => active === source && allowed(ws, "removeCaptions"));
           if (track.fileId) {
             const file = source.files.get(track.fileId);
             const provider = file && source.providers.get(file.providerId || source.id);

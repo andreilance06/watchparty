@@ -1,3 +1,5 @@
+import { can } from "./permissions.js";
+
 export function createVoting({ elements, state, send, report = () => {} }) {
   const { suggestionForm, suggestionInput, suggestionResults, suggestionStatus, voteOptions } = elements;
   let searchSequence = 0;
@@ -5,7 +7,8 @@ export function createVoting({ elements, state, send, report = () => {} }) {
   let connected = false, expanded = false, starting = false, lastResultId = null;
 
   function sendPoll(payload) {
-    if (!connected || latest.poll.status !== "open") return false;
+    const permission = { "finish-video-poll": "finishPoll", "suggest-video": "suggestTitles", "vote-video": "vote" }[payload.type];
+    if (!connected || latest.poll.status !== "open" || permission && !can(state, permission)) return false;
     return send({ ...payload, pollId: latest.poll.id });
   }
 
@@ -20,23 +23,24 @@ export function createVoting({ elements, state, send, report = () => {} }) {
     const open = latest.poll.status === "open";
     elements.votePanel.hidden = !open;
     elements.chatPanel.classList.toggle("poll-expanded", open && expanded);
-    elements.startPollButton.hidden = state.role !== "host" || open;
+    elements.startPollButton.hidden = !can(state, "startPoll") || open;
     elements.startPollButton.disabled = !connected;
-    elements.finishPollButton.hidden = state.role !== "host";
+    elements.finishPollButton.hidden = !can(state, "finishPoll");
     elements.finishPollButton.disabled = !connected;
     elements.pollDetails.hidden = !open || !expanded;
     elements.pollToggle.setAttribute("aria-expanded", String(open && expanded));
     elements.pollToggle.textContent = expanded ? "Collapse poll" : "Expand poll";
-    suggestionInput.disabled = !connected || !open;
+    for (const button of suggestionResults.querySelectorAll("button")) button.disabled = !connected || !can(state, "suggestTitles");
+    suggestionInput.disabled = !connected || !open || !can(state, "suggestTitles");
     const submit = suggestionForm.querySelector('button[type="submit"]');
-    if (submit) submit.disabled = !connected || !open;
+    if (submit) submit.disabled = !connected || !open || !can(state, "suggestTitles");
   }
 
   elements.startPollButton.addEventListener("click", () => {
-    if (connected && state.role === "host") starting = send({ type: "start-video-poll" }) !== false;
+    if (connected && can(state, "startPoll")) starting = send({ type: "start-video-poll" }) !== false;
   });
   elements.finishPollButton.addEventListener("click", () => {
-    if (state.role === "host") sendPoll({ type: "finish-video-poll" });
+    if (can(state, "finishPoll")) sendPoll({ type: "finish-video-poll" });
   });
   elements.pollToggle.addEventListener("click", () => {
     expanded = !expanded;
@@ -52,7 +56,7 @@ export function createVoting({ elements, state, send, report = () => {} }) {
     }
     suggestionInput.value = "";
     suggestionResults.replaceChildren();
-    suggestionStatus.textContent = `Suggested “${title}”. Your vote is recorded automatically.`;
+    suggestionStatus.textContent = `Suggested “${title}”. ${can(state, "vote") ? "Your vote is recorded automatically." : ""}`;
     suggestionInput.focus();
   }
 
@@ -111,7 +115,7 @@ export function createVoting({ elements, state, send, report = () => {} }) {
       const button = document.createElement("button");
       button.className = "movie-search-select";
       button.type = "button";
-      button.textContent = "Suggest & vote";
+      button.textContent = can(state, "vote") ? "Suggest & vote" : "Suggest";
       button.addEventListener("click", () => suggestTitle(movie.title, movie));
       details.appendChild(button);
       result.appendChild(details);
@@ -126,7 +130,7 @@ export function createVoting({ elements, state, send, report = () => {} }) {
     if (poll.id !== latest.poll.id || poll.status !== latest.poll.status) {
       restoreFocus = poll.status !== "open" && elements.votePanel.contains(document.activeElement);
       resetSearch();
-      expanded = poll.status === "open" && starting && state.role === "host";
+      expanded = poll.status === "open" && starting && can(state, "startPoll");
       starting = false;
     }
     latest = { ...message, poll };
@@ -229,7 +233,7 @@ export function createVoting({ elements, state, send, report = () => {} }) {
       button.className = "vote-button";
       button.type = "button";
       button.textContent = isSelected ? "Your vote" : "Vote";
-      button.disabled = isSelected || !connected || poll.status !== "open";
+      button.disabled = isSelected || !connected || poll.status !== "open" || !can(state, "vote");
       button.setAttribute("aria-pressed", String(isSelected));
       button.setAttribute("aria-label", `${isSelected ? "Your vote for" : "Vote for"} ${option.title}`);
       button.addEventListener("click", () => sendPoll({ type: "vote-video", suggestionId: option.id }));
@@ -251,7 +255,7 @@ export function createVoting({ elements, state, send, report = () => {} }) {
 
   suggestionForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (!connected || latest.poll.status !== "open") return;
+    if (!connected || latest.poll.status !== "open" || !can(state, "suggestTitles")) return;
     const query = suggestionInput.value.replace(/\s+/g, " ").trim().slice(0, 80);
     if (query.length < 2) {
       suggestionStatus.textContent = "Enter at least two characters to search.";
@@ -266,13 +270,13 @@ export function createVoting({ elements, state, send, report = () => {} }) {
       const response = await fetch(`/api/movies/search?q=${encodeURIComponent(query)}`);
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || "Movie search is unavailable.");
-      if (token === searchSequence) showMovies(Array.isArray(result.movies) ? result.movies : [], query);
+      if (token === searchSequence && can(state, "suggestTitles")) showMovies(Array.isArray(result.movies) ? result.movies : [], query);
     } catch (error) {
       if (token !== searchSequence) return;
       suggestionStatus.textContent = `${error.message || "Movie search is unavailable."} You can still suggest the title without a poster.`;
       addTitleOnlyButton(query);
     } finally {
-      if (token === searchSequence && submit) submit.disabled = false;
+      if (token === searchSequence) refreshControls();
     }
   });
 

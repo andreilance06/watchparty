@@ -6,7 +6,7 @@ Repository: [andreilance06/watchparty](https://github.com/andreilance06/watchpar
 
 ## Purpose and target users
 
-WatchParty helps friends, classmates, and small groups watch a host's local video together while chatting and deciding what to watch next. The project combines a responsive HTML, CSS, and JavaScript interface with a Node.js server and demonstrates collaborative development through Git branches, commits, and feature integration.
+WatchParty helps friends, classmates, and small groups watch a host's local video together while chatting and deciding what to watch next. The project combines a responsive React interface built with Vite and Tailwind CSS with a Node.js server and demonstrates collaborative development through Git branches, commits, and feature integration.
 
 Its objectives are to keep playback synchronized, make group interaction available in one page, and let members contribute separate features to one working application.
 
@@ -19,14 +19,17 @@ Its objectives are to keep playback synchronized, make group interaction availab
 | Captions | Add SRT, VTT, ASS, or SSA subtitles and choose a caption track independently. |
 | Chat and reactions | Send messages and quoted replies, insert emojis, react to comments, and send floating emoji reactions, including in fullscreen. |
 | Movie polls | Start a poll as host, suggest titles with optional Wikipedia metadata, vote, and post the result when the host finishes the poll. |
-| Participants and moderation | See connected participants; hosts can manage playback permissions, transfer hosting, and block or unblock viewers. |
+| Participants and moderation | See connected participants; hosts can configure 19 permissions with room defaults and individual overrides, transfer hosting, and delegate moderation. |
 | Responsive interface | Watch beside a wider social lounge on desktop, switch between Chat and People tabs on smaller screens, and choose light or dark themes. |
 
 ## Technologies
 
 | Technology | Role |
 | --- | --- |
-| HTML, CSS, JavaScript | Page structure, responsive styles, and browser interactions. |
+| React and React DOM | Reusable components, props, state, reducers, context, and interactive forms. |
+| Vite | Frontend development server, production bundling, and backend proxy. |
+| Tailwind CSS | Layout utilities, responsive styling, and shared theme tokens alongside specialized player CSS. |
+| HTML5, CSS3, JavaScript (ES6+) | Semantic structure, media adapters, and browser interactions. |
 | Node.js and the `ws` package | HTTP server, rooms, and real-time WebSocket messages. |
 | Movi Player and WebCodecs | Browser playback and video controls. |
 | ffprobe, FFmpeg, and HLS | Structured media inspection, processing, and compatibility streaming. |
@@ -36,7 +39,7 @@ Its objectives are to keep playback synchronized, make group interaction availab
 
 ## Run locally
 
-Prerequisites: Git, Node.js 18 or newer with npm, and a modern browser. The server computer needs these tools; viewers only need a browser. Internet access is needed to install dependencies and use movie search or external posters.
+Prerequisites: Git, Node.js 24 or newer with npm, and a modern browser. The server computer needs these tools; viewers only need a browser. Internet access is needed to install dependencies and use movie search or external posters.
 
 1. Clone the shared repository:
 
@@ -53,24 +56,44 @@ Prerequisites: Git, Node.js 18 or newer with npm, and a modern browser. The serv
 3. Install the dependencies. The `ffmpeg-static` and `@derhuerst/ffprobe-static` packages provide bundled FFmpeg and ffprobe executables:
 
    ```sh
-   npm install
+   npm ci
    ```
 
-4. Start the server and leave the terminal running:
+4. Start the backend and Vite development servers:
 
    ```sh
-   npm start
+   npm run dev
    ```
 
-5. Open `http://localhost:3000` in your browser. Stop the server with **Ctrl+C** when finished.
+5. Open `http://localhost:5173` in your browser. Vite proxies room, API, media, and WebSocket requests to the Node server on port 3000. Stop the server with **Ctrl+C** when finished.
 
-On Windows, if PowerShell blocks `npm.ps1`, use `npm.cmd install` and `npm.cmd start` instead. If a bundled download is unavailable, install a compatible executable and set `FFMPEG_PATH` or `FFPROBE_PATH` to its path before starting the server.
+On Windows, if PowerShell blocks `npm.ps1`, use `npm.cmd ci` and `npm.cmd run dev` instead. If a bundled download is unavailable, install a compatible executable and set `FFMPEG_PATH` or `FFPROBE_PATH` to its path before starting the server.
+
+To run the production version locally:
+
+```sh
+npm run build
+npm start
+```
+
+Open `http://localhost:3000`. The Node server serves the compiled `dist` frontend;
+rebuild after frontend changes. `npm run dev:server` runs only the backend and
+`npm run dev:client` runs only Vite. For HTTPS/LAN development, use the production
+build behind the documented HTTPS proxy; the HTTP Vite server does not enable
+WebCodecs on remote devices.
+
+See [React frontend architecture](docs/react-frontend.md) for component ownership,
+state flow, media lifecycle, and verification commands.
 
 At startup, the server compares FFmpeg executables from `FFMPEG_PATH` and `PATH`, preferring complete GPU processing capabilities before partial acceleration and codec/filter coverage. Ties prefer `FFMPEG_PATH`, then PATH order. Candidates must support the app's software compatibility and caption conversion paths. If none qualify, the server uses bundled FFmpeg. The chosen path, version, and selection reason appear in the terminal; changing installations requires a server restart.
 
 ffprobe is discovered independently using `FFPROBE_PATH`, `PATH`, and its bundled fallback. Usable external candidates are ranked by relevant demuxer/decoder support, then overall inspection coverage; ties prefer `FFPROBE_PATH`, then PATH order. Both executables are required. All probing uses ffprobe JSON, including duration, streams, captions, fonts, and HDR metadata. FFmpeg handles conversion, extraction, thumbnails, and encoding; a failed probe reports an error without starting a second scan through FFmpeg.
 
 For another device on the same network, open one of the LAN addresses printed by the server; `localhost` on that device refers to the device itself. Allow the server through the firewall if necessary. Use [trusted HTTPS](docs/https.md) for LAN and public access to enable WebCodecs on viewers' devices. HTTP still supports native files and compatibility streaming. Keep the Node.js server running; opening `index.html` directly does not provide rooms or shared playback.
+
+## Deploy publicly
+
+Follow the [Ubuntu VPS deployment guide](docs/deployment.md) to host WatchParty at **https://ypothesi.space** with HTTPS, a persistent Node service, and update/rollback instructions. Create real parties on that public site so **Invite** copies a usable public room link. Localhost is a separate development environment: its rooms are not available on the hosted server, and changing an invite's hostname does not transfer a room.
 
 ## Your first watch party
 
@@ -79,29 +102,35 @@ For another device on the same network, open one of the LAN addresses printed by
 3. As host, select **Choose Video** and choose one video, optionally with subtitle files. Keep the browser page that supplies the video open throughout the session. Other participants join the room to watch.
 4. Type in the chatroom and select **Send**. Right-click a message (long-press on touch) to reply or choose a reaction. The single emoji button at the bottom opens Message emoji and Global reaction tabs; the latter sends floating reactions to the room.
 5. As host, select **Start poll**. Enter a movie title and select **Find movie**; choose a matching result with **Suggest & vote**, or suggest the title without a poster. Suggesting a title automatically casts your vote. Participants can vote for another suggestion, and the host selects **Finish poll** to post the result in chat. A poll chooses what to watch next; the host still selects the actual video file.
-6. Select a participant's name to inspect playback permissions. Hosts can change permissions or transfer hosting. Use **Leave room** to return to the hub.
+6. Select a participant's name to inspect permissions. Hosts can customize individual viewers, transfer hosting, or use **Room options > Viewer permissions** to configure room defaults. Use **Leave room** to return to the hub.
 
 ## Screenshots
 
-These screenshots show the running application with local demonstration data. The example room has a chat message and an active movie poll; no video has been selected yet.
+These captures show the current application with local demonstration data, a generated video, two participants, chat, and an active movie poll.
 
 ### Room selection
 
-The hub lists all rooms with video previews and optional password protection. This screenshot predates the separate hub and shows the former entry dialog.
+The room hub lists rooms with video previews, participant counts, and optional password protection.
 
-![WatchParty welcome screen with create-room, join-room, display-name, and public-room controls](docs/screenshots/room-selection.png)
+![WatchParty room hub with room cards, a video preview, and create/join controls](docs/screenshots/room-selection.png)
 
 ### Desktop room
 
-The desktop layout places the video beside a 380-pixel social lounge with participants above chat and a compact, expandable movie poll. The room bar groups invitations, connection status, and **Room options** for changing your display name or leaving. The screenshots below predate the social lounge redesign, message context menu, and tabbed emoji picker.
+Video sits beside the social lounge, with participants, a compact movie poll, and chat. Room options contains profile settings and host permission controls.
 
-![Desktop WatchParty room showing the video panel, host participant, Arrival poll with one vote, and a welcome chat message](docs/screenshots/desktop-room.png)
+![Desktop room showing a demonstration video, two participants, an Arrival poll, and chat](docs/screenshots/desktop-room.png)
 
 ### Mobile room
 
-On smaller screens, video sits above a social panel with **Chat** and **People** tabs. Chat shows an unread indicator while you browse People, and drafts survive tab and fullscreen changes. This older full-page capture predates the social tabs.
+Video sits above the lounge with Chat and People tabs. This full-page capture uses a 390-pixel mobile viewport.
 
-<img src="docs/screenshots/mobile-room.png" alt="Mobile WatchParty room with vertically stacked video panel, participants, movie poll, and chat" width="390">
+<img src="docs/screenshots/mobile-room.png" alt="Mobile room showing the demonstration video, Chat and People tabs, a compact movie poll, and chat composer" width="390">
+
+### Viewer permissions
+
+Hosts can configure room defaults, then customize individual viewers from the participant list. The grouped controls scroll to include polls, identity, and moderation.
+
+![Viewer permissions dialog showing grouped room defaults for playback, media, chat, and polls](docs/screenshots/permissions.png)
 
 ## Team and contributions
 
@@ -121,7 +150,7 @@ The root page is a room hub, separate from the player at `/watch?roomId=ID` (or 
 
 Unexpected host disconnects reserve hosting for 15 seconds so a refresh or brief interruption can reconnect. Other participants see a reconnecting notice; if the host does not return in time, the next connected participant takes over. Explicit room leaving and host transfers take effect immediately. A private room's creator reclaims the sole host role whenever they reconnect, including after leaving and rejoining with the same verified browser identity; any replacement host becomes a viewer. Other hosts cannot block the creator. The public default room has no permanent creator. These identities and rooms last until room expiry or server restart, and localhost and the public domain use separate cookies.
 
-The host starts movie polls from **Chat options** (the three-dot button in the lounge). An active poll stays pinned above messages as a compact, expandable card; everyone can suggest and vote. Suggestions search Wikipedia through its keyless MediaWiki API. Choose a matching article for its thumbnail and attribution, or suggest a title without a poster. Suggesting automatically casts your vote. The host and original suggester can remove entries; the suggester keeps that right after browser restarts or rejoining with the same browser cookie and site address while the room/server remains alive. Finishing a poll hides it for everyone and posts the winner, tie, or no-votes result in chat. The host can then start a fresh round. Posters are served by Wikimedia, so availability and licensing depend on each source image. See the [movie poll API](docs/rooms.md#movie-suggestions-and-posters).
+The host or viewers granted Start polls permission start movie polls from **Chat options** (the three-dot button in the lounge). An active poll stays pinned above messages as a compact, expandable card; viewers can suggest and vote unless the host revokes those permissions. Suggestions search Wikipedia through its keyless MediaWiki API. Choose a matching article for its thumbnail and attribution, or suggest a title without a poster. Suggesting automatically casts your vote when voting is allowed. The host, authorized moderators of suggestions, and original suggesters with removal permission can remove entries; the suggester keeps that right after browser restarts or rejoining with the same browser cookie and site address while the room/server remains alive. Finishing a poll hides it for everyone and posts the winner, tie, or no-votes result in chat. The host can then start a fresh round. Posters are served by Wikimedia, so availability and licensing depend on each source image. See the [movie poll API](docs/rooms.md#movie-suggestions-and-posters).
 
 ## Playback
 
@@ -174,11 +203,24 @@ Support depends on the actual container layout and subtitle codec, rather than t
 
 Native/HLS engines use the adapter's clock bridge because Movi's embedded renderer hook only runs on its WASM pipeline. The caption canvas lives inside the player, including fullscreen. Native video Picture-in-Picture cannot include this separate subtitle surface; Document PiP support depends on the browser/player.
 
-Click a name in the chatroom's **Participants** list to open its dropdown. Everyone can inspect playback permissions; the host can grant or revoke **Play/pause**, **Seek**, and **Playback speed** for viewers. The same dropdown offers **Transfer host**, **Kick and block**, and **Unblock**. Viewers start with play/pause enabled and seeking/speed disabled; choosing the shared video and managing room captions remain host-only. Volume, aspect ratio, caption selection, and fullscreen are local. Browsers may require a tap to enable sound or playback.
+Click a name in **Participants** (the **People** tab on mobile) to inspect effective permissions. Only the host can edit permissions or transfer hosting. **Room options > Viewer permissions** configures room defaults; a participant's switches set individual overrides. **Use room default** removes one override, and **Reset all overrides** restores inheritance for that viewer. Changes take effect immediately across that browser's connected tabs.
 
-Blocked viewers stay in the participant list with a dimmed, crossed-out name until a host unblocks them. They cannot reconnect to that room, including through another tab in the same browser profile. Blocks survive host changes and disappear with the room or server restart. Unblocked viewers manually rejoin. Transferring host takes effect immediately and preserves the current video, playhead, speed, pause state, and captions; the former host starts with default viewer permissions and continues supplying the video until it is replaced or their browser disconnects. The new host can add captions or choose a new video.
+| Group | Configurable permissions | Initial viewer defaults |
+| --- | --- | --- |
+| Playback | Play/pause, seek, playback speed | Play/pause enabled |
+| Media | Choose/replace video, add captions, remove captions | All disabled |
+| Chat | Send messages, send replies, react to messages, send floating reactions | All enabled |
+| Polls | Start polls, finish polls, suggest titles, vote, remove own suggestions, remove any suggestion | Suggest, vote, and remove own enabled |
+| Identity | Change display name | Enabled |
+| Moderation | Block viewers, unblock viewers | Both disabled |
 
-Permissions are checked on the server and remembered for the same browser profile in each room, including after disconnecting or explicitly leaving and rejoining. Other hosts taking over do not reset grants. A viewer becoming host clears that viewer's stored grants; room expiry and server restart clear all grants. Clearing cookies or changing browsers creates a new identity. Private-room passwords and membership are still required after leaving.
+Replies require both send-message and reply permissions. Suggesting without voting permission adds a title without casting a vote. Permission to remove any suggestion also allows removing your own. A viewer delegated blocking cannot block the host, room creator, their own browser, or viewers with either moderation permission. Only the host can grant permissions or transfer hosting.
+
+Authorized viewers can supply a video without taking over hosting; their browser must stay connected. Adding and removing captions are separate permissions, with removal actions in the captions menu. Revocation stops further changes and pending file attachments, while an active video provider continues serving the current video. Volume, quality, aspect ratio, caption selection, and fullscreen remain local. Browsers may require a tap to enable sound or playback.
+
+Blocked viewers stay in the participant list with a dimmed, crossed-out name until a host or authorized viewer unblocks them. They cannot reconnect to that room, including through another tab in the same browser profile. Blocks survive host changes and disappear with the room or server restart. Unblocked viewers manually rejoin. Transferring host takes effect immediately and preserves the current video, playhead, speed, pause state, and captions; the former host inherits current room defaults and continues supplying the video until it is replaced or their browser disconnects. The new host can add captions or choose a new video.
+
+Permissions are checked on the server and remembered for the same browser profile in each room, including after disconnecting or explicitly leaving and rejoining. Other hosts taking over do not reset grants. A viewer becoming host clears that viewer's stored overrides; room expiry and server restart clear all overrides and room defaults. Clearing cookies or changing browsers creates a new identity. Private-room passwords and membership are still required after leaving.
 
 ## Chat and reactions
 
@@ -202,6 +244,8 @@ In DevTools, inspect `document.getElementById('video').watchpartyMetrics` for `p
 
 Its `preparation` snapshot separates metadata-provider requests, ranges, bytes, and cache hits from FFmpeg bridge reads and elapsed preparation time. `indexMode` is `mfra`, `structural`, or `container`. Bridge byte counts include bytes served from cache, so they can exceed actual provider transfers; caption counters remain separate. The session's `mediaInfo.container` identifies ISO files with `family: "iso-bmff"`, `fragmented`, and `indexed` flags.
 
+The video status card shows **Checking connection speed...** during the initial Auto assessment and **Adjusting quality...** during automatic quality changes. It shares the caption indicator's styling, with separate rows when captions are loading at the same time. It uses real media transfers; if no usable sample arrives within ten seconds, the notice explains that Auto is continuing without an estimate. Completed changes briefly show the selected resolution. Manual selections keep their feedback in Settings.
+
 `document.getElementById('video').watchpartyQualityMetrics` exposes the local preferences, actual rendition, measured viewer throughput, provider throughput, application-wide encoder demand, pending selection, adaptation reason, and warnings. Measurements come from real uncached relay transfers and media downloads; deliberate encoder/paused-production waits are excluded from viewer transfer timing. Connection estimates are observations, not an Internet speed-test guarantee.
 
 `document.getElementById('video').watchpartyCaptionMetrics` records the selected caption's index mode (`cues`, `structural`, `samples`, or `external`) and extraction/conversion timings. Embedded-source metrics also include caption relay requests, ranges, transferred bytes, and bytes reused from the playback cache; counters are scoped to the current source. Caption responses expose the same snapshot in `X-WatchParty-Caption-Metrics`, with index/conversion durations in `Server-Timing`. Use these to distinguish indexing delays from renderer initialization. The local target for a representative indexed 24-minute episode is caption readiness within five seconds across first and later selections; unindexed files and slow storage/network paths can take longer.
@@ -209,16 +253,18 @@ Its `preparation` snapshot separates metadata-provider requests, ranges, bytes, 
 See the [WebCodecs validation results](docs/webcodecs-validation.md) for a three-run comparison of native, WebCodecs, and compatibility playback, resource measurements, and local Caddy HTTPS checks.
 
 ```sh
+npm run build
 npm test
+npm run test:ui
 ```
 
-Tests cover room admission/isolation, range validation/cancellation/deduplication, stale generations, fast readiness independent of captions/encoder detection, selective caption reads across supported container families, local fallback negotiation, bounded continuous encoding, AAC timestamps and decoded audio across pause/resume, HEVC Main 10/E-AC-3 conversion, downscaling, encoder failure, seek acknowledgements, caption lifecycle, chat, voting, and proxy trust. Media tests create temporary fixtures and skip if FFmpeg is unavailable. DOM doubles test wiring, not visual decoding.
+Tests cover room admission/isolation, range validation/cancellation/deduplication, stale generations, fast readiness independent of captions/encoder detection, selective caption reads across supported container families, local fallback negotiation, bounded continuous encoding, AAC timestamps and decoded audio across pause/resume, HEVC Main 10/E-AC-3 conversion, downscaling, encoder failure, seek acknowledgements, caption lifecycle, chat, voting, and proxy trust. Media tests create temporary fixtures and skip if FFmpeg is unavailable. React Testing Library tests the current interface. Frozen pre-React fixtures under `tests/fixtures/legacy-ui` keep the existing VM media regression harness usable; they are not shipped or served. DOM doubles test wiring, not visual decoding.
 
 For release testing, use real desktop Chrome/Edge/Firefox/Safari, Android Chrome, and iPhone/iPad Safari. Check visible motion and audible audio for H.264/AAC MP4, HEVC MKV, VP9/AV1, multichannel/unusual audio, 4K/HDR conversion, and styled ASS. Test cold/warm startup, uncached seeks, fullscreen captions, autoplay gestures, and mixed direct/compatibility viewers in one room.
 
 ## Structure and dependencies
 
-`server.js` and `js/app.js` compose the application. Server media modules handle probing, lazy caption extraction, compatibility playlists and continuous encoding runs; `server/source-relay.js` owns browser files and authenticated range serving. Player modules handle source selection, synchronization, Movi controls, and the JASSUB adapter.
+`server.js` composes the backend; `src/main.jsx` mounts the React frontend. `src/Hub.jsx` handles the directory and admission forms; the room context, player adapter, and lounge components handle the watch page. `js/connection.js`, `js/host-files.js`, and `js/player/` retain transport and media logic. The frontend is compiled into `dist`, which is the only frontend directory served in production. Server media modules handle probing, lazy caption extraction, compatibility playlists and continuous encoding runs; `server/source-relay.js` owns browser files and authenticated range serving. Player modules handle source selection, synchronization, Movi controls, and the JASSUB adapter.
 
 Third-party distributions are bundled locally; replace generated distributions as a unit rather than editing them. Movi Player **0.4.1** (slim JS/WASM) is covered by `vendor/MOVI_PLAYER_LICENSE.txt`; JASSUB **2.5.16** and its worker/WASM assets are covered by `vendor/jassub/LICENSE.txt`.
 
@@ -228,4 +274,4 @@ The hls.js pause/resume bridge uses Movi 0.4.1's internal stream-wrapper loader 
 
 `js/player/native-quality-menu.js` isolates the quality Settings hooks, including menu placement when viewer seeking is disabled. `js/player/adaptive-quality.js` observes completed downloads and the pinned hls.js fragment-loading bridge. Verify these integrations and native mobile Settings when upgrading Movi; vendor distributions remain unchanged.
 
-Movi 0.4.1 exposes custom controls and overlays but no host-managed subtitle-menu provider. `js/player/native-caption-menu.js` isolates element-level menu hooks for the room's track list, selection, status, and host-only Add action. It reuses native CC/Settings/context surfaces and leaves decoder methods and the generated bundle intact. Verify these hooks against the real player when upgrading Movi; DOM doubles do not exercise its menu lifecycle or CSS.
+Movi 0.4.1 exposes custom controls and overlays but no host-managed subtitle-menu provider. `js/player/native-caption-menu.js` isolates element-level menu hooks for the room's track list, selection, status, and permission-controlled Add and Remove actions. It reuses native CC/Settings/context surfaces and leaves decoder methods and the generated bundle intact. Verify these hooks against the real player when upgrading Movi; DOM doubles do not exercise its menu lifecycle or CSS.

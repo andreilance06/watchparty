@@ -1,7 +1,7 @@
 const { randomUUID } = require("crypto");
 const { sanitizeDisplayName, createNameRegistry } = require("./names");
 const { currentTime, sessionState } = require("./state");
-const { permissionKey, permissionsFor, promoteHost } = require("./permissions");
+const { permissionKey, permissionsFor, promoteHost, can, permissionSnapshot, DEFAULT_PERMISSIONS } = require("./permissions");
 const { participants: roomParticipants } = require("./participants");
 const { hostStatus } = require("./hosting");
 const { segmentSchedule } = require("./media/playlists");
@@ -54,8 +54,8 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
   const { send, broadcast } = transport;
   const { isDisplayNameTaken } = createNameRegistry(state.clients);
 
-  function participants() {
-    return roomParticipants(state);
+  function participants(requesterId) {
+    return roomParticipants(state, requesterId);
   }
 
   function isHost(clientId) {
@@ -63,13 +63,15 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
   }
 
   function canRemove(clientId, suggestion) {
-    return isHost(clientId) || state.suggestionOwners.get(suggestion.id) === permissionKey(state.clients.get(clientId), clientId);
+    return can(state, clientId, "removeAnySuggestion") || can(state, clientId, "removeOwnSuggestions") &&
+      state.suggestionOwners.get(suggestion.id) === permissionKey(state.clients.get(clientId), clientId);
   }
 
   function updateName(clientId, name) {
     const client = state.clients.get(clientId);
     client.name = name;
     const identity = permissionKey(client, clientId);
+    state.viewerNames.set(identity, name);
     for (const suggestion of state.videoSuggestions) {
       if (state.suggestionOwners.get(suggestion.id) === identity) suggestion.ownerName = name;
     }
@@ -88,7 +90,7 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
     const suggestions = pollSuggestions();
     for (const [clientId, client] of state.clients) {
       send(client.ws, {
-        type: "party-state", participants: participants(), poll: state.poll, host: hostStatus(state),
+        type: "party-state", roomPermissions: { ...DEFAULT_PERMISSIONS, ...state.roomPermissions }, participants: participants(clientId), poll: state.poll, host: hostStatus(state),
         suggestions: suggestions.map(suggestion => ({ ...suggestion, canRemove: canRemove(clientId, suggestion) })),
         myVoteId: state.videoVotes.get(clientId) ?? null
       });
@@ -118,6 +120,14 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
   function handleMessage(ws, message) {
     const client = state.clients.get(ws.clientId);
     if (!client) return;
+    const required = { "set-name": "changeName", chat: "sendChat", "comment-reaction": "reactMessages",
+      reaction: "globalReactions", "start-video-poll": "startPoll", "finish-video-poll": "finishPoll",
+      "suggest-video": "suggestTitles", "vote-video": "vote" }[message.type];
+    if (required && !can(state, ws.clientId, required) || message.type === "chat" && message.replyToId != null && !can(state, ws.clientId, "replyChat")) {
+      send(ws, { type: "error", action: message.type, requestId: message.requestId,
+        code: "PERMISSION_DENIED", message: "The host has not allowed this action. Ask them to update your permissions." });
+      return;
+    }
     const pollAction = ["suggest-video", "vote-video", "remove-video-suggestion", "finish-video-poll"].includes(message.type);
     if (pollAction && (state.poll.status !== "open" || message.pollId !== state.poll.id)) {
       send(ws, { type: "error", action: message.type, message: "That poll is no longer open. Use the current poll." });
@@ -125,7 +135,7 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
     }
     switch (message.type) {
       case "start-video-poll": {
-        if (!isHost(ws.clientId)) {
+        if (!can(state, ws.clientId, "startPoll")) {
           send(ws, { type: "error", action: message.type, message: "Only the current host can start a poll." });
           break;
         }
@@ -141,7 +151,7 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
         break;
       }
       case "finish-video-poll": {
-        if (!isHost(ws.clientId)) {
+        if (!can(state, ws.clientId, "finishPoll")) {
           send(ws, { type: "error", action: message.type, message: "Only the current host can finish a poll." });
           break;
         }
@@ -195,14 +205,14 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
       }
       case "join":
         {
-          const requestedName = client.hasMemberName ? client.name : sanitizeDisplayName(message.name, client.name);
+          const requestedName = client.hasMemberName || !can(state, ws.clientId, "changeName") ? client.name : sanitizeDisplayName(message.name, client.name);
           const nameRejected = isDisplayNameTaken(requestedName, ws.clientId);
           updateName(ws.clientId, nameRejected ? client.name : requestedName);
           if (!state.hostId) promoteHost(state, ws.clientId);
           send(ws, {
             type: "role", role: client.role, hostId: state.hostId, clientId: ws.clientId,
             viewerCount: state.clients.size, name: client.name,
-            permissions: permissionsFor(state, client, ws.clientId),
+            ...permissionSnapshot(state, client, ws.clientId),
             ...(nameRejected ? { nameRejected: requestedName } : {})
           });
           send(ws, sessionState(state, "join"));
@@ -212,22 +222,36 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
           updatePresence();
         }
         break;
+      case "set-room-permissions":
+      case "reset-viewer-permissions":
       case "set-viewer-permissions": {
+        const roomDefault = message.type === "set-room-permissions";
+        const reset = message.type === "reset-viewer-permissions";
         const target = state.clients.get(message.clientId);
         const value = message.permissions;
-        if (client.role !== "host" || state.hostId !== ws.clientId || !target || target.role !== "viewer" ||
-            !value || typeof value !== "object" || Array.isArray(value) ||
-            Object.keys(value).length !== 3 ||
-            !["playPause", "seek", "playbackRate"].every(key => typeof value[key] === "boolean")) {
+        const valid = reset || value && typeof value === "object" && !Array.isArray(value) &&
+          Object.keys(value).length > 0 && Object.entries(value).every(([key, entry]) =>
+            Object.hasOwn(DEFAULT_PERMISSIONS, key) && (typeof entry === "boolean" || !roomDefault && entry === null));
+        if (!isHost(ws.clientId) || !valid || !roomDefault && (!target || target.role !== "viewer")) {
           send(ws, { type: "error", action: message.type, clientId: message.clientId, requestId: message.requestId,
-            message: "Only the room host can set valid permissions for a connected viewer." });
+            message: "Only the room host can update valid permissions for this room or a connected viewer." });
           break;
         }
-        const key = permissionKey(target, message.clientId);
-        state.viewerPermissions.set(key, { playPause: value.playPause, seek: value.seek, playbackRate: value.playbackRate });
+        const key = target && permissionKey(target, message.clientId);
+        if (roomDefault) state.roomPermissions = { ...state.roomPermissions, ...value };
+        else if (reset) state.viewerPermissions.delete(key);
+        else {
+          const overrides = { ...state.viewerPermissions.get(key) };
+          for (const [name, entry] of Object.entries(value)) {
+            if (entry === null) delete overrides[name]; else overrides[name] = entry;
+          }
+          if (Object.keys(overrides).length) state.viewerPermissions.set(key, overrides);
+          else state.viewerPermissions.delete(key);
+        }
         for (const [clientId, affected] of state.clients) {
-          if (permissionKey(affected, clientId) === key) {
-            broadcast({ type: "permissions-updated", clientId, ...(message.requestId ? { requestId: message.requestId } : {}), permissions: permissionsFor(state, affected, clientId) });
+          if (roomDefault || permissionKey(affected, clientId) === key) {
+            broadcast({ type: "permissions-updated", clientId, action: message.type,
+              ...(message.requestId ? { requestId: message.requestId } : {}), ...permissionSnapshot(state, affected, clientId) });
           }
         }
         updatePartyState();
@@ -334,7 +358,7 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
           state.videoSuggestions.push(suggestion);
           state.suggestionOwners.set(suggestion.id, permissionKey(client, ws.clientId));
         }
-        state.videoVotes.set(ws.clientId, suggestion.id);
+        if (can(state, ws.clientId, "vote")) state.videoVotes.set(ws.clientId, suggestion.id);
         updatePartyState();
         break;
       }

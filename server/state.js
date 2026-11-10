@@ -10,6 +10,8 @@ function createSession() {
     sessionId: randomUUID(),
     clients: new Map(),
     viewerPermissions: new Map(),
+    viewerNames: new Map(),
+    roomPermissions: {},
     blockedParticipants: new Map(),
     sourceId: null,
     sourceOwnerId: null,

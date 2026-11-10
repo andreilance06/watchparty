@@ -179,5 +179,5 @@ export function createPlaybackSync({ elements, state: session, send }) {
   // Drift correction must never become a viewer's shared speed command.
   function isAppliedRate() { return Number.isFinite(appliedRate) && Math.abs(video.playbackRate - appliedRate) <= 0.005; }
 
-  return { apply, accept, cancel, reject, status, isAppliedRate, update: () => settle(), isApplying: () => applying, broadcast: broadcastVideoState };
+  return { apply, accept, cancel, reject, status, isAppliedRate, destroy() { cancel(); rateDisplay.destroy(); }, update: () => settle(), isApplying: () => applying, broadcast: broadcastVideoState };
 }

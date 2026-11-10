@@ -23,5 +23,5 @@ export function createCompatibilityBuffer(video) {
   video.addEventListener("pause", update);
   video.addEventListener("seeking", update);
   video.addEventListener("seeked", update);
-  return { update };
+  return { update, destroy() { for (const type of ["play", "pause", "seeking", "seeked"]) video.removeEventListener(type, update); } };
 }

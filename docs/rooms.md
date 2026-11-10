@@ -77,7 +77,7 @@ Global reactions use `{ "type": "reaction", "emoji": "..." }`; message reactions
 
 `GET /api/movies/search?q=Arrival` searches Wikipedia through its keyless MediaWiki Action API. Queries are normalized, limited to 80 characters, and cached in memory for ten minutes. The API returns up to eight article matches with a title, short description, article URL, and optional Wikimedia thumbnail URL. Requests use the existing admission rate limit.
 
-The current host starts an empty movie poll with `{ "type": "start-video-poll" }`. Each `party-state` includes `poll: { id, status, result }`, initially `{ id: null, status: "idle", result: null }`. Starting a poll creates a new ID and sets its status to `open`. While open, all admitted participants may suggest titles and vote. Use that poll's ID in every suggestion, vote, removal, and finish command; inactive polls and stale IDs are rejected.
+The host or a viewer with `startPoll` starts an empty movie poll with `{ "type": "start-video-poll" }`. Each `party-state` includes `poll: { id, status, result }`, initially `{ id: null, status: "idle", result: null }`. Starting a poll creates a new ID and sets its status to `open`. While open, admitted participants with `suggestTitles` and `vote` respectively may suggest titles and vote. Use that poll's ID in every suggestion, vote, removal, and finish command; inactive polls and stale IDs are rejected.
 
 To add a selected result to an open poll, send the result's metadata:
 
@@ -98,13 +98,13 @@ To add a selected result to an open poll, send the result's metadata:
 
 The server verifies that the selection came from a recent search, accepts only HTTPS Wikipedia article links and Wikimedia upload/thumbnail image URLs, and shares the selected details in party-state snapshots. `posterUrl` may be `null`; title-only suggestions remain supported. Poster availability and reuse terms vary by image; follow the linked article for source details.
 
-The server records the original suggester using its verified browser identity, with a membership/connection identity fallback when no browser cookie is available. Each suggestion includes `ownerId`, `ownerName`, `votes`, and a personalized `canRemove` flag. Identity keys stay private. The first submission owns a title; submitting a duplicate preserves that ownership and casts the submitter's vote for the existing suggestion. Every new suggestion also casts its owner's vote automatically. Cast or replace a vote with `{ "type": "vote-video", "pollId": "current-poll-id", "suggestionId": 1 }`.
+The server records the original suggester using its verified browser identity, with a membership/connection identity fallback when no browser cookie is available. Each suggestion includes `ownerId`, `ownerName`, `votes`, and a personalized `canRemove` flag. Identity keys stay private. The first submission owns a title; submitting a duplicate preserves that ownership and casts the submitter's vote for the existing suggestion when voting is permitted. New suggestions also cast their owner's vote automatically when `vote` is enabled. Cast or replace a vote with `{ "type": "vote-video", "pollId": "current-poll-id", "suggestionId": 1 }`.
 
 Active suggestions' `ownerName` values follow accepted display-name changes and rejoining connections with the same verified owner identity. Rejected names do not change attribution. Completed poll results retain their recorded names and counts.
 
-To remove an entry, send `{ "type": "remove-video-suggestion", "pollId": "current-poll-id", "suggestionId": 1 }`. The server permits the current host or original suggester and clears all votes targeting that entry. Ownership survives browser restarts and room leave/rejoin while the same browser profile retains its cookie, the origin stays the same, and the room/server remains alive. Display names and client-supplied owner fields do not grant ownership. Votes themselves retain their existing connection lifetime.
+To remove an entry, send `{ "type": "remove-video-suggestion", "pollId": "current-poll-id", "suggestionId": 1 }`. The server permits the host, viewers with `removeAnySuggestion`, or the original suggester with `removeOwnSuggestions`, and clears all votes targeting that entry. Ownership survives browser restarts and room leave/rejoin while the same browser profile retains its cookie, the origin stays the same, and the room/server remains alive. Display names and client-supplied owner fields do not grant ownership. Votes themselves retain their existing connection lifetime.
 
-The current host concludes voting with `{ "type": "finish-video-poll", "pollId": "current-poll-id" }`. The resulting `party-state` has status `closed`, an empty active suggestion list, and a frozen `poll.result: { suggestions, totalVotes, winnerIds }`. All highest-voted entries are winners; `winnerIds` is empty when no votes were cast. Clients hide the pinned card and post the result once per poll in chat. The latest result is included in subsequent snapshots for reconnecting/new participants until the host starts a fresh poll. Starting again clears the prior result and creates an empty round. Polls are room-scoped and in memory; finishing does not select or change the shared video.
+The host or a viewer with `finishPoll` concludes voting with `{ "type": "finish-video-poll", "pollId": "current-poll-id" }`. The resulting `party-state` has status `closed`, an empty active suggestion list, and a frozen `poll.result: { suggestions, totalVotes, winnerIds }`. All highest-voted entries are winners; `winnerIds` is empty when no votes were cast. Clients hide the pinned card and post the result once per poll in chat. The latest result is included in subsequent snapshots for reconnecting/new participants until the host starts a fresh poll. Starting again clears the prior result and creates an empty round. Polls are room-scoped and in memory; finishing does not select or change the shared video.
 
 ## Control connection and file declaration
 
@@ -116,7 +116,7 @@ Open `endpoints.websocket`, then send the existing `{ "type": "join", "name": "A
 
 After an unexpected host control-socket disconnect, the server reserves hosting for 15 seconds (`hostReconnectGraceMs: 15000` in server configuration). A reconnect with the same verified browser identity, or the same authenticated membership when no browser identity is available, restores hosting before the deadline. Public default-room reconnects require the browser cookie because their connection IDs change. Client-supplied IDs, roles, and names cannot claim a reservation. After timeout, the next connected participant becomes host; a former temporary host returning afterward becomes a viewer.
 
-Each private room records its creator using the verified browser identity, with the original authenticated membership as fallback. Whenever the creator reconnects, they reclaim the sole host role even after the grace period or a deliberate transfer; the replacement host becomes a viewer with default playback permissions. A deliberate transfer remains in effect while the creator stays on their existing connection. Other hosts cannot block the creator. An explicit Leave request releases the current host immediately, including when its reconnect reservation is pending. The public default room has no permanent creator.
+Each private room records its creator using the verified browser identity, with the original authenticated membership as fallback. Whenever the creator reconnects, they reclaim the sole host role even after the grace period or a deliberate transfer; the replacement host becomes a viewer with inherited room-default permissions. A deliberate transfer remains in effect while the creator stays on their existing connection. Other hosts cannot block the creator. An explicit Leave request releases the current host immediately, including when its reconnect reservation is pending. The public default room has no permanent creator.
 
 Every `party-state` includes `host: { clientId, name, status, reconnectUntil }`. Status is `connected`, `reconnecting`, or `vacant`; `reconnectUntil` is the deadline in epoch milliseconds during a reservation and `null` otherwise. The private room's initial, not-yet-connected creator slot can have a client ID while status is `vacant`. Identity keys are never included. Clients hydrate a reconnecting notice from this snapshot. The existing `host-left` event is sent on actual release/handoff, not on a successfully restored refresh. Pending reservations delay empty-room expiry and are cancelled on restoration, explicit handoff, destruction, or shutdown.
 
@@ -124,7 +124,7 @@ Connected participant snapshots include an `isCreator` flag so temporary hosts c
 
 The reservation preserves the host role, not browser File objects. Refreshing the browser supplying video still ends its source; a source supplied by another connected browser survives role changes. Creator identity and reservations are in memory, scoped to each room, and require retained cookies and the same origin to recognize a returning browser.
 
-The host opens a standard browser file chooser and retains the `File` objects. Declare one video and up to eight sidecar files:
+The host or a viewer with `chooseVideo` opens a standard browser file chooser and retains the `File` objects. Declare one video and up to eight sidecar files:
 
 ```json
 {
@@ -136,7 +136,7 @@ The host opens a standard browser file chooser and retains the `File` objects. D
 
 IDs must be unique ASCII alphanumeric/hyphen strings of 1–64 characters. Sizes must be positive safe integers. Names are limited to 255 characters; directory components are discarded. No filesystem path or arbitrary source URL is accepted. Caption extensions are SRT, VTT, ASS, or SSA.
 
-Only the current connected host may register or edit files. A new registration invalidates the previous source generation, pending reads, and media. The reply is `{ type: "source-registered", requestId, sourceId, token, relayPath }`. The token is a private, single-use attachment credential; never place it in a URL or share it with viewers.
+File registration requires `chooseVideo`; bundled or added captions require `addCaptions`, and caption removal requires `removeCaptions`. A new registration invalidates the previous source generation, pending reads, and media. The reply is `{ type: "source-registered", requestId, sourceId, token, relayPath }`. The token is a private, single-use attachment credential; never place it in a URL or share it with viewers.
 
 Open a separate WebSocket at `relayPath` and send `{ type: "source-attach", sourceId, token }`. Private rooms also require their membership cookie. Attachment must begin within 5 seconds of opening this socket and within 30 seconds of registration. Successful attachment receives `source-attached`, then the existing processing/ready `session-state` messages arrive on the control socket.
 
@@ -215,24 +215,52 @@ During local or acknowledged remote seeks, the browser retains one bounded frame
 
 ## Viewer permissions
 
-Click a name in the chatroom's Participants list to open its dropdown. Everyone can inspect Play/pause, Seek, and Playback speed permissions; only the host can edit a connected viewer. The dropdown closes on another name, an outside click, or Escape. There is no separate permissions panel below the player. Role messages and participants in presence/party snapshots include effective `permissions: { playPause, seek, playbackRate }`.
+Only the host can configure permissions. **Room options > Viewer permissions** edits room defaults. Participant dropdowns show grouped effective permissions, explicit overrides, **Use room default** per override, and **Reset all overrides**. Everyone can inspect permissions.
 
-Only the current host can send:
+The 19 keys and initial viewer defaults are:
+
+| Group | Enabled initially | Disabled initially |
+| --- | --- | --- |
+| Playback | `playPause` | `seek`, `playbackRate` |
+| Media | None | `chooseVideo`, `addCaptions`, `removeCaptions` |
+| Chat | `sendChat`, `replyChat`, `reactMessages`, `globalReactions` | None |
+| Polls | `suggestTitles`, `vote`, `removeOwnSuggestions` | `startPoll`, `finishPoll`, `removeAnySuggestion` |
+| Identity | `changeName` | None |
+| Moderation | None | `blockViewers`, `unblockViewers` |
+
+Effective viewer permissions merge initial defaults, room defaults, and per-browser overrides. Hosts always have every permission. Role and `permissions-updated` messages contain `permissions`, `roomPermissions`, and `permissionOverrides`. Participants in presence/party snapshots include effective `permissions` and `permissionOverrides`; party snapshots also include `roomPermissions`. Initial role/party snapshots supply the current configuration after reconnection.
+
+Only the current host can send these commands (include a `requestId` for acknowledgement):
 
 ```json
-{ "type": "set-viewer-permissions", "clientId": "viewer-client-id",
-  "permissions": { "playPause": true, "seek": true, "playbackRate": false } }
+{ "type": "set-room-permissions", "requestId": "defaults-1",
+  "permissions": { "sendChat": true, "seek": false } }
 ```
 
-All three values must be booleans, with no additional permission keys. The target must be a connected viewer in that room. Include a `requestId` to correlate UI updates. Success broadcasts `{ type: "permissions-updated", clientId, requestId, permissions }` for each affected connection. Connections from the same browser profile share room grants. Invalid requests return `{ type: "error", action: "set-viewer-permissions", clientId, requestId, message }` to the requester.
+```json
+{ "type": "set-viewer-permissions", "requestId": "viewer-1", "clientId": "viewer-client-id",
+  "permissions": { "seek": true, "sendChat": null } }
+```
 
-Defaults are play/pause enabled, seeking and playback speed disabled. Hosts always have full control. The server checks every viewer command: `play`/`pause` require `playPause`, `seek` requires `seek`, and `rate` requires `playbackRate`; viewer ticks and other modes are rejected. A viewer's command cannot modify other playback properties. Accepted commands are echoed to all room clients. Denied commands receive `{ type: "playback-rejected", commandSequence, message, state }`, where `state` is an authoritative session snapshot with `syncMode: "correction"`; clear matching pending intent and restore shared playback.
+```json
+{ "type": "reset-viewer-permissions", "requestId": "reset-1", "clientId": "viewer-client-id" }
+```
 
-Grants survive disconnects, renaming, explicit leave/rejoin, media changes, and another host taking over. They are cleared for a browser when it becomes host, and for the whole room on expiry or server restart. A host who transfers control receives default viewer permissions. The persistent browser cookie survives explicit leave; room membership does not. Clearing cookies, another browser profile, or browser-enforced cookie expiry produces a new identity.
+Permission updates are nonempty partial objects: booleans set values, and `null` removes an individual override. Room defaults cannot be null. Unknown keys, non-boolean values, arrays, and empty patches are rejected atomically. Existing requests containing the original three playback keys remain valid. Viewer targets must be connected viewers in the same room.
+
+Success broadcasts `{ type: "permissions-updated", action, clientId, requestId, permissions, roomPermissions, permissionOverrides }` for each affected connection, followed by party snapshots. Room-default changes affect every inheriting viewer immediately; explicit overrides remain intact. Errors return `{ type: "error", action, clientId, requestId, message }` to the requester.
+
+Every action is enforced server-side, including forged socket requests. Replies require both `sendChat` and `replyChat`. Suggestions require `suggestTitles`; automatic voting occurs only with `vote`. Removal requires `removeAnySuggestion`, or ownership plus `removeOwnSuggestions`. Chat denials echo `requestId`, report `code: "PERMISSION_DENIED"`, and preserve the local draft/reply target. Display-name permission also applies to names supplied through socket join messages.
+
+Video registration requires `chooseVideo`; bundled captions additionally require `addCaptions`. Caption-provider registration/addition requires `addCaptions`; removal requires `removeCaptions`. Provider tokens, ownership, membership, file limits, and room isolation still apply. Authorization is rechecked before pending provider attachment and caption mutation commits. Revoking a grant does not disconnect an already active video provider.
+
+Playback commands remain property-specific: `play`/`pause` require `playPause`, `seek` requires `seek`, and `rate` requires `playbackRate`. Viewer ticks and unsupported modes are rejected. Denied commands receive `{ type: "playback-rejected", commandSequence, message, state }`, with an authoritative `syncMode: "correction"` snapshot.
+
+Overrides survive disconnects, renaming, explicit leave/rejoin, media changes, and host changes. Promotion clears the browser's overrides; demotion inherits current room defaults. Room expiry and server restart clear configuration. Browser identities do not grant admission; clearing cookies or using another browser profile creates a different identity.
 
 ## Participant moderation and host transfer
 
-Hosts can send `{ type, requestId, clientId }`, with `type` equal to `block-participant`, `unblock-participant`, or `transfer-host`. `requestId` must be nonempty text of at most 100 characters. Success returns `{ type: "participant-action-complete", action, requestId, clientId }`; errors return `{ type: "error", action, requestId, clientId, message }`. Only the current connected host may act. Blocking/transferring requires a connected viewer in this room; self/host blocking is rejected, including blocking another tab from the host's own browser identity.
+Hosts can send `{ type, requestId, clientId }`, with `type` equal to `block-participant`, `unblock-participant`, or `transfer-host`. `requestId` must be nonempty text of at most 100 characters. Success returns `{ type: "participant-action-complete", action, requestId, clientId }`; errors return `{ type: "error", action, requestId, clientId, message }`. Only the current connected host may transfer hosting. Blocking and unblocking may also be delegated through `blockViewers` and `unblockViewers`. Delegated blockers cannot block the host (including another tab from its browser), room creator, their own browser, or viewers with either moderation permission. Blocking/transferring requires a connected viewer in this room; self/host blocking is rejected, including blocking another tab from the host's own browser identity.
 
 Presence and party snapshots include `connected`, `blocked`, and `suppliesVideo` for participants. A blocked entry retains its last name, permissions, and client ID, stays dimmed/crossed out, and has an Unblock action for the host. It is excluded from the online count and cannot receive permissions or host ownership. Unblocking removes its offline entry and preserves grants; the viewer must manually rejoin. Blocks follow the existing browser identity, affect all matching tabs, survive host changes, and expire with the room or server. Names are never used as credentials.
 

@@ -521,3 +521,79 @@ test('automatic viewer downgrade resumes and a newer room pause overrides replac
   assert.equal(h.video.currentTime, 48);
   assert.equal(h.sent.some(m => m.type === 'video-state'), false, 'replacement transport stays local');
 });
+
+
+const qualityNotice = h => h.video.overlays.get('watchparty-playback-status')?.content.querySelector('.watchparty-quality-status-text')?.textContent;
+function measureSlowConnection(h) {
+  h.resources([{name:'http://localhost/media/original?v=1', transferSize:100300, encodedBodySize:100000, responseStart:2000, responseEnd:2400}]);
+}
+async function automaticDowngrade(h) {
+  h.video.readyState=4; h.b.runTimers(100); h.state.sourceSwitching=false; h.video.paused=false;
+  h.video.buffered={length:1,start:()=>0,end:()=>100};
+  h.player.applySessionState({...h.snapshot,paused:false});
+  measureSlowConnection(h);
+  h.advance(10000); h.b.runTimers(2000); h.advance(2000); h.b.runTimers(2000);
+}
+
+test('initial Auto assessment uses actual transfers, expires without samples, and does not restart on telemetry', async () => {
+  const h=await harness({observe:true});
+  assert.equal(qualityNotice(h), 'Checking connection speed...');
+  h.resources([{name:'http://localhost/media/original?v=1',transferSize:0,encodedBodySize:100000,responseStart:0,responseEnd:500}]);
+  assert.equal(qualityNotice(h), 'Checking connection speed...');
+  measureSlowConnection(h); assert.equal(qualityNotice(h), 'Connection speed checked');
+  h.b.runTimers(3000); assert.equal(qualityNotice(h),undefined);
+  h.b.runTimers(2000); assert.equal(qualityNotice(h),undefined);
+  const noSample=await harness(); noSample.video.readyState=4; noSample.b.runTimers(100); noSample.state.sourceSwitching=false; noSample.b.runTimers(2000); noSample.b.runTimers(10000);
+  assert.equal(qualityNotice(noSample),'Connection estimate unavailable; continuing with Auto');
+  noSample.b.runTimers(3000); noSample.b.runTimers(2000);
+  assert.equal(qualityNotice(noSample),undefined);
+});
+
+test('automatic quality progress waits for the replacement player, then dismisses the selected resolution', async () => {
+  const h=await harness({observe:true});
+  await automaticDowngrade(h);
+  assert.equal(qualityNotice(h),'Adjusting quality...');
+  const retired={getVideoElement:()=>({readyState:4,currentTime:17,paused:true})};h.video.player=retired;
+  await h.reply(); h.b.runTimers(100);
+  assert.equal(qualityNotice(h),'Adjusting quality...','a retired player cannot finish the indicator');
+  const native=h.b.document.createElement('video'); Object.assign(native,{readyState:4,currentTime:17,paused:true,playbackRate:1.25});
+  h.video.player={getHLSVideoElement:()=>native};
+  h.b.runTimers(100); await flush(); h.b.runTimers(2000);
+  assert.equal(qualityNotice(h),'Using 360p quality');
+  h.b.runTimers(3000); assert.equal(qualityNotice(h),undefined);
+});
+
+test('manual quality and bitrate changes, ordinary seeks, resets and disconnects do not leave Auto notices', async () => {
+  const h=await harness({observe:true});
+  h.change(undefined,2000000); assert.equal(qualityNotice(h),undefined,'manual bitrate with Auto quality stays in Settings');
+  h.change('720'); assert.equal(qualityNotice(h),undefined);
+  h.player.handleQuality({type:'quality-error',mediaVersion:1,requestId:h.requests().at(-1).requestId,message:'Server busy'});
+  assert.equal(qualityNotice(h),undefined);
+  const auto=await harness({observe:true});
+  await automaticDowngrade(auto); const stale=auto.requests().at(-1);
+  auto.player.disconnect(); assert.equal(qualityNotice(auto),undefined);
+  auto.player.applyCompatibility({...auto.snapshot,type:'compatibility-ready',requestId:stale.requestId,rendition:resolveQuality(auto.snapshot.mediaInfo,'360'),segmentSeconds:2,url:'/obsolete'});
+  auto.b.runTimers(10000); assert.equal(qualityNotice(auto),undefined);
+  const seek=await harness({supported:false}); await seek.reply();
+  seek.video.readyState=4;seek.b.runTimers(100);seek.b.runTimers(10000);seek.b.runTimers(3000);
+  seek.player.applySessionState({...seek.snapshot,time:70,playbackRevision:2,streamGeneration:1,syncMode:'seek'});
+  assert.equal(qualityNotice(seek),undefined,'following a shared seek does not restart quality notices');
+});
+
+test('automatic failures briefly replace progress and source replacement cancels all pending quality notices', async () => {
+  const h=await harness({observe:true}); await automaticDowngrade(h);
+  h.player.handleQuality({type:'quality-error',mediaVersion:1,requestId:h.requests().at(-1).requestId,message:'Server busy'});
+  assert.equal(qualityNotice(h),'Server busy'); h.b.runTimers(3000); assert.equal(qualityNotice(h),undefined);
+  h.player.applySessionState({...h.snapshot,mediaVersion:2,processing:true,hasVideo:false});
+  h.b.runTimers(10000); assert.equal(qualityNotice(h),undefined);
+});
+
+
+test('initial Auto preparation errors replace the assessment timeout while manual bitrate failures stay in Settings', async () => {
+  const auto=await harness({supported:false});
+  auto.b.runTimers(10000);
+  assert.match(qualityNotice(auto),/could not be prepared/);
+  auto.b.runTimers(3000); assert.equal(qualityNotice(auto),undefined);
+  const manual=await harness();manual.change(undefined,2000000);
+  manual.b.runTimers(10000);assert.equal(qualityNotice(manual),undefined);
+});

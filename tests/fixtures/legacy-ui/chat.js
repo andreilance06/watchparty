@@ -1,3 +1,4 @@
+import { can } from "./permissions.js";
 import { createEmojiPicker } from "./emoji-picker.js";
 import { createMessageMenu } from "./message-menu.js";
 import { createClientId } from "./utils/client-id.js";
@@ -20,7 +21,7 @@ export function createChat({ elements, state: session, send, attention }) {
     onOpen: () => menu.close()
   });
   const menu = createMessageMenu({
-    menu: messageMenu, beforeOpen: () => picker.close(),
+    menu: messageMenu, canReply: () => can(session, "sendChat") && can(session, "replyChat"), canReact: () => can(session, "reactMessages"), beforeOpen: () => picker.close(),
     onReply: selectReply, onReact: toggleCommentReaction
   });
   document.addEventListener("watchparty-social-change", () => { picker.close(); menu.close(); });
@@ -54,7 +55,10 @@ export function createChat({ elements, state: session, send, attention }) {
   attention.onChatShown(() => { if (followLatest && pendingLatestScroll) scrollToLatest(); });
 
   function selectReply(comment) {
+    if (comment && (!can(session, "replyChat") || !can(session, "sendChat"))) return;
     replyTarget = comment;
+    const submit = chatForm.querySelector('button[type="submit"]');
+    if (submit) submit.disabled = !can(session, "sendChat") || Boolean(comment && !can(session, "replyChat"));
     chatReplyPreview.hidden = !comment;
     chatReplyName.textContent = comment ? `Reply to ${comment.name}` : "";
     chatReplyText.textContent = comment?.message || "";
@@ -95,6 +99,7 @@ export function createChat({ elements, state: session, send, attention }) {
       const reactorNames = reactors.join(", ");
       button.setAttribute("aria-label", `${emoji}, ${count} ${count === 1 ? "reaction" : "reactions"} from ${reactorNames}${comment.myReaction === emoji ? ", your reaction" : ""}`);
       button.title = `${label}: ${reactorNames}`;
+      button.disabled = !can(session, "reactMessages");
       button.setAttribute("aria-pressed", String(comment.myReaction === emoji));
       countElement.textContent = String(count);
     }
@@ -119,6 +124,7 @@ export function createChat({ elements, state: session, send, attention }) {
   }
 
   function toggleCommentReaction(comment, emoji) {
+    if (!can(session, "reactMessages")) { showStatus("The host has disabled message reactions for you."); return; }
     const nextEmoji = comment.myReaction === emoji ? null : emoji;
     if (send({
       type: "comment-reaction",
@@ -252,6 +258,7 @@ export function createChat({ elements, state: session, send, attention }) {
     let start = chatInput.selectionStart ?? chatInput.value.length;
     let end = chatInput.selectionEnd ?? start;
     picker.open(chatEmojiButton, (emoji) => {
+      if (!can(session, "sendChat")) return;
       const next = chatInput.value.slice(0, start) + emoji + chatInput.value.slice(end);
       if (next.length > (chatInput.maxLength || 300)) return;
       chatInput.value = next;
@@ -261,6 +268,7 @@ export function createChat({ elements, state: session, send, attention }) {
         chatInput.setSelectionRange(start, end);
       }
     }, "Emojis and global reactions", emoji => {
+      if (!can(session, "globalReactions")) { showStatus("The host has disabled floating reactions for you."); return; }
       if (send({ type: "reaction", emoji }) === false) showStatus("Reconnect to send a reaction.");
     });
   });
@@ -278,6 +286,7 @@ export function createChat({ elements, state: session, send, attention }) {
     event.preventDefault();
     const message = chatInput.value.trim();
     if (!message || pending) return;
+    if (!can(session, "sendChat") || replyTarget && !can(session, "replyChat")) { showStatus("The host has disabled this action. Your draft is saved here."); return; }
     const requestId = createClientId();
     pending = { requestId, draft: chatInput.value, replyTarget };
     if (send({ type: "chat", message, requestId, ...(replyTarget ? { replyToId: replyTarget.commentId } : {}) }) === false) {
@@ -291,6 +300,7 @@ export function createChat({ elements, state: session, send, attention }) {
   });
   nameForm.addEventListener("submit", (event) => {
     event.preventDefault();
+    if (!can(session, "changeName")) return;
     const nextName = displayNameInput.value.replace(/\s+/g, " ").trim().slice(0, 24);
     if (!nextName) {
       displayNameInput.value = session.clientName;
@@ -307,5 +317,18 @@ export function createChat({ elements, state: session, send, attention }) {
   });
   displayNameInput.addEventListener("input", () => displayNameInput.removeAttribute("aria-invalid"));
 
-  return { addSystemMessage, receive, receiveCommentReaction, acceptName, handleNameMessage, rejectSend, setConnected };
+  function refreshPermissions() {
+    const sendButton = chatForm.querySelector('button[type="submit"]');
+    if (sendButton) sendButton.disabled = !can(session, "sendChat") || Boolean(replyTarget && !can(session, "replyChat"));
+    chatInput.setAttribute("aria-disabled", String(!can(session, "sendChat")));
+    displayNameInput.disabled = !can(session, "changeName");
+    const nameButton = nameForm.querySelector('button[type="submit"]');
+    if (nameButton) nameButton.disabled = !can(session, "changeName");
+    emojiGlobalTab.disabled = !can(session, "globalReactions");
+    emojiMessageTab.disabled = !can(session, "sendChat");
+    chatEmojiButton.disabled = !can(session, "sendChat") && !can(session, "globalReactions");
+    picker.close(); menu.close();
+    for (const comment of comments.values()) updateCommentReactions(comment);
+  }
+  return { refreshPermissions, addSystemMessage, receive, receiveCommentReaction, acceptName, handleNameMessage, rejectSend, setConnected };
 }

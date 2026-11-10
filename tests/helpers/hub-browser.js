@@ -5,7 +5,7 @@ const { EventTargetDouble, ElementDouble } = require("./browser");
 const root = path.resolve(__dirname, "../..");
 
 function createHubBrowserDouble({ search = "", fetch: request } = {}) {
-  const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
+  const html = fs.readFileSync(path.join(root, "tests/fixtures/legacy-ui/index.html"), "utf8");
   const elements = new Map();
   const document = new EventTargetDouble(), window = new EventTargetDouble();
   document.documentElement = new ElementDouble("html");
@@ -36,7 +36,7 @@ function createHubBrowserDouble({ search = "", fetch: request } = {}) {
   });
   const modules = new Map();
   function getModule(filename) {
-    if (!modules.has(filename)) modules.set(filename, new vm.SourceTextModule(fs.readFileSync(filename, "utf8"), { context, identifier: filename }));
+    if (!modules.has(filename)) modules.set(filename, new vm.SourceTextModule(fs.readFileSync(fs.existsSync(filename) ? filename : path.join(root, "tests/fixtures/legacy-ui", path.basename(filename)), "utf8"), { context, identifier: filename }));
     return modules.get(filename);
   }
   async function load() {

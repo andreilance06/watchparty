@@ -3,12 +3,12 @@ const assert = require('node:assert/strict');
 const { createBrowserDouble, captionItems, selectedCaption, pickCaption } = require('./helpers/browser');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
-async function setup({ host = false, onAdd, browser = createBrowserDouble() } = {}) {
+async function setup({ host = false, onAdd, canRemove = false, onRemove, browser = createBrowserDouble() } = {}) {
   const { createSubtitles } = await browser.load('js/player/subtitles.js');
   const video = browser.elements.get('video'), errors = [];
-  const subtitles = createSubtitles({ elements: { video }, report: error => errors.push(error), onAddCaptions: onAdd });
+  const subtitles = createSubtitles({ elements: { video }, report: error => errors.push(error), onAddCaptions: onAdd, onRemoveCaption: onRemove });
   const tracks = [{ id: 'english', title: 'Signs & Songs', label: 'Old label', lang: 'eng', default: true, forced: true, url: '/english.ass' }];
-  subtitles.setAvailability({ hasVideo: true, canAdd: host });
+  subtitles.setAvailability({ hasVideo: true, canAdd: host, canRemove });
   subtitles.setTracks(tracks, { reset: true, key: 'source-1' });
   const root = video.shadowRoot;
   const button = root.querySelector('.movi-subtitle-track-btn');
@@ -160,4 +160,20 @@ test('picker focus return recovers cancellation when the browser omits its cance
   const next = files.chooseCaptions();
   browser.document.body.children.at(-1).dispatch('cancel'); await next;
   assert.equal(browser.window.listeners.get('focus').length, 0);
+});
+
+
+test('caption removal grants expose independent actions and revocation disables stale rows', async () => {
+  const removed = [];
+  const b = await setup({ canRemove: true, onRemove: id => removed.push(id) });
+  b.button.click();
+  const remove = captionItems(b.video).find(row => row.dataset.roomCaptionKey === 'remove:english');
+  assert.equal(remove.getAttribute('role'), 'menuitem');
+  assert.equal(captionItems(b.video).some(row => row.dataset.roomCaptionKey === 'add'), false);
+  remove.click(); assert.deepEqual(removed, ['english']);
+  b.subtitles.setAvailability({ canRemove: false });
+  assert.equal(captionItems(b.video).some(row => row.dataset.roomCaptionKey.startsWith('remove:')), false);
+  remove.click(); assert.deepEqual(removed, ['english']);
+  b.subtitles.setAvailability({ canAdd: true });
+  assert.equal(captionItems(b.video).some(row => row.dataset.roomCaptionKey === 'add'), true);
 });

@@ -165,13 +165,14 @@ function createMediaService({ state, config, encoderPromise, broadcast, thumbnai
     return task;
   }
 
-  function addCaptions(files) {
+  function addCaptions(files, authorize = () => true) {
     return captionMutation(async (version) => {
+      if (!authorize()) throw new Error("Caption permission changed.");
       if (state.captionTracks.length + files.length > 16) throw new Error("A video can have at most 16 caption tracks.");
       const declared = files.map(assignCaption);
       const tracks = (await Promise.all(declared.map((file) => subtitlesService.extract(file, version)))).filter(Boolean);
       if (version !== state.mediaVersion) throw new Error("The video source changed.");
-      if (tracks.length !== files.length) {
+      if (tracks.length !== files.length || !authorize()) {
         declared.forEach((file) => subtitlesService.remove(file.fileName));
         throw new Error("Some caption files could not be converted.");
       }
@@ -180,8 +181,9 @@ function createMediaService({ state, config, encoderPromise, broadcast, thumbnai
     });
   }
 
-  function removeCaption(trackId) {
+  function removeCaption(trackId, authorize = () => true) {
     return captionMutation(() => {
+      if (!authorize()) throw new Error("Caption permission changed.");
       const index = state.captionTracks.findIndex((track) => track.id === trackId);
       if (index < 0) throw new Error("Caption track not found.");
       const [track] = state.captionTracks.splice(index, 1);

@@ -2,7 +2,7 @@ import { captionStatusText, updateCaptionStatus } from "./caption-status.js";
 
 // Movi 0.4.1 has no host-managed subtitle-menu API. Keep the element-level
 // hooks here; do not replace player/decoder methods or edit its generated bundle.
-export function createNativeCaptionMenu({ video, onSelect, onAdd, report }) {
+export function createNativeCaptionMenu({ video, onSelect, onAdd, onRemove = () => {}, report }) {
   let state = { tracks: [], selectedId: null, status: "off", phase: null, hasVideo: false, canAdd: false };
   let destroyed = false, pickerPending = false;
   const hooks = new Map(), containers = new Map(), statuses = new Map();
@@ -39,6 +39,9 @@ export function createNativeCaptionMenu({ video, onSelect, onAdd, report }) {
           pickerPending = false; focusButton();
         });
       } catch (error) { pickerPending = false; report(error.message || String(error)); focusButton(); }
+    } else if (row.dataset.roomCaptionKey.startsWith("remove:")) {
+      if (!state.canRemove) return;
+      close(); onRemove(row.dataset.roomCaptionId); focusButton();
     } else {
       close();
       onSelect(row.dataset.roomCaptionId || null);
@@ -93,6 +96,7 @@ export function createNativeCaptionMenu({ video, onSelect, onAdd, report }) {
       key: `track:${track.id}`, id: track.id, label: name(track), details: details(track), selected: track.id === state.selectedId
     }))];
     if (state.canAdd) choices.push({ key: "add", label: "Add captions" });
+    if (state.canRemove) for (const track of state.tracks) choices.push({ key: `remove:${track.id}`, id: track.id, label: `Remove ${name(track)}`, action: true });
     const retained = new Set();
     let index = context ? 1 : 0;
     for (const choice of choices) {
@@ -102,8 +106,8 @@ export function createNativeCaptionMenu({ video, onSelect, onAdd, report }) {
       row.dataset.roomCaptionId = choice.id || "";
       row.classList.toggle(context ? "movi-context-menu-active" : "movi-subtitle-track-active", Boolean(choice.selected));
       row.classList.toggle("movi-subtitle-pick-item", choice.key === "add");
-      row.setAttribute("role", choice.key === "add" ? "menuitem" : "menuitemradio");
-      if (choice.key === "add") row.removeAttribute("aria-checked");
+      row.setAttribute("role", choice.key === "add" || choice.action ? "menuitem" : "menuitemradio");
+      if (choice.key === "add" || choice.action) row.removeAttribute("aria-checked");
       else row.setAttribute("aria-checked", String(Boolean(choice.selected)));
       row.children[0].innerHTML = choice.key === "off" ? video.constructor.TRACK_ICON_OFF || "" :
         choice.key === "add" ? "+" : video.constructor.TRACK_ICON_SUBTITLE || "";

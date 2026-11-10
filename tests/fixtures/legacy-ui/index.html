@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Find your friends, join a room, and watch together on WatchParty.">
+  <title>Rooms · WatchParty</title>
+  <link rel="stylesheet" href="/css/hub.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/">
+      <img class="brand-mark" src="/assets/images/logo/logo_watchparty.png" alt="">
+      <div>
+        <h1>WatchParty</h1>
+        <p>Watch together. Chat together.</p>
+      </div>
+    </a>
+
+    <div class="header-actions">
+      <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch to light mode" title="Switch to light mode">
+        <svg class="theme-icon icon-sun" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42"/>
+        </svg>
+        <svg class="theme-icon icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M20.4 15.2A8.5 8.5 0 0 1 8.8 3.6 8.5 8.5 0 1 0 20.4 15.2Z"/>
+        </svg>
+      </button>
+      <button id="createRoomButton" class="hub-button hub-primary" type="button">＋ Create room</button>
+    </div>
+  </header>
+
+
+  <main class="hub-main">
+    <section class="hub-intro" aria-labelledby="hubTitle">
+      <div class="hub-intro-copy">
+        <p class="eyebrow">A GOOD TIME, TOGETHER</p>
+        <h2 id="hubTitle">Your people.<br>Your next watch.</h2>
+        <p>Find a room, say hello, and settle in together.</p>
+      </div>
+      <div class="hub-join-profile">
+      <h3>What should we call you?</h3>
+      <p>Choose your name, then join any room below.</p>
+      <label class="hub-name" for="initialDisplayName">
+        Your name <span>(optional)</span>
+        <input id="initialDisplayName" type="text" maxlength="24" autocomplete="nickname" placeholder="Leave blank for a guest name">
+      </label>
+      <p class="hub-profile-hint">Just dropping in? We'll give you a guest name.</p>
+      </div>
+    </section>
+    <section aria-labelledby="roomsTitle">
+      <div class="hub-section-heading">
+        <div><h2 id="roomsTitle">Find your lounge <span id="roomCount" class="hub-count">0</span></h2><p>A shared screen. A conversation. A good time.</p></div>
+        <span class="hub-live"><span aria-hidden="true"></span> Updated live</span>
+      </div>
+      <p id="hubNotice" class="hub-notice" role="status" hidden></p>
+      <div class="hub-status-row"><p id="hubStatus" role="status">Finding rooms…</p><button id="retryRooms" class="hub-button" type="button" hidden>Try again</button></div>
+      <div id="roomGrid" class="room-grid" aria-label="Available rooms" aria-busy="true"></div>
+      <p class="hub-preview-note">Video previews refresh every 30 seconds. Room names and previews are visible to everyone.</p>
+    </section>
+  </main>
+  <dialog id="createRoomDialog" class="hub-dialog" aria-labelledby="createRoomTitle">
+    <form id="createRoomForm">
+      <p class="eyebrow">MAKE YOURSELF AT HOME</p>
+      <h2 id="createRoomTitle">Start a watch party</h2>
+      <p class="hub-dialog-description">Make a room for your group. You choose what plays.</p>
+      <label class="hub-field" for="createRoomName">Room name<input id="createRoomName" type="text" maxlength="80" placeholder="e.g. Friday night films" required autofocus></label>
+      <label class="hub-field" for="createRoomPassword">Password <span>(optional)</span><input id="createRoomPassword" type="password" maxlength="128" autocomplete="new-password"></label>
+      <p class="hub-field-help">Leave it blank to let anyone join.</p>
+      <p id="createRoomStatus" class="hub-form-status" role="status"></p>
+      <div class="hub-dialog-actions"><button id="cancelCreateRoom" class="hub-button" type="button">Cancel</button><button id="submitCreateRoom" class="hub-button hub-primary" type="submit">Create room</button></div>
+    </form>
+  </dialog>
+  <dialog id="joinRoomDialog" class="hub-dialog" aria-labelledby="joinRoomTitle">
+    <form id="joinRoomForm">
+      <p class="eyebrow">YOUR SEAT IS WAITING</p>
+      <h2 id="joinRoomTitle">Join room</h2>
+      <p class="hub-dialog-description">This room needs a password. Ask the host if you don't have it.</p>
+      <label class="hub-field" for="joinRoomPassword">Room password<input id="joinRoomPassword" type="password" maxlength="128" autocomplete="current-password" required autofocus></label>
+      <p id="joinRoomStatus" class="hub-form-status" role="status"></p>
+      <div class="hub-dialog-actions"><button id="cancelJoinRoom" class="hub-button" type="button">Cancel</button><button id="submitJoinRoom" class="hub-button hub-primary" type="submit">Join room</button></div>
+    </form>
+  </dialog>
+  <footer class="site-footer"><span>WatchParty</span><span>Watch together. Chat together.</span></footer>
+  <script type="module" src="/js/hub.js"></script>
+</body>
+</html>

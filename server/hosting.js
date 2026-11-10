@@ -1,4 +1,4 @@
-const { permissionKey, permissionsFor, promoteHost, isRoomCreator, DEFAULT_PERMISSIONS } = require("./permissions");
+const { permissionKey, permissionsFor, promoteHost, isRoomCreator, permissionSnapshot } = require("./permissions");
 const { currentTime, sessionState } = require("./state");
 
 function hostStatus(state) {
@@ -23,7 +23,7 @@ function createHosting(room, { config, scheduleExpiry }) {
   function role(clientId) {
     const client = state.clients.get(clientId);
     if (client) transport.send(client.ws, { type: "role", clientId, hostId: state.hostId, role: client.role,
-      name: client.name, viewerCount: state.clients.size, permissions: permissionsFor(state, client, clientId) });
+      name: client.name, viewerCount: state.clients.size, ...permissionSnapshot(state, client, clientId) });
   }
 
   function assign(clientId, { notifyClient = true, announce = true } = {}) {
@@ -35,7 +35,7 @@ function createHosting(room, { config, scheduleExpiry }) {
     for (const [id, other] of state.clients) {
       if (id !== clientId && other.role === "host") {
         other.role = "viewer";
-        state.viewerPermissions.set(permissionKey(other, id), { ...DEFAULT_PERMISSIONS });
+        state.viewerPermissions.delete(permissionKey(other, id));
         demoted.push(id);
       }
     }

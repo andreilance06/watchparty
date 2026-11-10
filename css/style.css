@@ -1,9 +1,24 @@
 /* Ordered entry point; component styles live in focused files. */
-@import url("./base.css");
-@import url("./layout.css");
-@import url("./player.css");
-@import url("./chat.css");
-@import url("./voting.css");
-@import url("./participants.css");
-@import url("./responsive.css");
-@import url("./lounge.css");
+@import "./base.css";
+@import "./layout.css";
+@import "./player.css";
+@import "./chat.css";
+@import "./voting.css";
+@import "./participants.css";
+@import "./responsive.css";
+@import "./lounge.css";
+
+/* Permission controls share the participant switches and remain usable on small screens. */
+.permission-group { margin: 20px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.permission-switch { flex-wrap: wrap; gap: 8px; }
+.permission-switch input { flex-shrink: 0; }
+.permission-inherit { display: block; margin: 0 0 8px; font: inherit; font-size: 11px; background: transparent; color: var(--muted); border: 0; text-align: left; padding: 0; cursor: pointer; }
+.permission-inherit:disabled { cursor: default; opacity: .6; }
+.permissions-dialog { width: min(540px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; border: 1px solid var(--border); border-radius: 18px; padding: 24px; background: var(--surface); color: var(--text); }
+.permissions-dialog::backdrop { background: #080b17aa; backdrop-filter: blur(5px); }
+.permissions-dialog-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.permissions-dialog h2 { margin: 4px 0 12px; }
+.permissions-dialog > p { font-size: 13px; line-height: 1.6; color: var(--muted); }
+.permissions-dialog button { padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); cursor: pointer; }
+.permissions-dialog .permission-switch { padding: 10px 0; }
+.participant-dropdown { overscroll-behavior: contain; }

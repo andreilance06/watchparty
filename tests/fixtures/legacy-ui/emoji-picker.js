@@ -359,6 +359,7 @@ export function createEmojiPicker({ picker, search, grid, emptyMessage, tabs, me
 
   function setMode(nextMode, focus = false) {
     mode = nextMode === "global" && globalSelect ? "global" : "message";
+    if (globalSelect && (mode === "global" ? globalTab : messageTab)?.disabled) mode = mode === "global" ? "message" : "global";
     const global = mode === "global";
     picker.setAttribute("aria-label", global ? "Send global reaction" : contextLabel);
     if (hint) hint.textContent = global ? "Send a floating reaction to everyone in the room."

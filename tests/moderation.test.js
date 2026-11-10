@@ -89,7 +89,7 @@ test("private-room blocks reject old memberships and new admission until unblock
   assert.equal((await fetch(f.base + membership.body.endpoints.session, { headers: { Cookie: cookie } })).status, 401);
   membership = await f.api("/api/rooms/join", body, identity);
   const rejoined = await f.connect("Back", `${membership.cookie}; ${identity}`, membership.body.endpoints.websocket);
-  assert.deepEqual(rejoined.role.permissions, { playPause: false, seek: true, playbackRate: false });
+  assert.deepEqual(rejoined.role.permissions, { ...DEFAULT_PERMISSIONS, playPause: false, seek: true, playbackRate: false });
   await f.action(host, "block-participant", rejoined.role.clientId);
   const room = f.app.rooms.get(created.body.room.id);
   await f.close(host); await new Promise(resolve => setTimeout(resolve, 180));
@@ -100,7 +100,7 @@ test("moderation rejects unauthorized, self, cross-room, and concurrent stale-ho
   const f = await setup(t);
   const host = await f.connect("Host"), one = await f.connect("One"), two = await f.connect("Two");
   for (const type of ["block-participant", "unblock-participant", "transfer-host"]) {
-    assert.match((await f.action(one, type, two.role.clientId, true)).message, /current host/);
+    assert.match((await f.action(one, type, two.role.clientId, true)).message, /permission/);
   }
   assert.match((await f.action(host, "block-participant", host.role.clientId, true)).message, /connected viewer/);
   assert.match((await f.action(host, "transfer-host", randomUUID(), true)).message, /connected viewer/);
@@ -108,7 +108,7 @@ test("moderation rejects unauthorized, self, cross-room, and concurrent stale-ho
   host.send({ type: "transfer-host", clientId: one.role.clientId, requestId: first });
   host.send({ type: "transfer-host", clientId: two.role.clientId, requestId: second });
   await host.next("participant-action-complete", m => m.requestId === first);
-  assert.match((await host.next("error", m => m.requestId === second)).message, /current host/);
+  assert.match((await host.next("error", m => m.requestId === second)).message, /permission/);
   assert.equal([...f.app.state.clients.values()].filter(client => client.role === "host").length, 1);
   assert.equal(f.app.state.hostId, one.role.clientId);
 });
@@ -242,8 +242,8 @@ test("participant dropdown shows read-only permissions, blocked styling, actions
   trigger.click(); socket.receive({ type: "role", role: "host", clientId: "self" });
   assert.ok(inputs().every(input => !input.disabled));
   let actions = el("participantDetails").children.at(-1);
-  assert.deepEqual(actions.children.map(button => button.textContent), ["Transfer host", "Kick and block"]);
-  actions.children[1].click(); const command = socket.sent.at(-1); assert.equal(command.type, "block-participant");
+  assert.deepEqual(actions.children.map(button => button.textContent), ["Reset all overrides", "Transfer host", "Kick and block"]);
+  actions.children[2].click(); const command = socket.sent.at(-1); assert.equal(command.type, "block-participant");
   socket.receive({ type: "presence", count: 1, participants: [{ ...people[0], connected: false, blocked: true }] });
   assert.equal(trigger.classList.contains("participant-blocked"), true);
   assert.equal(el("viewerCount").textContent, "1 online"); assert.ok(inputs().every(input => input.disabled));
@@ -262,4 +262,28 @@ test("blocked browsers stop reconnecting and return to room selection", async ()
   fresh.context.fetch = async url => url === "/api/session" ? { ok: false, json: async () => ({ code: "ROOM_BLOCKED" }) } : { ok: true };
   await fresh.load("js/app.js"); assert.equal(fresh.sockets.length, 0);
   assert.equal(fresh.context.location.href, "/?blocked=1");
+});
+
+
+test("delegated moderators can block ordinary viewers but cannot change grants or block protected identities", async t => {
+  const f = await setup(t);
+  const hostCookie = (await f.api("/api/viewer-identity")).cookie;
+  const host = await f.connect("Host", hostCookie), hostTab = await f.connect("Host tab", hostCookie);
+  const moderator = await f.connect("Moderator"), otherModerator = await f.connect("Other moderator"), ordinary = await f.connect("Ordinary");
+  for (const peer of [moderator, otherModerator]) {
+    host.send({ type: "set-viewer-permissions", clientId: peer.role.clientId, permissions: { blockViewers: true, unblockViewers: true } });
+    await peer.next("permissions-updated", m => m.clientId === peer.role.clientId);
+  }
+  for (const peer of [host, hostTab, moderator, otherModerator]) {
+    const result = await f.action(moderator, "block-participant", peer.role.clientId, true);
+    assert.equal(result.type, "error");
+  }
+  moderator.send({ type: "set-viewer-permissions", clientId: ordinary.role.clientId, permissions: { blockViewers: true } });
+  assert.equal((await moderator.next("error", m => m.action === "set-viewer-permissions")).type, "error");
+  await f.action(moderator, "transfer-host", ordinary.role.clientId, true);
+  await f.action(moderator, "block-participant", ordinary.role.clientId);
+  await f.action(moderator, "unblock-participant", ordinary.role.clientId);
+  host.send({ type: "set-viewer-permissions", clientId: moderator.role.clientId, permissions: { blockViewers: false } });
+  await moderator.next("permissions-updated", m => m.clientId === moderator.role.clientId);
+  await f.action(moderator, "block-participant", otherModerator.role.clientId, true);
 });

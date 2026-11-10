@@ -1,22 +1,26 @@
+import { createLifecycle } from "../utils/lifecycle.js";
 import "../../vendor/movi-player.js";
 import { choosePlayback } from "./playback.js";
 import { createMediaEventBridge } from "./media-events.js";
 import { createCompatibilityBuffer } from "./compatibility-buffer.js";
 import { createAdaptiveQuality } from "./adaptive-quality.js";
+import { createPlaybackStatus } from "./playback-status.js";
 import { createSubtitles } from "./subtitles.js";
 import { createFullscreen } from "./fullscreen.js";
 import { createPlaybackSync } from "./sync.js";
 import { createSeekPresentation } from "./seek-presentation.js";
-import { canControl, DEFAULT_PERMISSIONS } from "../permissions.js";
+import { can, canControl, DEFAULT_PERMISSIONS } from "../permissions.js";
 
 export function createPlayer({ elements, state: session, send, report, files, attention }) {
+  const life = createLifecycle();
   const { video, videoPlaceholder, placeholderTitle, placeholderText, viewerControls,
     chooseVideoButton, hostControls, roleBadge, fileName, syncStatus } = elements;
-  const subtitles = createSubtitles({ elements, report, onAddCaptions: files.chooseCaptions });
+  const playbackStatus = createPlaybackStatus(video);
+  const subtitles = createSubtitles({ elements, report, playbackStatus, onAddCaptions: files.chooseCaptions, onRemoveCaption: files.removeCaption });
   const sync = createPlaybackSync({ elements, state: session, send });
   const mediaEvents = createMediaEventBridge(video);
   const compatibilityBuffer = createCompatibilityBuffer(video);
-  createFullscreen({ elements, getHostPaused: () => session.latestHostPaused, afterResize: subtitles.refreshLayout, attention });
+  const fullscreen = createFullscreen({ elements, getHostPaused: () => session.latestHostPaused, afterResize: subtitles.refreshLayout, attention });
   let latest, latestAt = 0, sourceKey = "", generation = 0, mode = "", pendingCompatibility;
   let switchStarted = 0, lastProgress = 0, lastTime = -1, metrics = {}, selectionStarted = 0;
   let requestSequence = 0, requestTimer, recoveryTimer, recovery, recoveryUsed = false, terminalError = false;
@@ -30,7 +34,7 @@ export function createPlayer({ elements, state: session, send, report, files, at
     settled: () => !session.sourceSwitching && !sync.isApplying() && !awaitingReplacement(),
     canBeginLocal: () => Boolean(latest?.hasVideo && !session.suppressVideoEvents && !session.sourceSwitching && canControl(session, "seek")),
     onTimeout: () => failPlayback("The seek could not finish. Check the connection and try again.") });
-  const quality = createAdaptiveQuality({ video, session, send, report, surface, fail: failPlayback,
+  const quality = createAdaptiveQuality({ video, session, send, report, surface, playbackStatus, fail: failPlayback,
     validateOriginal: () => choosePlayback(latest?.mediaInfo),
     onRenditionReady: preparePipeline,
     switchSource(engine) {
@@ -120,6 +124,7 @@ export function createPlayer({ elements, state: session, send, report, files, at
   function failPlayback(message) {
     if (terminalError) return;
     terminalError = true;
+    quality.failed(message);
     seekPresentation.clear();
     cancelRecovery(); sync.cancel();
     session.suppressVideoEvents = true;
@@ -270,7 +275,7 @@ export function createPlayer({ elements, state: session, send, report, files, at
     const key = `${state.sessionId || ""}:${state.mediaVersion ?? ""}:${state.originalUrl || state.mediaUrl || ""}`;
     session.mediaVersion = state.mediaVersion;
     session.latestHostPaused = Boolean(state.paused);
-    subtitles.setAvailability({ hasVideo: Boolean(state.hasVideo && !state.processing), canAdd: session.role === "host" });
+    subtitles.setAvailability({ hasVideo: Boolean(state.hasVideo && !state.processing), canAdd: can(session, "addCaptions"), canRemove: can(session, "removeCaptions") });
     if (state.processing) {
       seekPresentation.clear();
       openingVideo = true;
@@ -343,7 +348,7 @@ export function createPlayer({ elements, state: session, send, report, files, at
 
   function applyRole(role) {
     files.setRole(role); session.role = role;
-    subtitles.setAvailability({ canAdd: role === "host" });
+    subtitles.setAvailability({ canAdd: can(session, "addCaptions"), canRemove: can(session, "removeCaptions") });
     updateSharingStatus();
     roleBadge.textContent = role === "host" ? "Host" : "Viewer";
     roleBadge.classList.toggle("host", role === "host");
@@ -365,6 +370,8 @@ export function createPlayer({ elements, state: session, send, report, files, at
   }
 
   function updateControls() {
+    hostControls.hidden = !can(session, "chooseVideo");
+    subtitles.setAvailability({ canAdd: can(session, "addCaptions"), canRemove: can(session, "removeCaptions") });
     const host = session.role === "host";
     const flags = [];
     if (!host) flags.push("noloop", "nopip", "noplaylist");
@@ -378,7 +385,8 @@ export function createPlayer({ elements, state: session, send, report, files, at
   }
 
   function applyPermissions(value) {
-    session.permissions = { ...(value || DEFAULT_PERMISSIONS) };
+    session.permissions = { ...DEFAULT_PERMISSIONS, ...value };
+    files.setPermissions?.(session.permissions);
     updateControls();
   }
 
@@ -417,7 +425,7 @@ export function createPlayer({ elements, state: session, send, report, files, at
 
   // Movi's built-in keyboard handler does not gate all transport shortcuts.
   // Viewers use this small permission-aware handler while hosts keep Movi's.
-  video.addEventListener("keydown", event => {
+  life.listen(video, "keydown", event => {
     if (session.role === "host" || event.ctrlKey || event.metaKey || event.altKey || !session.activeMediaUrl) return;
     if ((event.composedPath?.() || []).some(node => /^(INPUT|TEXTAREA|SELECT|BUTTON)$/i.test(node.tagName) || node.isContentEditable)) return;
     const key = event.key.toLowerCase();
@@ -437,6 +445,7 @@ export function createPlayer({ elements, state: session, send, report, files, at
     sync.status(recovery ? "Reconnecting playback…" : session.sourceSwitching ? "Preparing compatible playback…" : undefined);
   }
   function showMediaError(message) {
+    quality.failed(message);
     seekPresentation.clear();
     terminalError = true; cancelRecovery(); sync.cancel();
     session.suppressVideoEvents = true; session.sourceSwitching = false;
@@ -479,11 +488,11 @@ export function createPlayer({ elements, state: session, send, report, files, at
       metrics.fallbackPending = false; video.watchpartyMetrics = metrics;
     }
   }
-  video.addEventListener("loadedmetadata", ready);
-  video.addEventListener("canplay", ready);
-  video.addEventListener("loadeddata", progress);
-  video.addEventListener("playing", progress);
-  document.addEventListener("visibilitychange", resetProgress);
+  life.listen(video, "loadedmetadata", ready);
+  life.listen(video, "canplay", ready);
+  life.listen(video, "loadeddata", progress);
+  life.listen(video, "playing", progress);
+  life.listen(document, "visibilitychange", resetProgress);
   let hdrAssessment = 0;
   async function reassessHdr() {
     if (!latest?.mediaInfo?.hdr || document.hidden || terminalError) return;
@@ -493,13 +502,13 @@ export function createPlayer({ elements, state: session, send, report, files, at
     if (quality.enabled()) quality.updatePlayback(choice);
     else if (choice === "compatibility" && mode !== "compatibility") requestCompatibility("HDR display capability changed");
   }
-  document.addEventListener("visibilitychange", reassessHdr);
+  life.listen(document, "visibilitychange", reassessHdr);
   for (const query of ["(dynamic-range: high)", "(video-dynamic-range: high)"]) {
-    globalThis.matchMedia?.(query).addEventListener?.("change", reassessHdr);
+    life.listen(globalThis.matchMedia?.(query), "change", reassessHdr);
   }
   // Some native-engine wrappers expose readyState without forwarding every
   // HTML media event. Also observe a first frame while initially paused.
-  setInterval(() => {
+  life.interval(() => {
     if (!latest || !session.activeMediaUrl || terminalError || pendingCompatibility || awaitingReplacement()) return;
     mediaEvents.connect();
     compatibilityBuffer.update();
@@ -518,30 +527,30 @@ export function createPlayer({ elements, state: session, send, report, files, at
       } else sync.status("Reconnecting playback…");
     }
   }, 100);
-  video.addEventListener("seeked", () => {
+  life.listen(video, "seeked", () => {
     if (metrics.seekStarted) { metrics.seekMs = performance.now() - metrics.seekStarted; metrics.seekStarted = 0; video.watchpartyMetrics = metrics; }
     progress();
   });
-  video.addEventListener("pointerdown", () => {
+  life.listen(video, "pointerdown", () => {
     if (session.role !== "viewer" || session.sourceSwitching) return;
     video.muted = false;
     if (!Number.isFinite(video.volume) || video.volume < 0.05) video.volume = 1;
     if (!session.latestHostPaused && video.paused) video.play().catch(() => {});
   });
-  chooseVideoButton.addEventListener("click", files.chooseVideo);
-  video.addEventListener("play", () => { resetProgress(); localIntent("play"); });
-  video.addEventListener("pause", () => { resetProgress(); localIntent("pause"); });
-  video.addEventListener("watchparty-seek-intent", event => {
+  life.listen(chooseVideoButton, "click", files.chooseVideo);
+  life.listen(video, "play", () => { resetProgress(); localIntent("play"); });
+  life.listen(video, "pause", () => { resetProgress(); localIntent("pause"); });
+  life.listen(video, "watchparty-seek-intent", event => {
     if (!session.suppressVideoEvents && !session.sourceSwitching && !canControl(session, "seek")) event.preventDefault();
     localIntent("seek", event.detail.time);
   });
-  video.addEventListener("seeking", () => {
+  life.listen(video, "seeking", () => {
     metrics.seekStarted = performance.now(); lastProgress = performance.now();
     if (!video.player?.getHLSVideoElement?.()) localIntent("seek");
   });
-  video.addEventListener("ratechange", () => localIntent("rate"));
-  setInterval(() => { if (session.role === "host" && !video.paused) sync.broadcast("tick"); }, 2000);
-  setInterval(() => {
+  life.listen(video, "ratechange", () => localIntent("rate"));
+  life.interval(() => { if (session.role === "host" && !video.paused) sync.broadcast("tick"); }, 2000);
+  life.interval(() => {
     if (!latest || !session.activeMediaUrl || terminalError || pendingCompatibility || mode === "compatibility") return;
     const active = surface(), time = Number(active.currentTime) || 0, now = performance.now();
     const playing = !document.hidden && !active.paused && !video.ended && !session.sourceSwitching;
@@ -554,7 +563,7 @@ export function createPlayer({ elements, state: session, send, report, files, at
     const seekStalled = metrics.seekStarted && video.seeking && now - metrics.seekStarted > 5000;
     if (openingStalled || playbackStalled || seekStalled) requestCompatibility("playback stalled");
   }, 1000);
-  video.addEventListener("smoothwarning", (event) => {
+  life.listen(video, "smoothwarning", (event) => {
     if (event.detail?.measured || event.detail?.software || event.detail?.playable === false || event.detail?.smooth === false) {
       event.preventDefault(); requestCompatibility("decoder cannot keep up");
     }
@@ -568,11 +577,12 @@ export function createPlayer({ elements, state: session, send, report, files, at
       else requestCompatibility(message, true);
     }
   }
-  video.addEventListener("error", playbackError);
-  video.addEventListener("errordisplay", playbackError);
-  video.addEventListener("nativeaudiounsupported", () => {
+  life.listen(video, "error", playbackError);
+  life.listen(video, "errordisplay", playbackError);
+  life.listen(video, "nativeaudiounsupported", () => {
     if (latest?.mediaInfo?.hasAudio) requestCompatibility("native audio decoder unavailable");
   });
   return { applyRole, applyPermissions, rejectPlayback, applySessionState, applyCompatibility, updateCaptions, updateEncoder, showMediaError, showNoVideo,
-    handleQuality: quality.handle, disconnect: () => { seekPresentation.clear(); quality.reset(null); } };
+    destroy() { generation++; latest = null; terminalError = true; life.dispose(); clearCompatibilityRequest(); cancelRecovery(); sync.destroy(); seekPresentation.dispose(); quality.destroy(); subtitles.destroy(); playbackStatus.clearAll(); mediaEvents.destroy(); compatibilityBuffer.destroy(); fullscreen.destroy(); files.disconnect(); video.dispose?.(); },
+    handleQuality: quality.handle, disconnect: () => { seekPresentation.clear(); quality.reset(null); subtitles.setTracks([], { reset: true, key: "disconnected" }); playbackStatus.clearAll(); } };
 }

@@ -28,5 +28,5 @@ export function createMediaEventBridge(video) {
     }
   }
   video.addEventListener("nativefallback", connect);
-  return { connect };
+  return { connect, destroy() { video.removeEventListener("nativefallback", connect); for (const [type, handler] of handlers) native?.removeEventListener(type, handler); if (player?.seek === wrappedSeek && originalSeek) player.seek = originalSeek; handlers = []; } };
 }

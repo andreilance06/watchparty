@@ -1,4 +1,4 @@
-import { DEFAULT_PERMISSIONS } from "./permissions.js";
+import { DEFAULT_PERMISSIONS, PERMISSION_CATALOG, can } from "./permissions.js";
 import { createClientId } from "./utils/client-id.js";
 
 export function createParticipants({ elements, state, send }) {
@@ -32,7 +32,7 @@ export function createParticipants({ elements, state, send }) {
     renderDetails(focus);
   }
   function request(type, person, permissions, focus) {
-    if (pending || !connected || state.role !== "host") return;
+    if (pending || !connected || !can(state, ({ "block-participant": "blockViewers", "unblock-participant": "unblockViewers" })[type]) && state.role !== "host") return;
     const id = createClientId();
     pending = { id, clientId: person.clientId, focus,
       timer: setTimeout(() => finish({ message: "The request timed out. Try again." }), 10000) };
@@ -57,19 +57,33 @@ export function createParticipants({ elements, state, send }) {
     }
     const editable = connected && state.role === "host" && person.role !== "host" && !person.blocked;
     const permissions = person.permissions || DEFAULT_PERMISSIONS;
-    for (const [key, title] of [["playPause", "Play/pause"], ["seek", "Seek"], ["playbackRate", "Playback speed"]]) {
+    let group;
+    for (const { key, label: title, group: section } of PERMISSION_CATALOG) {
+      if (group !== section) {
+        const heading = document.createElement("h4"); heading.className = "permission-group";
+        heading.textContent = section; participantDetails.appendChild(heading); group = section;
+      }
       const label = document.createElement("label"); label.className = "permission-switch";
       const input = document.createElement("input"); input.type = "checkbox"; input.checked = permissions[key]; input.dataset.permission = key;
       input.disabled = !editable || Boolean(pending); input.setAttribute("aria-label", `${title} for ${person.name}`);
       input.addEventListener("change", () => {
-        const next = { ...permissions, [key]: !permissions[key] }; input.checked = permissions[key];
+        const next = { [key]: !permissions[key] }; input.checked = permissions[key];
         if (editable) request("set-viewer-permissions", person, next, key);
       });
       const text = document.createElement("span"); text.textContent = title;
       label.append(text, input); participantDetails.appendChild(label);
+      if (editable) {
+        const reset = document.createElement("button"); reset.type = "button"; reset.className = "permission-inherit";
+        const overridden = Object.hasOwn(person.permissionOverrides || {}, key);
+        reset.textContent = overridden ? "Use room default" : "Room default";
+        reset.setAttribute("aria-label", `Use room default for ${title}`);
+        reset.disabled = !overridden || Boolean(pending);
+        reset.addEventListener("click", () => request("set-viewer-permissions", person, { [key]: null }, key));
+        participantDetails.appendChild(reset);
+      }
       if (focus === key && !input.disabled) queueMicrotask(() => input.focus());
     }
-    if (connected && state.role === "host" && person.role !== "host") {
+    if (connected && person.role !== "host" && (state.role === "host" || can(state, "blockViewers") || can(state, "unblockViewers"))) {
       const actions = document.createElement("div"); actions.className = "participant-actions";
       const addAction = (title, type, danger = false) => {
         const button = document.createElement("button"); button.type = "button"; button.textContent = title;
@@ -77,11 +91,14 @@ export function createParticipants({ elements, state, send }) {
         if (danger) button.className = "participant-danger";
         button.addEventListener("click", () => request(type, person)); actions.appendChild(button);
       };
-      if (person.blocked) addAction("Unblock", "unblock-participant");
-      else {
-        addAction("Transfer host", "transfer-host");
-        if (!person.isCreator) addAction("Kick and block", "block-participant", true);
-        if (person.suppliesVideo && !person.isCreator) {
+      if (editable) addAction("Reset all overrides", "reset-viewer-permissions");
+      if (person.blocked && can(state, "unblockViewers")) addAction("Unblock", "unblock-participant");
+      else if (!person.blocked) {
+        if (state.role === "host") addAction("Transfer host", "transfer-host");
+        const ownBrowser = person.clientId === state.clientId || person.sameBrowser;
+        const protectedModerator = state.role !== "host" && (person.permissions?.blockViewers || person.permissions?.unblockViewers);
+        if (!person.isCreator && !person.hostBrowser && !ownBrowser && !protectedModerator && can(state, "blockViewers")) addAction("Kick and block", "block-participant", true);
+        if (person.suppliesVideo && !person.isCreator && !person.hostBrowser && !ownBrowser && !protectedModerator && can(state, "blockViewers")) {
           const warning = document.createElement("p"); warning.className = "participant-action-warning";
           warning.textContent = "Blocking this viewer stops the current video."; actions.appendChild(warning);
         }
@@ -134,11 +151,14 @@ export function createParticipants({ elements, state, send }) {
   return {
     close, refresh: () => { if (selected) renderDetails(); },
     setConnected(value) { connected = value; if (!value) { clearTimeout(pending?.timer); pending = null; close(); } },
-    updateParticipants(value = []) { people = value; renderList(); },
+    updateParticipants(value = []) {
+      people = value.map(person => ({ ...person, sameBrowser: person.sameBrowser ?? people.find(old => old.clientId === person.clientId)?.sameBrowser }));
+      renderList();
+    },
     setSourceOwner(clientId) { if (clientId === undefined) return; people = people.map(person => ({ ...person, suppliesVideo: !person.blocked && person.clientId === clientId })); renderList(); },
     updated(message) {
       const person = people.find(item => item.clientId === message.clientId);
-      if (person) person.permissions = message.permissions;
+      if (person) { person.permissions = message.permissions; person.permissionOverrides = message.permissionOverrides || {}; }
       if (pending?.clientId === message.clientId && (!message.requestId || message.requestId === pending.id)) finish({ message: "Permissions updated." });
       else if (selected) renderDetails();
     },

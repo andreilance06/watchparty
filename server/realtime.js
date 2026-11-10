@@ -1,6 +1,7 @@
 const crypto = require("crypto");
 const WebSocket = require("ws");
 const { createNameRegistry } = require("./names");
+const { permissionsFor } = require("./permissions");
 const { createMessageHandler } = require("./messages");
 const { validOrigin } = require("./rooms");
 
@@ -37,9 +38,12 @@ function createRealtimeServer(server, { registry, config, movieSearch }) {
     ws.clientId = member?.id || crypto.randomUUID();
     if (member) member.permissionIdentity ||= identity || `member:${member.id}`;
     const previous = state.clients.get(ws.clientId);
+    const permissionIdentity = member?.permissionIdentity || identity;
+    const mayRename = permissionsFor(state, { role: "viewer", permissionIdentity }, ws.clientId).changeName;
+    const retainedName = !mayRename && state.viewerNames.get(permissionIdentity || ws.clientId);
     state.clients.set(ws.clientId, {
       ws, role: "viewer",
-      name: previous?.name || member?.name || availableGuestName(ws.clientId),
+      name: retainedName || previous?.name || (mayRename ? member?.name : null) || availableGuestName(ws.clientId),
       permissionIdentity: member?.permissionIdentity || identity,
       hasMemberName: Boolean(member?.name)
     });

@@ -1,7 +1,9 @@
+import { createLifecycle } from "../utils/lifecycle.js";
 import { chooseAutomaticQuality, createQualityHysteresis } from "./quality-policy.js";
 import { createNativeQualityMenu } from "./native-quality-menu.js";
 
-export function createAdaptiveQuality({ video, session, send, switchSource, switchRendition, fail, report, surface, validateOriginal, onRenditionReady }) {
+export function createAdaptiveQuality({ video, session, send, switchSource, switchRendition, fail, report, surface, validateOriginal, onRenditionReady, playbackStatus }) {
+  const life = createLifecycle();
   let source, engine, current, pending, serial = 0, throughput = 0, measuredAt = 0, demand = {}, blockedUntil = 0;
   let preferences = { quality: "auto", bitrate: "auto" }, warning = "", retryUsed = false, loading, loader;
   let deferred, awaitingSeek = false, refreshKey;
@@ -20,6 +22,30 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
       estimatedBitrate: bitrateRange().max * 2, id: `${width}x${height}_source`, reason: "Source (compatible near-lossless transcode)" };
   };
   const now = () => performance.now();
+  let assessing = false, assessmentStarted = false, assessmentTimer, adjusting = false;
+  function clearAssessment() { clearTimeout(assessmentTimer); assessmentTimer = undefined; assessing = false; }
+  function clearStatus() { clearAssessment(); adjusting = false; playbackStatus?.clear("quality"); }
+  function progressStatus() {
+    if (adjusting) playbackStatus?.set("quality", { text: "Adjusting quality...", pending: true });
+    else if (assessing) playbackStatus?.set("quality", { text: "Checking connection speed...", pending: true });
+  }
+  function startAssessment() {
+    if (assessmentStarted || !enabled() || preferences.quality !== "auto") return;
+    assessmentStarted = true; assessing = true; progressStatus();
+    assessmentTimer = setTimeout(() => {
+      clearAssessment();
+      if (!adjusting) playbackStatus?.set("quality", { text: "Connection estimate unavailable; continuing with Auto" });
+    }, 10000);
+  }
+  function statusFailure(message) {
+    clearAssessment(); adjusting = false;
+    playbackStatus?.set("quality", { text: message });
+  }
+  function statusReady() {
+    if (!adjusting) return;
+    adjusting = false; clearAssessment();
+    playbackStatus?.set("quality", { text: current?.id === "source" ? "Using original quality" : `Using ${current.height}p quality` });
+  }
   function paint(reason) {
     const actual = current?.id === "source" ? `Original (${source?.mediaInfo?.height || "?"}p)` :
       current?.rateControl === "near-lossless" ? `Source (${current.width}×${current.height}, compatible near-lossless transcode)` :
@@ -62,17 +88,20 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
     request(profile, settings, "Following the shared playhead", true);
     refreshKey = key;
   }
-  function beginLoading(apply) {
+  function beginLoading(apply, announce = true) {
     clearLoading();
-    const attempt = loading = { retiredPlayer: video.player };
+    const attempt = loading = { retiredPlayer: video.player, announce };
     apply();
     attempt.timer = setTimeout(() => {
       if (loading !== attempt) return;
-      clearLoading(); fail("The selected quality could not start playback. Check the connection and try Auto.");
+      clearLoading();
+      const message = "The selected quality could not start playback. Check the connection and try Auto.";
+      if (attempt.announce && preferences.quality === "auto" || assessing || adjusting) statusFailure(message);
+      fail(message);
     }, 10000);
   }
   function settleLoading() {
-    if (loading && (!loading.retiredPlayer || video.player !== loading.retiredPlayer) && surface().readyState >= 2 && !session.sourceSwitching) clearLoading();
+    if (loading && (!loading.retiredPlayer || video.player !== loading.retiredPlayer) && surface().readyState >= 2 && !session.sourceSwitching) { clearLoading(); statusReady(); }
   }
   function profileFor(settings) {
     if (settings.quality === "source") return sourceSupported() && now() >= blockedUntil ?
@@ -96,15 +125,22 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
     send({ type: "quality-selection", mediaVersion: source.mediaVersion, renditionId: profile.id });
     paint(reason);
   }
-  function request(profile, settings = preferences, reason = profile?.reason, recover = false) {
+  function request(profile, settings = preferences, reason = profile?.reason, recover = false, announce = true) {
     if (!profile || !enabled()) return;
     refreshKey = undefined;
     deferred = undefined;
     cancelPending();
-    if (current?.id === profile.id && !recover) { preferences = { ...settings }; paint(reason); return; }
+    if (current?.id === profile.id && !recover) {
+      preferences = { ...settings };
+      if (adjusting) { adjusting = false; playbackStatus?.clear("quality"); progressStatus(); }
+      paint(reason); return;
+    }
+    if (settings.quality === "auto" && current && current.id !== profile.id && !recover && announce) {
+      adjusting = true; progressStatus();
+    }
     if (profile.id === "source") {
       if (source.mediaInfo?.hdr && validateOriginal) {
-        const attempt = pending = { target: profile, settings: { ...settings } };
+        const attempt = pending = { target: profile, settings: { ...settings }, announce };
         paint(reason);
         Promise.resolve().then(validateOriginal).then(choice => {
           if (pending !== attempt) return;
@@ -112,23 +148,23 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
           engine = choice;
           if (choice !== "native") {
             const compatible = settings.quality === "source" ? settings : { quality: "auto", bitrate: settings.bitrate };
-            request(profileFor(compatible), compatible, "HDR playback is unavailable on this display");
+            request(profileFor(compatible), compatible, "HDR playback is unavailable on this display", false, announce);
             return;
           }
-          beginLoading(() => switchSource(choice)); changed(profile, settings, reason);
+          beginLoading(() => switchSource(choice), announce); changed(profile, settings, reason);
         }).catch(() => {
           if (pending !== attempt) return;
           pending = null; engine = "compatibility";
           const compatible = settings.quality === "source" ? settings : { quality: "auto", bitrate: settings.bitrate };
-          request(profileFor(compatible), compatible, "Original playback is unavailable");
+          request(profileFor(compatible), compatible, "Original playback is unavailable", false, announce);
         });
         return;
       }
-      if (!sourceSupported()) { request(sourceProfile(), settings); return; }
-      beginLoading(() => switchSource(engine)); changed(profile, settings, reason); return;
+      if (!sourceSupported()) { request(sourceProfile(), settings, undefined, false, announce); return; }
+      beginLoading(() => switchSource(engine), announce); changed(profile, settings, reason); return;
     }
     const requestId = `quality-${source.mediaVersion}-${++serial}`;
-    const attempt = pending = { requestId, target: profile, settings: { ...settings }, reason, recover,
+    const attempt = pending = { requestId, target: profile, settings: { ...settings }, reason, recover, announce,
       controller: typeof AbortController === "function" ? new AbortController() : null };
     attempt.timer = setTimeout(() => rejected("The selected quality could not be prepared. Try Auto or check the connection.", attempt), 10000);
     if (send({ type: "compatibility-request", mediaVersion: source.mediaVersion, requestId,
@@ -139,6 +175,7 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
   }
   function rejected(message, attempt = pending) {
     if (!attempt || pending !== attempt) return;
+    if (attempt.announce && attempt.settings.quality === "auto" || assessing || adjusting) statusFailure(message);
     cancelPending(); warning = message;
     // Until the first successful selection there is no previous playback to keep.
     if (!current) fail(message); else if (attempt.recover) fail(message); else report(message);
@@ -146,20 +183,22 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
   }
   function change(settings) {
     if (!enabled()) return;
+    clearStatus();
+    if (loading) loading.announce = false;
     if (settings.quality === "source") {
       settings = { quality: "source", bitrate: "source" };
       if (source.mediaInfo?.hdr && validateOriginal) {
-        request({ id: "source", reason: "Selected in Settings" }, settings); return;
+        request({ id: "source", reason: "Selected in Settings" }, settings, undefined, false, false); return;
       }
     }
     const profile = profileFor(settings);
-    request(profile, settings);
+    request(profile, settings, undefined, false, false);
   }
   async function ready(message) {
     const attempt = pending;
     if (!attempt || message.requestId !== attempt.requestId || message.mediaVersion !== source?.mediaVersion) return false;
     if ((message.playbackRevision ?? 0) < (session.playbackRevision ?? 0)) {
-      request(attempt.target, attempt.settings, attempt.reason, true); return true;
+      request(attempt.target, attempt.settings, attempt.reason, true, attempt.announce); return true;
     }
     if (attempt.preparing) return true;
     attempt.preparing = true;
@@ -181,10 +220,10 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
       await response.arrayBuffer();
       if (pending !== attempt || message.mediaVersion !== source?.mediaVersion) return true;
       if ((message.playbackRevision ?? 0) < (session.playbackRevision ?? 0)) {
-        request(attempt.target, attempt.settings, attempt.reason, true); return true;
+        request(attempt.target, attempt.settings, attempt.reason, true, attempt.announce); return true;
       }
       clearTimeout(attempt.timer); pending = null;
-      beginLoading(() => switchRendition(message, attempt.recover));
+      beginLoading(() => switchRendition(message, attempt.recover), attempt.announce);
       changed(message.rendition, attempt.settings, attempt.reason);
     } catch (error) { if (pending === attempt) rejected(error.message, attempt); }
     return true;
@@ -192,6 +231,10 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
   function sample(bps) {
     if (!Number.isFinite(bps) || bps <= 0 || bps > 1e12) return;
     throughput = throughput ? throughput * 0.65 + bps * 0.35 : bps; measuredAt = now();
+    if (assessing) {
+      clearAssessment();
+      if (!adjusting) playbackStatus?.set("quality", { text: "Connection speed checked" });
+    }
   }
   function fragmentLoaded(event, data) {
     const stats = data?.frag?.stats || data?.stats;
@@ -249,9 +292,10 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
     if (!starved && hysteresis.evaluate({ now: now(), current, candidate, urgent: buffer < 0.5 && active.readyState < 3 })) request(candidate);
     else paint();
   }
-  setInterval(tick, 2000);
-  document.addEventListener("visibilitychange", () => { throughput = 0; measuredAt = 0; hysteresis.reset(now()); });
+  life.interval(tick, 2000);
+  life.listen(document, "visibilitychange", () => { throughput = 0; measuredAt = 0; hysteresis.reset(now()); });
   function reset(snapshot) {
+    clearStatus(); assessmentStarted = false;
     if (source) send({ type: "quality-release", mediaVersion: source.mediaVersion });
     cancelPending(); clearLoading(); loader?.off?.("hlsFragLoaded", fragmentLoaded); loader = null;
     deferred = undefined; awaitingSeek = false; refreshKey = undefined; replacements.clear();
@@ -265,6 +309,7 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
   }
   function start(choice) {
     engine = choice;
+    startAssessment();
     request(profileFor(preferences));
   }
   function fallback(reason, recover = false) {
@@ -313,7 +358,8 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
       request(profileFor(preferences), preferences, "HDR playback is unavailable on this display");
     } else paint();
   }
-  return { enabled, reset, start, fallback, handle, settleLoading, updatePlayback, seekStarted, refresh,
+  return { destroy() { life.dispose(); reset(null); menu.destroy(); }, enabled, reset, start, fallback, handle, settleLoading, updatePlayback, seekStarted, refresh,
+    failed(message) { if (assessing || adjusting) statusFailure(message); },
     needsRefresh: () => awaitingSeek || Boolean(deferred),
     waiting: () => Boolean(loading?.retiredPlayer && loading.retiredPlayer === video.player),
     managed: () => enabled() && Boolean(current || pending || deferred),
