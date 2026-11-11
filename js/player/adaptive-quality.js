@@ -203,6 +203,15 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
     if (attempt.preparing) return true;
     attempt.preparing = true;
     onRenditionReady?.(message);
+    const checkResponse = async (response, fallback) => {
+      if (response.ok) return;
+      if (response.status === 503) {
+        let detail;
+        try { detail = await response.json(); } catch { /* A proxy can return HTML instead. */ }
+        if (detail?.code === "QUALITY_BUSY" && typeof detail.error === "string") throw Object.assign(new Error(detail.error), { code: detail.code });
+      }
+      throw new Error(fallback);
+    };
     try {
       // This is the selected rendition's first real demand. Prepare just the
       // current fragment before replacing a working player; HLS reuses its cache.
@@ -210,13 +219,13 @@ export function createAdaptiveQuality({ video, session, send, switchSource, swit
         Math.floor(message.time / message.segmentSeconds)));
       if (index > 0) {
         const bootstrap = await fetch(message.url.replace("master.m3u8", "segment_000000.ts"), { signal: attempt.controller?.signal });
-        if (!bootstrap.ok) throw new Error("The selected quality could not initialize. Keep the current quality or try Auto.");
+        await checkResponse(bootstrap, "The selected quality could not initialize. Keep the current quality or try Auto.");
         await bootstrap.arrayBuffer();
         if (pending !== attempt) return true;
       }
       const segment = message.url.replace("master.m3u8", `segment_${String(index).padStart(6, "0")}.ts`);
       const response = await fetch(segment, { signal: attempt.controller?.signal });
-      if (!response.ok) throw new Error("The selected quality is unavailable. Keep the current quality or try Auto.");
+      await checkResponse(response, "The selected quality is unavailable. Keep the current quality or try Auto.");
       await response.arrayBuffer();
       if (pending !== attempt || message.mediaVersion !== source?.mediaVersion) return true;
       if ((message.playbackRevision ?? 0) < (session.playbackRevision ?? 0)) {

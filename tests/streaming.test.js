@@ -110,6 +110,51 @@ test('original-file ranges are exact, cached, generation checked, and independen
   assert.equal((await fetch(url)).status,404);
 });
 
+test('a quality selection racing the last encoder slot can recover without poisoning its segments', async t => {
+  const source = fixture(t, { size: '1280x720', duration: '12' }); if (!source) return;
+  const { app, base, host } = await application(t, { lowMemory: true, maxEncoders: 1, renditionIdleMs: 20 });
+  await serveHostFiles(host, base, { name: 'source.mkv', bytes: source.bytes });
+  const ready = await host.next('session-state', m => m.hasVideo);
+  const viewer = await connectPeer(base.replace('http', 'ws'), 'Viewer');
+  const other = await connectPeer(base.replace('http', 'ws'), 'Other');
+  const select = async (peer, requestId, quality) => {
+    peer.send({ type: 'compatibility-request', mediaVersion: ready.mediaVersion, requestId, quality, bitrate: 'auto' });
+    return peer.next('compatibility-ready', m => m.requestId === requestId);
+  };
+  // Both negotiations happen before either lazy encoder starts.
+  const low = await select(viewer, 'low-race', '360');
+  const high = await select(other, 'high-race', '720');
+  const segment = selection => base + selection.url.replace('master.m3u8', 'segment_000000.ts');
+  const first = await fetch(segment(low));
+  assert.equal(first.status, 200); await first.arrayBuffer();
+  viewer.send({ type: 'quality-selection', mediaVersion: ready.mediaVersion, renditionId: low.rendition.id });
+  const busy = await fetch(segment(high));
+  assert.equal(busy.status, 503);
+  assert.equal((await busy.json()).code, 'QUALITY_BUSY');
+  assert.equal(app.config.encoderBudget.snapshot().active, 1);
+  // A previously negotiated but stopped rendition must not bypass the guard.
+  other.send({ type: 'compatibility-request', mediaVersion: ready.mediaVersion, requestId: 'known-busy', quality: '720', bitrate: 'auto' });
+  assert.equal((await other.next('quality-error', m => m.requestId === 'known-busy')).code, 'QUALITY_BUSY');
+  const continued = await fetch(segment(low));
+  assert.equal(continued.status, 200); await continued.arrayBuffer();
+  viewer.send({ type: 'quality-release', mediaVersion: ready.mediaVersion });
+  for (let n = 0; n < 200 && app.config.encoderBudget.snapshot().active; n++) await delay(25);
+  assert.equal(app.config.encoderBudget.snapshot().active, 0);
+  const recovered = await fetch(segment(high));
+  assert.equal(recovered.status, 200, 'capacity failure must not be cached as a permanent segment error');
+  assert.ok((await recovered.arrayBuffer()).byteLength > 188);
+  assert.equal(app.config.encoderBudget.snapshot().active, 1);
+  const clock = { ...app.state.playback };
+  app.media.restartStream();
+  const replacement = await select(other, 'draining-replacement', '720');
+  assert.notEqual(replacement.url, high.url);
+  const restarted = await fetch(segment(replacement));
+  assert.equal(restarted.status, 200, 'replacement waits for the previous FFmpeg process to release its only slot');
+  await restarted.arrayBuffer();
+  assert.equal(app.config.encoderBudget.snapshot().active, 1);
+  assert.deepEqual(app.state.playback, clock);
+});
+
 test('quality renditions are lazy, shared by settings, isolated across switches, and bounded by demand', async t => {
   const source=fixture(t,{size:'1280x720',duration:'12'});if(!source)return;
   const {app,base,host}=await application(t,{renditionIdleMs:20,renditionCacheBytes:1});

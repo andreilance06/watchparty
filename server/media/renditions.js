@@ -83,7 +83,8 @@ function createRenditionService({ state, config, encoderPromise, broadcast }) {
   function select(clientId, quality, bitrate, automatic = false) {
     let profile = resolveQuality(state.mediaInfo, quality, bitrate);
     const load = config.encoderBudget?.snapshot();
-    if (load?.active >= load.limit && !entries.has(profile.id)) {
+    const target = entries.get(profile.id);
+    if (load?.active >= load.limit && !target?.service.running() && !target?.service.isDraining()) {
       const shared = automatic && [...entries.values()].filter(entry => entry.service.running() && entry.profile.rateControl !== "near-lossless" &&
         entry.profile.height <= profile.height && entry.profile.bitrate <= profile.bitrate)
         .sort((a, b) => b.profile.height - a.profile.height || b.profile.bitrate - a.profile.bitrate)[0];

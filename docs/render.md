@@ -31,6 +31,8 @@ Containers with a detected memory limit of 768 MiB or less automatically use the
 
 `GET /healthz` returns `status`, the deployed Render `commit` when available, `lowMemory`, `ffmpegThreads`, and `maxEncoders`. Startup logs also identify the selected profile. After deployment, check that the commit is current and `lowMemory` is true on a small instance. No cookies, source tokens, or private room data appear in this endpoint.
 
+Each concurrently encoded quality requires an encoder slot; multiple viewers of the same quality share one. With a one-encoder limit, selecting another quality while that slot is occupied is rejected with a server-busy notice and preserves current playback. Previously negotiated but inactive qualities obey the same limit. A segment request that races for the last slot returns a recoverable `QUALITY_BUSY` response rather than permanently poisoning that quality; retry after capacity becomes free. Stream replacements wait for their cancelled process to exit before starting the replacement encoder.
+
 Check Render's logs and memory metrics during a failure. A server restart clears rooms and invalidates browser identities/resume tokens; reload to bootstrap a fresh browser identity after a restart. Reloading the browser that supplies a video also releases its File objects, so choose the video again. These are separate from ordinary socket reconnection.
 
 Use a small H.264/AAC MP4 first, then test conversion and additional viewers. Preserve a nonempty HAR with response bodies and WebSocket frames for unresolved client failures; keep it out of the repository because it may contain credentials and conversation content.

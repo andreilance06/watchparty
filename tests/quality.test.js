@@ -245,6 +245,20 @@ test('busy selections, stale replies, and superseded prefetches cannot replace c
   assert.equal(h.source().src,before,'a timed-out choice preserves working playback');
 });
 
+test('segment capacity failures preserve current playback and report server busy for bootstrap and current fragments', async () => {
+  for (const time of [0, 17]) {
+    const h = await harness();
+    const previous = h.source().src;
+    h.b.context.fetch = async () => ({ ok: false, status: 503,
+      json: async () => ({ code: 'QUALITY_BUSY', error: 'The server is busy encoding another quality. Keep the current quality or try Auto again shortly.' }) });
+    h.change('720'); await h.reply({ time });
+    assert.equal(h.source().src, previous);
+    assert.match(h.reports.at(-1), /server is busy encoding another quality/);
+    assert.equal(h.video.watchpartyQualityMetrics.pending, null);
+    assert.equal(h.video.watchpartyQualityMetrics.preferences.quality, 'auto');
+  }
+});
+
 test('reset visibility follows pending manual settings and returns to Auto after a rejected selection', async () => {
   const h = await harness(), list = h.video.shadowRoot.querySelector('.movi-quality-list');
   const reset = list.querySelector('button');

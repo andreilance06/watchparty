@@ -22,13 +22,17 @@ Small containers now default to one encoder and bounded decoder/filter/encoder t
 
 The local `/healthz` check returned `lowMemory: true`, `ffmpegThreads: 1`, and `maxEncoders: 1`. The four-viewer regression successfully delivered the same converted video fragment to all four viewers using one active encoder. The low-memory profile reduces resource demand; arbitrary 4K/HDR conversion is not guaranteed to fit in Render Free.
 
+## Quality-switch segment recovery
+
+A follow-up traced failed quality-switch segments to encoder-capacity races and asynchronous FFmpeg shutdown. Temporary capacity failures no longer stay cached as permanent failures, and replacement streams wait for the old process to release its slot. Previously created qualities also obey the encoder limit. The player reports a clear server-busy notice and keeps the current quality when a second encoder cannot be started.
+
 ## Validation and deployment handoff
 
-- **387 backend/browser tests passed** in the full run. A subsequently added low-memory preset test passed in a separate six-test transcoding run.
+- **390 backend/browser tests passed**, including quality-capacity recovery and replacement with a single encoder slot.
 - **19 React tests passed**, and the production build passed.
 - Real-browser reload retained the client ID and name; generated sample video playback loaded without console errors.
 - The host-transfer test now explicitly evicts its cached source page before testing an uncached read, removing timing-dependent failures without weakening its relay check.
-- Application fixes are committed as **`1dfe2a0`**. GitHub authentication blocked the automated push; the project owner will push the commits. The new Render deployment is **pending verification**.
+- Application fixes and the report are committed locally. GitHub authentication blocked the automated push; the project owner will push the commits. The new Render deployment is **pending verification**.
 
 A [Render setup guide](render.md) and [Blueprint](../render.yaml) now document the build, environment, and health check. Existing services should set `WATCHPARTY_LOW_MEMORY=1`, keep `WATCHPARTY_MAX_ENCODERS=1` and `WATCHPARTY_ENCODER=libx264`, and use `/healthz` for health checks. After pushing and deployment, `/healthz` should show the latest commit, `lowMemory: true`, `ffmpegThreads: 1`, and `maxEncoders: 1`.
 

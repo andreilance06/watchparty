@@ -76,6 +76,11 @@ function createHlsHandler({ state: rootState, config, media: rootMedia }) {
       }
       serveFile(req, res, filePath);
     } catch (error) {
+      if (error.code === "QUALITY_BUSY" && !res.headersSent && !res.destroyed) {
+        res.writeHead(503, { "Content-Type": "application/json", "Cache-Control": "no-store", "Retry-After": "1" });
+        res.end(JSON.stringify({ code: "QUALITY_BUSY", error: "The server is busy encoding another quality. Keep the current quality or try Auto again shortly." }));
+        return;
+      }
       if (!res.headersSent) { res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8", "Retry-After": "1" }); res.end(/^captions_\d+\.ass$/.test(relative) ? error.message : "The stream is temporarily unavailable. Check the host's file connection."); }
     }
   }

@@ -53,6 +53,7 @@ function renditionEncoderArgs(encoder, profile, lowMemory = false) {
 function createSegmentService({ state, config, encoderPromise, broadcast, spawnEncoder = spawn }) {
   const jobs = new Set(), failedEncoders = new Set();
   let preferredEncoder = CPU_ENCODER, failureVersion = -1, cancelEpoch = 0, recoveryFailures = 0;
+  let draining = Promise.resolve(), drainingCount = 0;
   encoderPromise.then(encoder => { preferredEncoder = encoder; }).catch(() => {});
   const filename = (directory, index) => path.join(directory, `segment_${String(index).padStart(6, "0")}.ts`);
   const valid = job => !job.cancelled && !job.signal?.aborted && job.epoch === cancelEpoch &&
@@ -70,7 +71,12 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
       job.sink?.closeAllConnections();
     }
     jobs.clear();
-    return Promise.allSettled(retired);
+    if (retired.length) {
+      const previous = draining;
+      drainingCount++;
+      draining = Promise.allSettled([previous, ...retired]).finally(() => { drainingCount--; });
+    }
+    return draining;
   }
 
   function restart(recovery = false) {
@@ -288,7 +294,12 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
         message: lastError?.code === "MEDIA_PREPARATION_LIMIT" ? lastError.message : "Compatibility encoding failed. Check the server encoder or choose another video." });
       throw lastError || new Error("No compatible encoder is available.");
     })();
-    job.promise.then(() => { job.done = true; job.preparationBudget?.finish(); }, error => { job.done = true; job.error = error; job.preparationBudget?.finish(); });
+    job.promise.then(() => { job.done = true; job.preparationBudget?.finish(); }, error => {
+      job.done = true; job.error = error; job.preparationBudget?.finish();
+      // Capacity may change after negotiation, or while a bootstrap finishes.
+      // A rejected permit is transient; do not reuse that failed job forever.
+      if (error.code === "QUALITY_BUSY") jobs.delete(job);
+    });
     return job;
   }
 
@@ -305,6 +316,9 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
     if (index < (state.compatibilityStartIndex || 0) && !bootstrap) throw new Error("Segment belongs to an earlier playback run.");
     const request = { version, generation, epoch: cancelEpoch, signal, schedule: segmentSchedule(state, config.segmentSeconds) };
     await permission(index, request);
+    // Killing FFmpeg is asynchronous. A replacement must wait for its old
+    // process to exit and release the shared permit before acquiring another.
+    await draining;
     if (!valid(request)) throw new Error("Segment encoding was cancelled.");
     const job = [...jobs].find(j => valid(j) && j.index <= index && index < j.end) || start(bootstrap);
     while (!job.done) {
@@ -319,7 +333,7 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
     return output;
   }
 
-  return { ensure, cancel, restart, running: () => [...jobs].some(job => !job.done) };
+  return { ensure, cancel, restart, running: () => [...jobs].some(job => !job.done), isDraining: () => drainingCount > 0 };
 }
 
 module.exports = { createSegmentService, compatibilityFilter, renditionEncoderArgs };
