@@ -67,6 +67,48 @@ test("public reconnects replace lingering sockets only for the verified browser"
   }
 });
 
+test("signed public resume restores a closed connection and host reservation", async t => {
+  const { app, base, api } = await setup(t, { hostReconnectGraceMs: 15000 });
+  const cookie = (await api("/api/viewer-identity")).cookie;
+  const otherCookie = (await api("/api/viewer-identity")).cookie;
+  const connect = async (name, browserCookie, resume) => {
+    const url = new URL(base.replace("http", "ws") + "/ws");
+    if (resume) {
+      url.searchParams.set("resumeClientId", resume.clientId);
+      url.searchParams.set("resumeToken", resume.resumeToken);
+    }
+    const peer = await connectPeer(url.href, name, { headers: { Cookie: browserCookie } });
+    t.after(() => peer.ws.terminate());
+    return peer;
+  };
+  const host = await connect("lance", cookie);
+  const viewer = await connect("Viewer", otherCookie);
+  assert.match(host.role.resumeToken, /^[\da-f]{64}$/);
+  const closed = once(host.ws, "close");
+  host.ws.close(); await closed;
+  await viewer.next("party-state", m => m.host.status === "reconnecting");
+  assert.equal(app.state.clients.has(host.role.clientId), false);
+
+  const foreign = await connect("Other browser", otherCookie, host.role);
+  assert.notEqual(foreign.role.clientId, host.role.clientId);
+  assert.equal(foreign.role.role, "viewer");
+  const returned = await connect("lance", cookie, host.role);
+  assert.equal(returned.role.clientId, host.role.clientId);
+  assert.equal(returned.role.name, "lance");
+  assert.equal(returned.role.nameRejected, undefined);
+  assert.equal(returned.role.role, "host");
+  assert.equal(app.state.hostReconnectUntil, null);
+  assert.equal([...app.state.clients.values()].filter(c => c.role === "host").length, 1);
+  // A malformed token cannot restore an inactive viewer ID either.
+  const foreignClosed = once(foreign.ws, "close");
+  foreign.ws.close(); await foreignClosed;
+  await returned.next("presence", m => !m.participants.some(p => p.clientId === foreign.role.clientId));
+  const forged = await connect("Bad token", otherCookie, { ...foreign.role, resumeToken: '0'.repeat(64) });
+  assert.notEqual(forged.role.clientId, foreign.role.clientId);
+  returned.send({ type: "chat", message: "Reloaded" });
+  assert.equal((await viewer.next("chat")).clientId, host.role.clientId);
+});
+
 function rejectedSocket(url, headers = {}) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(url, { headers });

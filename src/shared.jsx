@@ -63,7 +63,13 @@ export function Dialog({ open = true, onClose, title, children, className = 'hub
 }
 export async function request(path, options = {}) {
   const response = await fetch(path, options);
-  const data = await response.json();
+  let data;
+  try { data = await response.json(); }
+  catch (error) {
+    if (error.name === 'AbortError') throw error;
+    throw Object.assign(new Error(`The server returned an unexpected response (HTTP ${response.status}). Try again shortly.`), { status: response.status });
+  }
+  if (!data || typeof data !== 'object') throw Object.assign(new Error(`The server returned an unexpected response (HTTP ${response.status}). Try again shortly.`), { status: response.status });
   if (!response.ok) throw Object.assign(new Error(data.error || 'The request failed. Try again.'), { status: response.status, code: data.code });
   return data;
 }

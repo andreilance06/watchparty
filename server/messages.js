@@ -212,6 +212,7 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
           send(ws, {
             type: "role", role: client.role, hostId: state.hostId, clientId: ws.clientId,
             viewerCount: state.clients.size, name: client.name,
+            ...(client.resumeToken ? { resumeToken: client.resumeToken } : {}),
             ...permissionSnapshot(state, client, ws.clientId),
             ...(nameRejected ? { nameRejected: requestedName } : {})
           });

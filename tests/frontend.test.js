@@ -519,6 +519,66 @@ test("connection module reconnects and can be stopped independently", async () =
   assert.equal(status[0][1], "Connected");
 });
 
+test("reload restores tab-scoped credentials and role updates retain the resume token", async () => {
+  const browser = createBrowserDouble();
+  const stored = new Map();
+  browser.context.sessionStorage = { getItem: key => stored.get(key), setItem: (key, value) => stored.set(key, value) };
+  const { createConnection } = await browser.load("js/connection.js");
+  const options = { path: "/ws", getIdentity: () => ({ name: "lance" }), onMessage() {}, onStatus() {} };
+  const first = createConnection(options);
+  first.connect(); browser.sockets[0].open();
+  browser.sockets[0].receive({ type: "role", clientId: "assigned", resumeToken: "signed-token", name: "lance" });
+  browser.sockets[0].receive({ type: "name-updated", name: "Lance renamed" });
+  browser.sockets[0].receive({ type: "role", clientId: "assigned", role: "host" });
+  first.dispose();
+  const reloaded = createConnection({ ...options, getIdentity: () => ({ name: "Another tab's name" }) });
+  reloaded.connect();
+  const url = new URL(browser.sockets[1].url);
+  assert.equal(url.searchParams.get("resumeClientId"), "assigned");
+  assert.equal(url.searchParams.get("resumeToken"), "signed-token");
+  browser.sockets[1].open();
+  assert.equal(browser.sockets[1].sent[0].name, "Lance renamed");
+  const anotherRoom = createConnection({ ...options, path: "/rooms/another/ws" });
+  anotherRoom.connect();
+  assert.equal(new URL(browser.sockets[2].url).searchParams.has("resumeToken"), false);
+  reloaded.dispose(); anotherRoom.dispose();
+});
+
+test("unavailable tab storage does not prevent reconnecting", async () => {
+  const browser = createBrowserDouble();
+  browser.context.sessionStorage = {
+    getItem() { throw new Error("Denied"); }, setItem() { throw new Error("Denied"); },
+  };
+  const { createConnection } = await browser.load("js/connection.js");
+  const connection = createConnection({ getIdentity: () => ({}), onMessage() {}, onStatus() {} });
+  connection.connect(); browser.sockets[0].open();
+  browser.sockets[0].receive({ type: "role", clientId: "assigned", resumeToken: "signed-token" });
+  browser.sockets[0].close(); browser.runTimers(1500);
+  assert.equal(new URL(browser.sockets[1].url).searchParams.get("resumeToken"), "signed-token");
+  connection.dispose();
+});
+
+test("failed reconnect checks back off and reset after joining", async () => {
+  const browser = createBrowserDouble();
+  const { createConnection } = await browser.load("js/connection.js");
+  let unavailable = true;
+  const connection = createConnection({ getIdentity: () => ({}), onMessage() {}, onStatus() {},
+    beforeReconnect: async () => { if (unavailable) throw new Error("HTTP 503"); } });
+  connection.connect(); browser.sockets[0].open(); browser.sockets[0].close();
+  for (const delay of [1500, 3000, 6000, 12000, 24000, 30000, 30000]) {
+    assert.equal([...browser.timers.values()][0].delay, delay);
+    browser.runTimers(delay); await flush();
+    assert.equal(browser.sockets.length, 1);
+  }
+  unavailable = false;
+  browser.runTimers(30000); await flush();
+  assert.equal(browser.sockets.length, 2);
+  browser.sockets[1].open(); browser.sockets[1].receive({ type: "role", clientId: "assigned" });
+  browser.sockets[1].close();
+  assert.equal([...browser.timers.values()][0].delay, 1500);
+  connection.dispose();
+});
+
 test("browser host serves exact file ranges and caption controls use the active source", async () => {
   const browser = createBrowserDouble();
   const { createHostFiles } = await browser.load("js/host-files.js");

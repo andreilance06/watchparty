@@ -6,12 +6,16 @@ const { createMessageHandler } = require("./messages");
 const { validOrigin } = require("./rooms");
 
 function createRealtimeServer(server, { registry, config, movieSearch }) {
+  const resumeSecret = crypto.randomBytes(32);
+  const signResume = (room, identity, clientId) => crypto.createHmac("sha256", resumeSecret)
+    .update(JSON.stringify([room.state.sessionId, identity, clientId])).digest("hex");
   const wss = new WebSocket.Server({ noServer: true, maxPayload: config.sourceChunkBytes + 4, perMessageDeflate: false });
   server.on("upgrade", (req, socket, head) => {
     const reject = (status) => socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
     if (!validOrigin(req, config)) { reject("403 Forbidden"); return; }
-    let pathname;
-    try { pathname = new URL(req.url, "http://localhost").pathname; } catch { reject("400 Bad Request"); return; }
+    let url;
+    try { url = new URL(req.url, "http://localhost"); } catch { reject("400 Bad Request"); return; }
+    const { pathname } = url;
     const match = /^\/rooms\/([a-f0-9-]+)\/(ws|source)$/.exec(pathname);
     const room = match ? registry.get(match[1]) : ["/", "/ws", "/source"].includes(pathname) ? registry.defaultRoom : null;
     if (!room) { reject("404 Not Found"); return; }
@@ -24,19 +28,22 @@ function createRealtimeServer(server, { registry, config, movieSearch }) {
       ws.on("pong", () => { ws.alive = true; });
       ws.on("error", () => {});
       if (sourceConnection) room.source.attach(ws, member);
-      else attachControl(ws, room, member, registry.browserIdentity(req), new URL(req.url, "http://localhost").searchParams.get("resumeClientId"));
+      else attachControl(ws, room, member, registry.browserIdentity(req), url.searchParams.get("resumeClientId"), url.searchParams.get("resumeToken"));
     });
   });
 
-  function attachControl(ws, room, member, identity, resumeClientId) {
+  function attachControl(ws, room, member, identity, resumeClientId, resumeToken) {
     const { state, transport, media } = room;
     const { send } = transport;
     const { availableGuestName } = createNameRegistry(state.clients);
     const { handleMessage, updatePresence } = createMessageHandler({ state, transport, media, movieSearch });
     room.moderation.setPublish(updatePresence);
     room.hosting.setPublish(updatePresence);
-    // Only the signed browser identity may replace its still-open public socket.
-    const resumable = !member && identity && state.clients.get(resumeClientId)?.permissionIdentity === identity;
+    // The token also authenticates reloads after the old socket has been removed.
+    // Keep live-socket verification for clients deployed before tokens were added.
+    const signedResume = identity && /^[\da-f-]{36}$/i.test(resumeClientId || "") && /^[\da-f]{64}$/i.test(resumeToken || "") &&
+      crypto.timingSafeEqual(Buffer.from(resumeToken, "hex"), Buffer.from(signResume(room, identity, resumeClientId), "hex"));
+    const resumable = !member && identity && (signedResume || state.clients.get(resumeClientId)?.permissionIdentity === identity);
     ws.clientId = member?.id || (resumable ? resumeClientId : crypto.randomUUID());
     if (member) member.permissionIdentity ||= identity || `member:${member.id}`;
     const previous = state.clients.get(ws.clientId);
@@ -47,6 +54,7 @@ function createRealtimeServer(server, { registry, config, movieSearch }) {
       ws, role: "viewer",
       name: retainedName || previous?.name || (mayRename ? member?.name : null) || availableGuestName(ws.clientId),
       permissionIdentity: member?.permissionIdentity || identity,
+      resumeToken: identity ? signResume(room, identity, ws.clientId) : undefined,
       hasMemberName: Boolean(member?.name)
     });
     room.hosting.connect(ws.clientId, member);

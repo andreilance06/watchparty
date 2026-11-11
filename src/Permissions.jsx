@@ -30,11 +30,12 @@ export function Participants({ hidden = false, tabbed = false }) {
   useEffect(() => { if (hidden) setSelected(null); }, [hidden]);
   const trigger = useRef(null);
   const person = state.people.find(person => person.clientId === selected);
+  const people = [...state.people].sort((a, b) => Number(b.clientId === state.clientId) - Number(a.clientId === state.clientId));
   return <section id="socialPeople" className="participant-section" hidden={hidden} role={tabbed ? 'tabpanel' : undefined} aria-labelledby={tabbed ? 'peopleTab' : 'participants-title'}>
     <h3 id="participants-title">Participants</h3>
-    <ul className="participant-list" aria-live="polite">{state.people.map(person => <li className="participant-item" key={person.clientId}>
-      <button className={`participant${person.blocked ? ' participant-blocked' : ''}`} aria-haspopup="dialog" aria-expanded={selected === person.clientId} onClick={event => { trigger.current = event.currentTarget; setSelected(person.clientId); }}>
-        <span className={`participant-status ${person.blocked ? 'offline' : 'online'}`} aria-label={person.blocked ? 'Blocked' : 'Connected'} /><span className="participant-name">{person.name}</span><span className="participant-role">{person.blocked ? 'Blocked' : person.role === 'host' ? 'Host' : 'Viewer'}</span>
+    <ul className="participant-list" aria-live="polite">{people.map(person => <li className="participant-item" key={person.clientId}>
+      <button className={`participant${person.clientId === state.clientId ? ' participant-self' : ''}${person.blocked ? ' participant-blocked' : ''}`} aria-haspopup="dialog" aria-expanded={selected === person.clientId} onClick={event => { trigger.current = event.currentTarget; setSelected(person.clientId); }}>
+        <span className={`participant-status ${person.blocked ? 'offline' : 'online'}`} aria-label={person.blocked ? 'Blocked' : 'Connected'} /><span className="participant-name">{person.name}</span>{person.clientId === state.clientId && <span className="participant-you">You</span>}<span className="participant-role">{person.blocked ? 'Blocked' : person.role === 'host' ? 'Host' : 'Viewer'}</span>
       </button>
     </li>)}</ul>
     {person && !hidden && <ParticipantDetails key={person.clientId} person={person} trigger={trigger.current} onClose={() => { setSelected(null); trigger.current?.focus(); }} />}

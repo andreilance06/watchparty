@@ -1,5 +1,7 @@
 .participant-item { min-width: 0; }
 button.participant { color: var(--text); cursor: pointer; font-family: var(--font-readable); font-size: .68rem; }
+.participant.participant-self { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--surface-2)); }
+.participant-you { flex-shrink: 0; padding: .1rem .35rem; border-radius: 1rem; background: var(--accent); color: white; font-size: .6rem; font-weight: 700; }
 .participant:hover, .participant[aria-expanded="true"] { border-color: var(--accent); }
 .participant:focus-visible, .participant-dropdown button:focus-visible, .permission-switch input:focus-visible { outline: 2px solid var(--accent-hover); outline-offset: 2px; }
 .participant-blocked { opacity: .55; }

@@ -8,7 +8,7 @@ import { Poll } from './Poll.jsx';
 import { PermissionFields } from './Permissions.jsx';
 import { initialRoom, RoomContext, roomReducer, RoomProvider, useRoom } from './room.jsx';
 import { DEFAULT_PERMISSIONS } from '../js/permissions.js';
-import { ThemeProvider } from './shared.jsx';
+import { ThemeProvider, request } from './shared.jsx';
 
 vi.mock('./shared.jsx', async importOriginal => ({ ...await importOriginal(), navigate: vi.fn() }));
 const response = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });
@@ -18,6 +18,18 @@ const initial = () => initialRoom(identity);
 function wrap(state, children, send = vi.fn(() => true)) {
   return <RoomContext.Provider value={{ state, send, attention: { current: { setAtLatest() {}, onChatShown() {} } } }}>{children}</RoomContext.Provider>;
 }
+
+describe('HTTP responses', () => {
+  it.each([429, 503])('reports HTML proxy failures using their HTTP status (%s)', async status => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: false, status, json: async () => { throw new SyntaxError('Unexpected token <'); } });
+    await expect(request('/api/session')).rejects.toMatchObject({ status, message: `The server returned an unexpected response (HTTP ${status}). Try again shortly.` });
+  });
+  it('preserves cancellation while reading a response', async () => {
+    const aborted = new DOMException('Aborted', 'AbortError');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({ status: 200, json: async () => { throw aborted; } });
+    await expect(request('/api/session')).rejects.toBe(aborted);
+  });
+});
 
 describe('React hub', () => {
   it('keeps one polling loop through StrictMode, renders room data, and cleans up requests', async () => {
