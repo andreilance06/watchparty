@@ -123,7 +123,7 @@ export function Chat({ overlayTarget, layoutKey }) {
       const node = messages.current; if (!node.getBoundingClientRect().height) return;
       const latest = node.scrollHeight - node.scrollTop - node.clientHeight < 48; setAtLatest(latest); attention.current?.setAtLatest(latest);
     }}>
-      {state.messages.map(comment => comment.system ? <div className="system-message" key={comment.id}>{comment.message}</div> : <article key={comment.id} data-comment-id={comment.commentId} className={`chat-message${comment.clientId === state.clientId ? ' self' : ''}${highlight === comment.commentId ? ' reply-highlight' : ''}`} tabIndex={0} aria-haspopup="menu" aria-expanded={menu?.id === comment.commentId} aria-description="Right-click, long-press, or press Shift+F10 for message actions."
+      {state.messages.map(comment => comment.system ? <div className="system-message" key={comment.id}>{comment.message}</div> : <article key={comment.id} data-comment-id={comment.commentId} className={`chat-message${comment.isOwn ? ' self' : ''}${highlight === comment.commentId ? ' reply-highlight' : ''}`} tabIndex={0} aria-haspopup="menu" aria-expanded={menu?.id === comment.commentId} aria-description="Right-click, long-press, or press Shift+F10 for message actions."
         onContextMenu={event => openMenu(event, comment, { x: event.clientX, y: event.clientY })}
         onKeyDown={event => { if (event.key === 'ContextMenu' || event.key === 'F10' && event.shiftKey) openMenu(event, comment); }}
         onPointerDown={event => { cancelPress(); if (!['touch', 'pen'].includes(event.pointerType) || event.isPrimary === false) return;

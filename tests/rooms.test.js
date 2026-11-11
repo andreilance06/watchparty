@@ -19,6 +19,54 @@ async function setup(t, config = {}) {
   return { app, base, api, connect };
 }
 
+test("public reconnects replace lingering sockets only for the verified browser", async t => {
+  const { app, base, api } = await setup(t);
+  const socketUrl = base.replace("http", "ws") + "/ws";
+  const cookie = (await api("/api/viewer-identity")).cookie;
+  const otherCookie = (await api("/api/viewer-identity")).cookie;
+  const connect = async (name, browserCookie, resumeClientId) => {
+    const url = new URL(socketUrl);
+    if (resumeClientId) url.searchParams.set("resumeClientId", resumeClientId);
+    const peer = await connectPeer(url.href, name, { headers: browserCookie ? { Cookie: browserCookie } : {} });
+    t.after(() => peer.ws.terminate());
+    return peer;
+  };
+  const original = await connect("lance", cookie);
+  const oldClosed = once(original.ws, "close");
+  // Leave the original server socket alive, as happens during a network interruption.
+  const returned = await connect("lance", cookie, original.role.clientId);
+  assert.equal((await oldClosed)[0], 4000);
+  assert.equal(returned.role.clientId, original.role.clientId);
+  assert.equal(returned.role.name, "lance");
+  assert.equal(returned.role.nameRejected, undefined);
+  assert.equal(returned.role.role, "host");
+  assert.equal(app.state.clients.size, 1);
+  assert.equal(app.state.clients.get(returned.role.clientId).name, "lance");
+
+  const viewer = await connect("Viewer", otherCookie);
+  const viewerClosed = once(viewer.ws, "close");
+  const viewerReturned = await connect("Viewer", otherCookie, viewer.role.clientId);
+  await viewerClosed;
+  assert.equal(viewerReturned.role.clientId, viewer.role.clientId);
+  assert.equal(viewerReturned.role.nameRejected, undefined);
+  assert.equal(viewerReturned.role.role, "viewer");
+  assert.equal(app.state.clients.size, 2);
+  viewerReturned.send({ type: "chat", message: "Still here" });
+  assert.equal((await returned.next("chat")).name, "Viewer");
+
+  // A distinct tab can still connect without resuming another tab's socket.
+  const tab = await connect("Other tab", cookie);
+  assert.notEqual(tab.role.clientId, returned.role.clientId);
+  assert.equal(returned.ws.readyState, WebSocket.OPEN);
+  for (const attackerCookie of [otherCookie, "", cookie.replace(/.$/, "!")]) {
+    const attacker = await connect("lance", attackerCookie, returned.role.clientId);
+    assert.notEqual(attacker.role.clientId, returned.role.clientId);
+    assert.equal(attacker.role.nameRejected, "lance");
+    assert.equal(attacker.role.role, "viewer");
+    assert.equal(returned.ws.readyState, WebSocket.OPEN);
+  }
+});
+
 function rejectedSocket(url, headers = {}) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(url, { headers });

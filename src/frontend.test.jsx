@@ -71,6 +71,42 @@ describe('React hub', () => {
 });
 
 describe('React room workflows', () => {
+  it('keeps sent messages on the right across reconnects and identity updates', () => {
+    let state = { ...initial(), connected: true };
+    const receive = message => { state = roomReducer(state, { message }); };
+    receive({ type: 'chat', commentId: 'before', clientId: 'self', name: 'Alex', message: 'Before reconnect' });
+    // A matching display name must never identify another participant as us.
+    receive({ type: 'chat', commentId: 'other', clientId: 'other', name: 'Alex', message: 'Another participant' });
+    const view = render(wrap(state, <Chat overlayTarget={document.body} layoutKey="normal" />));
+    const assertSides = () => {
+      expect(screen.getByText('Before reconnect').closest('article')).toHaveClass('self');
+      expect(screen.getByText('Another participant').closest('article')).not.toHaveClass('self');
+    };
+    assertSides();
+    state = roomReducer(state, { type: 'status', connected: false, text: 'Disconnected' });
+    view.rerender(wrap(state, <Chat overlayTarget={document.body} layoutKey="normal" />));
+    assertSides();
+    receive({ type: 'role', clientId: 'reconnected', name: 'Alex', role: 'viewer' });
+    state = roomReducer(state, { type: 'status', connected: true, text: 'Connected' });
+    receive({ type: 'chat', commentId: 'after', clientId: 'reconnected', name: 'Alex', message: 'After reconnect' });
+    view.rerender(wrap(state, <Chat overlayTarget={document.body} layoutKey="normal" />));
+    assertSides();
+    expect(screen.getByText('After reconnect').closest('article')).toHaveClass('self');
+    receive({ type: 'name-updated', name: 'Renamed' });
+    receive({ type: 'role', clientId: 'reconnected', name: 'Renamed', role: 'host' });
+    receive({ type: 'comment-reaction', commentId: 'before', reactions: [{ clientId: 'other', name: 'Alex', emoji: '👍' }], myReaction: null });
+    view.rerender(wrap(state, <Chat overlayTarget={document.body} layoutKey="normal" />));
+    assertSides();
+    expect(screen.getByText('After reconnect').closest('article')).toHaveClass('self');
+    expect(state.messages.find(item => item.commentId === 'before').reactions).toHaveLength(1);
+    expect(state.messages.filter(item => !item.system).map(item => item.isOwn)).toEqual([true, false, true]);
+  });
+  it.each([undefined, null, ''])('does not assign ownership without a valid identity (%s)', clientId => {
+    const state = roomReducer(initialRoom({ ...identity, clientId }), {
+      message: { type: 'chat', commentId: 'unknown', clientId, name: 'Alex', message: 'Unidentified', isOwn: true },
+    });
+    expect(state.messages.find(item => item.commentId === 'unknown').isOwn).toBe(false);
+  });
   it('waits for chat acknowledgments and preserves an edited draft', async () => {
     const send = vi.fn(() => true), overlay = document.createElement('div'); document.body.appendChild(overlay);
     let state = { ...initial(), connected: true };

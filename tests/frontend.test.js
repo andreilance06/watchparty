@@ -507,9 +507,12 @@ test("connection module reconnects and can be stopped independently", async () =
   const connection = createConnection({ getIdentity: () => ({ name: "Test" }), onMessage() {}, onStatus: (...args) => status.push(args) });
   connection.connect();
   browser.sockets[0].open();
+  assert.equal(new URL(browser.sockets[0].url).searchParams.has("resumeClientId"), false);
+  browser.sockets[0].receive({ type: "role", clientId: "server-assigned-id", name: "Test", role: "viewer" });
   browser.sockets[0].close();
   browser.runTimers(1500);
   assert.equal(browser.sockets.length, 2);
+  assert.equal(new URL(browser.sockets[1].url).searchParams.get("resumeClientId"), "server-assigned-id");
   connection.dispose();
   browser.runTimers(1500);
   assert.equal(browser.sockets.length, 2);

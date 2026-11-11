@@ -24,18 +24,20 @@ function createRealtimeServer(server, { registry, config, movieSearch }) {
       ws.on("pong", () => { ws.alive = true; });
       ws.on("error", () => {});
       if (sourceConnection) room.source.attach(ws, member);
-      else attachControl(ws, room, member, registry.browserIdentity(req));
+      else attachControl(ws, room, member, registry.browserIdentity(req), new URL(req.url, "http://localhost").searchParams.get("resumeClientId"));
     });
   });
 
-  function attachControl(ws, room, member, identity) {
+  function attachControl(ws, room, member, identity, resumeClientId) {
     const { state, transport, media } = room;
     const { send } = transport;
     const { availableGuestName } = createNameRegistry(state.clients);
     const { handleMessage, updatePresence } = createMessageHandler({ state, transport, media, movieSearch });
     room.moderation.setPublish(updatePresence);
     room.hosting.setPublish(updatePresence);
-    ws.clientId = member?.id || crypto.randomUUID();
+    // Only the signed browser identity may replace its still-open public socket.
+    const resumable = !member && identity && state.clients.get(resumeClientId)?.permissionIdentity === identity;
+    ws.clientId = member?.id || (resumable ? resumeClientId : crypto.randomUUID());
     if (member) member.permissionIdentity ||= identity || `member:${member.id}`;
     const previous = state.clients.get(ws.clientId);
     const permissionIdentity = member?.permissionIdentity || identity;

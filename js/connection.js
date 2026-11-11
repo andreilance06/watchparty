@@ -3,6 +3,7 @@ export function createConnection({ getIdentity, onMessage, onStatus, onBlocked =
   let socket;
   let reconnectTimer;
   let stopped = false;
+  let resumeClientId;
 
   function send(payload) {
     if (socket?.readyState !== WebSocket.OPEN) return false;
@@ -12,13 +13,16 @@ export function createConnection({ getIdentity, onMessage, onStatus, onBlocked =
 
   function connect() {
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    socket = new WebSocket(`${protocol}//${location.host}${path}`);
+    const url = new URL(`${protocol}//${location.host}${path}`);
+    if (resumeClientId) url.searchParams.set("resumeClientId", resumeClientId);
+    socket = new WebSocket(url.href);
     socket.addEventListener("open", () => {
       onStatus(true, "Connected");
       send({ type: "join", ...getIdentity() });
     });
     socket.addEventListener("message", (event) => {
       const message = JSON.parse(event.data);
+      if (message.type === "role") resumeClientId = message.clientId;
       if (message.type === "room-blocked") { stopped = true; clearTimeout(reconnectTimer); }
       onMessage(message);
     });

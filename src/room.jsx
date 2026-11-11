@@ -35,7 +35,8 @@ export function roomReducer(state, action) {
       if (m.clientId === state.clientId) next.permissions = m.permissions;
       break;
     case 'chat':
-      if (!state.messages.some(item => item.commentId === m.commentId)) next.messages = [...state.messages, { ...m, id: m.commentId, reactions: [] }].slice(-500);
+      // Connection IDs can change on reconnect; retain ownership as received.
+      if (!state.messages.some(item => item.commentId === m.commentId)) next.messages = [...state.messages, { ...m, id: m.commentId, isOwn: typeof state.clientId === 'string' && state.clientId.length > 0 && m.clientId === state.clientId, reactions: [] }].slice(-500);
       break;
     case 'comment-reaction':
       next.messages = state.messages.map(item => item.commentId === m.commentId ? { ...item, reactions: m.reactions || [], myReaction: 'myReaction' in m ? m.myReaction : m.reactions?.find(item => item.clientId === state.clientId)?.emoji || null } : item);
