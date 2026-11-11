@@ -36,6 +36,39 @@ async function application(t, config = {}, encoderPromise = Promise.resolve(CPU_
   return { app, base, host };
 }
 
+test('low-memory compatibility shares one encoder across four concurrent viewers', async t => {
+  const source = fixture(t, { size: '640x360', duration: '6' }); if (!source) return;
+  const { app, base, host } = await application(t, { lowMemory: true });
+  const health = await (await fetch(base + '/healthz')).json();
+  assert.equal(health.lowMemory, true); assert.equal(health.ffmpegThreads, 1);
+  assert.equal(health.maxEncoders, 1);
+  const viewers = await Promise.all([1, 2, 3, 4].map(n => connectPeer(base.replace('http', 'ws'), `Viewer ${n}`)));
+  await serveHostFiles(host, base, { name: 'source.mkv', bytes: source.bytes });
+  const ready = await host.next('session-state', m => m.hasVideo);
+  const urls = await Promise.all(viewers.map(async viewer => {
+    viewer.send({ type: 'compatibility-request', mediaVersion: ready.mediaVersion, requestId: `test-${viewer.role.clientId}`, quality: 'auto', bitrate: 'auto', automatic: true });
+    return (await viewer.next('compatibility-ready')).url;
+  }));
+  assert.equal(new Set(urls).size, 1, 'all four viewers reuse the same rendition');
+  const fragmentUrl = base + urls[0].replace('master.m3u8', 'segment_000000.ts');
+  const fragments = await Promise.all(viewers.map(async () => {
+    const response = await fetch(fragmentUrl);
+    assert.equal(response.status, 200);
+    return Buffer.from(await response.arrayBuffer());
+  }));
+  for (const bytes of fragments) {
+    assert.ok(bytes.length > 188);
+    assert.deepEqual(bytes, fragments[0]);
+  }
+  assert.equal(app.config.encoderBudget.snapshot().active, 1);
+  const output = path.join(source.directory, 'low-memory.ts');
+  fs.writeFileSync(output, fragments[0]);
+  const probe = await probeMedia(output, (await resolveFfprobe()).path, undefined, output);
+  assert.equal(probe.info.videoCodec, 'h264');
+  assert.equal(probe.info.audioCodec, 'aac');
+  assert.equal(probe.info.width, 640);
+});
+
 test('original-file ranges are exact, cached, generation checked, and independent of encoder/caption preparation', async t => {
   const source = fixture(t); if (!source) return;
   const { app, base, host } = await application(t, {}, new Promise(() => {}));

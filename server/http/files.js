@@ -2,15 +2,18 @@ const fs = require("fs");
 const path = require("path");
 const { MIME_TYPES } = require("../config");
 
-function serveFile(req, res, filePath) {
+function serveFile(req, res, filePath, options = {}) {
   fs.stat(filePath, (error, stat) => {
     if (res.destroyed) return;
-    if (error || !stat.isFile()) { res.writeHead(404); res.end("Not found"); return; }
+    if (error || !stat.isFile()) {
+      const status = error && error.code !== "ENOENT" ? 500 : 404;
+      res.writeHead(status); res.end(status === 404 ? "Not found" : "Server error"); return;
+    }
     const extension = path.extname(filePath).toLowerCase();
     res.writeHead(200, {
       "Content-Type": MIME_TYPES[extension] || "application/octet-stream",
       "Content-Length": stat.size,
-      "Cache-Control": extension === ".m3u8" ? "no-store" : "private, max-age=3600, immutable"
+      "Cache-Control": options.cacheControl || (extension === ".m3u8" ? "no-store" : "private, max-age=3600, immutable")
     });
     if (req.method === "HEAD") res.end();
     else {
@@ -33,19 +36,8 @@ function serveStatic(req, res, url, publicDirectory) {
   if (!filePath.startsWith(`${publicDirectory}${path.sep}`) && filePath !== path.join(publicDirectory, "index.html")) {
     res.writeHead(403); res.end("Forbidden"); return;
   }
-  fs.readFile(filePath, (error, data) => {
-    if (error) {
-      res.writeHead(error.code === "ENOENT" ? 404 : 500);
-      res.end(error.code === "ENOENT" ? "Not found" : "Server error");
-      return;
-    }
-    res.writeHead(200, {
-      "Content-Type": MIME_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream",
-      "Cache-Control": /[.-][\w-]{8,}\.(?:js|css)$/.test(requested) && requested.startsWith("assets/")
-        ? "public, max-age=31536000, immutable" : "no-store"
-    });
-    if (req.method === "HEAD") res.end(); else res.end(data);
-  });
+  serveFile(req, res, filePath, { cacheControl: /[.-][\w-]{8,}\.(?:js|css)$/.test(requested) && requested.startsWith("assets/")
+    ? "public, max-age=31536000, immutable" : "no-store" });
 }
 
 module.exports = { serveFile, serveStatic };

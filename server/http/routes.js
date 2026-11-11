@@ -43,6 +43,12 @@ function createRequestHandler({ registry, config, movieSearch }) {
     try {
       const url = new URL(req.url, "http://localhost");
       if (req.method === "POST" && !validOrigin(req, config)) throw failure(403, "Request origin is not allowed.");
+      if (url.pathname === "/healthz") {
+        if (req.method !== "GET") { res.setHeader("Allow", "GET"); throw failure(405, "Use GET for this endpoint."); }
+        json(res, 200, { status: "ok", commit: process.env.RENDER_GIT_COMMIT || null,
+          lowMemory: config.lowMemory, ffmpegThreads: config.ffmpegThreads, maxEncoders: config.maxEncoders });
+        return;
+      }
       if (url.pathname === "/api/rooms" && req.method === "GET") {
         json(res, 200, { rooms: registry.list() }); return;
       }

@@ -12,14 +12,23 @@ const { isWatchPartyTempDirectory } = require("./temp-files");
 const { createPreparationBudget } = require("./preparation-budget");
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-function renditionEncoderArgs(encoder, profile) {
-  if (!profile) return encoder.args;
+function renditionEncoderArgs(encoder, profile, lowMemory = false) {
+  let encoderArgs = encoder.args;
+  if (lowMemory && encoder.name === "libx264") {
+    encoderArgs = [];
+    for (let index = 0; index < encoder.args.length; index++) {
+      if (["-preset", "-tune", "-rc-lookahead"].includes(encoder.args[index])) index++;
+      else encoderArgs.push(encoder.args[index]);
+    }
+    encoderArgs.push("-preset", "ultrafast", "-tune", "zerolatency", "-rc-lookahead", "0");
+  }
+  if (!profile) return encoderArgs;
   if (profile.rateControl === "near-lossless") {
     const replaced = new Set(["-crf", "-cq", "-global_quality", "-q:v", "-qp_i", "-qp_p", "-qp_b", "-rc", "-b:v", "-maxrate", "-bufsize", "-level:v"]);
     const args = [];
-    for (let index = 0; index < encoder.args.length; index++) {
-      if (replaced.has(encoder.args[index])) index++;
-      else args.push(encoder.args[index]);
+    for (let index = 0; index < encoderArgs.length; index++) {
+      if (replaced.has(encoderArgs[index])) index++;
+      else args.push(encoderArgs[index]);
     }
     const quality = {
       libx264: ["-crf", "14"], h264_nvenc: ["-rc", "vbr", "-cq", "14", "-b:v", "0"],
@@ -33,9 +42,9 @@ function renditionEncoderArgs(encoder, profile) {
   const qualityFlags = new Set(["-global_quality", "-q:v", "-qp_i", "-qp_p", "-qp_b"]);
   if (encoder.name === "h264_amf") qualityFlags.add("-rc");
   const args = [];
-  for (let index = 0; index < encoder.args.length; index++) {
-    if (qualityFlags.has(encoder.args[index])) index++;
-    else args.push(encoder.args[index]);
+  for (let index = 0; index < encoderArgs.length; index++) {
+    if (qualityFlags.has(encoderArgs[index])) index++;
+    else args.push(encoderArgs[index]);
   }
   if (encoder.name === "h264_amf") args.push("-rc", "vbr_peak");
   return args;
@@ -194,10 +203,14 @@ function createSegmentService({ state, config, encoderPromise, broadcast, spawnE
       if (job.preparationBudget) job.inputLease = state.openMediaLease?.(job.preparationBudget);
       const input = job.inputLease?.url || state.mediaPath;
       const uncapped = state.rendition?.rateControl === "near-lossless";
-      const args = ["-hide_banner", "-loglevel", "warning", "-y", ...encoder.init, ...encoder.input,
+      const threads = String(config.ffmpegThreads ?? 0);
+      const args = ["-hide_banner", "-loglevel", "warning", "-y",
+        "-filter_threads", String(config.ffmpegThreads || 2), "-filter_complex_threads", String(config.ffmpegThreads || 2),
+        ...encoder.init, ...encoder.input, "-threads", threads,
         "-ss", start.toFixed(9), ...(input.startsWith("http:") ? ["-rw_timeout", "30000000"] : []), ...(state.mediaInputArgs || []),
         "-i", input, "-t", duration.toFixed(9), "-map", "0:v:0", "-map", "0:a:0?",
-        "-vf", encoder.filter, "-c:v", encoder.name, ...renditionEncoderArgs(encoder, state.rendition),
+        "-vf", encoder.filter, "-c:v", encoder.name, ...renditionEncoderArgs(encoder, state.rendition, config.lowMemory),
+        "-threads:v", threads, "-threads:a", "1",
         ...(uncapped ? [] : [...(state.rendition ? ["-b:v", String(state.rendition.bitrate)] : []),
           "-maxrate", String(state.rendition?.bitrate || 8000000), "-bufsize", String((state.rendition?.bitrate || 8000000) * 2)]),
         "-pix_fmt", encoder.pixelFormat, "-bf", "0",

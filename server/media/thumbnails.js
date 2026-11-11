@@ -30,7 +30,7 @@ function createThumbnailQueue() {
 
 function extractThumbnail({ config, sourcePath, inputArgs, time, signal }) {
   return new Promise((resolve, reject) => {
-    execFile(config.ffmpegPath, ["-hide_banner", "-loglevel", "error", "-threads", "1",
+    execFile(config.ffmpegPath, ["-hide_banner", "-loglevel", "error", "-filter_threads", "1", "-filter_complex_threads", "1", "-threads", "1",
       ...inputArgs, "-ss", String(time), "-i", sourcePath, "-map", "0:v:0", "-an", "-sn", "-dn",
       "-vf", "scale=320:180:force_original_aspect_ratio=decrease,pad=320:180:(ow-iw)/2:(oh-ih)/2,setsar=1",
       "-frames:v", "1", "-threads", "1", "-c:v", "mjpeg", "-q:v", "5", "-f", "image2pipe", "pipe:1"],

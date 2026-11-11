@@ -4,6 +4,7 @@ const { createApplication } = require("./server/application");
 const app = createApplication();
 app.listen().then(({ port }) => {
   console.log(`WatchParty running at http://localhost:${port}`);
+  console.log(`Resources: ${app.config.lowMemory ? "low-memory" : "standard"} profile; ${app.config.maxEncoders} encoder(s); FFmpeg threads: ${app.config.ffmpegThreads || "auto"}`);
   try {
     const addresses = Object.values(os.networkInterfaces()).flat()
       .filter((item) => item && item.family === "IPv4" && !item.internal);

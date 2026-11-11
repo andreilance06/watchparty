@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: watchparty
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: NODE_ENV
+        value: production
+      - key: WATCHPARTY_LOW_MEMORY
+        value: "1"
+      - key: WATCHPARTY_MAX_ENCODERS
+        value: "1"
+      - key: WATCHPARTY_ENCODER
+        value: libx264
+      - key: PUBLIC_ORIGIN
+        sync: false

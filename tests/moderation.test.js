@@ -147,7 +147,7 @@ async function addCaptions(peer, f, sourceId, cookie = "") {
 }
 
 test("host transfer preserves video bytes, clock, captions and HLS generation; the new host can manage captions", async t => {
-  const f = await setup(t, { sourceCacheBytes: 1 });
+  const f = await setup(t, { sourceCacheBytes: 1, sourceChunkBytes: 4096 });
   const host = await f.connect("Original"), next = await f.connect("Next");
   const video = movie(t);
   const initialCaption = { name: "initial.srt", bytes: Buffer.from("1\n00:00:00,000 --> 00:00:02,000\nInitial\n") };
@@ -162,6 +162,9 @@ test("host transfer preserves video bytes, clock, captions and HLS generation; t
   assert.equal(transfer.time, 15); assert.equal(transfer.paused, true); assert.equal(transfer.playbackRate, 1.5);
   assert.equal(transfer.sourceOwnerId, host.role.clientId); assert.equal(transfer.sourceId, relay.sourceId);
   assert.equal(relay.ws.readyState, 1); assert.deepEqual(transfer.captions, ready.captions);
+  // Evict the single cached page explicitly; probing can otherwise leave the
+  // midpoint cached depending on process timing and the generated file size.
+  await (await fetch(f.base + transfer.originalUrl, { headers: { Range: 'bytes=0-31' } })).arrayBuffer();
   const beforeReads = relay.reads.length, offset = Math.floor(video.bytes.length / 2);
   const bytes = await fetch(f.base + transfer.originalUrl, { headers: { Range: `bytes=${offset}-${offset + 31}` } });
   assert.deepEqual(Buffer.from(await bytes.arrayBuffer()), video.bytes.subarray(offset, offset + 32));

@@ -10,6 +10,18 @@ function hardware(name = "h264_nvenc", filters = ["scale_cuda", "libplacebo"]) {
 }
 const info = { width: 3840, height: 2160, pixelFormat: "yuv420p10le", bitDepth: 10 };
 
+test("low-memory x264 keeps the selected rate control while disabling lookahead", () => {
+  for (const profile of [undefined, { bitrate: 1500000 }, { rateControl: "near-lossless" }]) {
+    const args = renditionEncoderArgs(CPU_ENCODER, profile, true);
+    assert.equal(args[args.indexOf("-preset") + 1], "ultrafast");
+    assert.equal(args[args.indexOf("-tune") + 1], "zerolatency");
+    assert.equal(args[args.indexOf("-rc-lookahead") + 1], "0");
+    assert.equal(args[args.indexOf("-crf") + 1], profile?.rateControl === "near-lossless" ? "14" : "20");
+    assert.equal(args.filter(value => value === "-preset").length, 1);
+  }
+  assert.equal(renditionEncoderArgs(CPU_ENCODER, undefined).includes("zerolatency"), false);
+});
+
 test("Source quality replaces rate control and level limits on each encoder without changing capped profiles", () => {
   const source = { rateControl: "near-lossless" };
   const cases = [
