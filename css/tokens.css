@@ -1,0 +1,93 @@
+/* Primitive palette → semantic roles → component tokens. Both themes use the same roles. */
+:root {
+  --violet-300: #b9a7ff;
+  --violet-500: #7957ee;
+  --violet-600: #6d4ae6;
+  --violet-700: #5b38ce;
+  --white: #ffffff;
+
+  --canvas: #0b0d12;
+  --surface: #12151d;
+  --surface-subtle: #181c26;
+  --surface-raised: #202532;
+  --text-primary: #f5f7fb;
+  --text-secondary: #a8b0c2;
+  --border-subtle: #292f3d;
+  --border-control: #778197;
+  --action-primary: var(--violet-600);
+  --action-primary-hover: var(--violet-500);
+  --action-primary-pressed: var(--violet-700);
+  --on-action: var(--white);
+  --text-brand: var(--violet-300);
+  --focus-ring: var(--violet-300);
+  --text-success: #36d399;
+  --text-warning: #f5c36b;
+  --text-danger: #ff8296;
+  --media-surface: #0b0d12;
+  --media-text: #ffffff;
+  --media-secondary: #b9c1d1;
+  --overlay-scrim: rgb(5 7 12 / .8);
+  --shadow: 0 20px 60px rgb(0 0 0 / .28);
+  --shadow-raised: 0 16px 40px rgb(0 0 0 / .22);
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --radius-compact: 8px;
+  --radius-control: 12px;
+  --radius-panel: 16px;
+  --control-height: 44px;
+  --motion-feedback: 120ms;
+  --motion-disclosure: 180ms;
+  --font-readable: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  /* Compatibility aliases for specialized UI during the component migration. */
+  --bg: var(--canvas);
+  --surface-2: var(--surface-subtle);
+  --surface-3: var(--surface-raised);
+  --text: var(--text-primary);
+  --muted: var(--text-secondary);
+  --border: var(--border-subtle);
+  --accent: var(--action-primary);
+  --accent-hover: var(--action-primary-hover);
+  --accent-soft-text: var(--text-brand);
+  --content-strong: var(--text-primary);
+  --success: var(--text-success);
+  --danger: var(--text-danger);
+
+  --button-primary-bg: var(--action-primary);
+  --button-primary-text: var(--on-action);
+  --input-bg: var(--surface-subtle);
+  --input-border: var(--border-control);
+  color-scheme: dark;
+  font-family: var(--font-readable);
+}
+
+:root[data-theme="light"] {
+  --canvas: #f4f2f8;
+  --surface: #ffffff;
+  --surface-subtle: #f8f6fc;
+  --surface-raised: #ece9f3;
+  --text-primary: #211d2b;
+  --text-secondary: #625d70;
+  --border-subtle: #ded9e8;
+  --border-control: #82798f;
+  --action-primary: #6441d9;
+  --action-primary-hover: #5735c6;
+  --action-primary-pressed: #4b2ab5;
+  --text-brand: #513bb0;
+  --focus-ring: #6441d9;
+  --text-success: #126b4b;
+  --text-warning: #805000;
+  --text-danger: #b42343;
+  --shadow: 0 18px 48px rgb(40 27 73 / .09);
+  --shadow-raised: 0 14px 36px rgb(40 27 73 / .12);
+  color-scheme: light;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --motion-feedback: 0ms; --motion-disclosure: 0ms; }
+}

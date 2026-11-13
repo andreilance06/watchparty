@@ -131,6 +131,9 @@ export function createPlayer({ elements, state: session, send, report, files, at
     session.sourceSwitching = false;
     video.pause();
     syncStatus.textContent = "Could not play this video";
+    placeholderTitle.textContent = "Playback needs attention";
+    placeholderText.textContent = message;
+    videoPlaceholder.hidden = false;
     report(message);
   }
 
@@ -200,6 +203,10 @@ export function createPlayer({ elements, state: session, send, report, files, at
     if (!video.player && !awaitingReplacement() && video.readyState >= 1) sync.apply(latest, true);
   }
 
+  function presentEmptyRoom() {
+    placeholderTitle.textContent = can(session, "chooseVideo") ? "Your screen is ready" : "Waiting for the host";
+    placeholderText.textContent = can(session, "chooseVideo") ? "Choose a video below, invite your people, and settle in." : "The host will choose a video file and start the watch party.";
+  }
   function showNoVideo(status = "Waiting for host") {
     seekPresentation.clear();
     quality.reset(null);
@@ -212,6 +219,7 @@ export function createPlayer({ elements, state: session, send, report, files, at
     subtitles.setTracks([], { reset: true, key: "" });
     subtitles.setAvailability({ hasVideo: false, canAdd: false });
     videoPlaceholder.hidden = false; viewerControls.hidden = true;
+    presentEmptyRoom();
     fileName.textContent = "No video selected"; syncStatus.textContent = status;
   }
 
@@ -294,9 +302,7 @@ export function createPlayer({ elements, state: session, send, report, files, at
       return;
     }
     if (!state.hasVideo) {
-      placeholderTitle.textContent = "Waiting for the host";
-      placeholderText.textContent = "The host will choose a video file and start the watch party.";
-      showNoVideo(session.role === "host" ? "Choose a video to begin" : "Waiting for the host"); return;
+      showNoVideo(session.role === "host" ? "" : "Waiting for the host"); return;
     }
     latest = state; latestAt = performance.now();
     fileName.textContent = state.fileName || "Selected video";
@@ -362,7 +368,7 @@ export function createPlayer({ elements, state: session, send, report, files, at
       video.setAttribute("persist", "stablevolume aspect"); video.setAttribute("persistkey", "watchparty-host");
     } else { video.removeAttribute("persist"); }
     if (latest?.hasVideo) sync.status();
-    else syncStatus.textContent = role === "host" ? "Choose a video to begin" : "Waiting for the host";
+    else { syncStatus.textContent = role === "host" ? "" : "Waiting for the host"; if (!session.sourceSwitching) presentEmptyRoom(); }
   }
 
   function updateSharingStatus() {

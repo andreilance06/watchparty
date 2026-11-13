@@ -14,6 +14,14 @@ The visible hub refreshes the directory every five seconds without overlapping r
 
 ## Creating and joining
 
+### Renaming a room
+
+The current connected host can send `{ "type": "set-room-name", "name": "Friday films", "requestId": "request-id" }` on the room control WebSocket. The server normalizes whitespace and enforces the same 1–80 character name limit as creation. Viewers receive an `error` with `action: "set-room-name"` and the matching `requestId`; invalid names are rejected the same way.
+
+On success, every connected participant receives `{ type: "room-updated", room: { ... } }` with the public room metadata, and the sender receives `{ type: "room-name-updated", requestId }`. The directory and subsequent admissions expose the updated name. Each control connection also receives current `room-updated` metadata when it opens. Room IDs and invitation URLs stay stable.
+
+### Creating a room
+
 `POST /api/rooms` accepts:
 
 ```json

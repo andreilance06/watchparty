@@ -10,11 +10,13 @@ the room protocol, browser-owned video sharing, and the Movi/JASSUB distribution
   create/join forms, invitations, protected-room sessions, and retry feedback.
 - `RoomProvider` owns admission and the control WebSocket. Its reducer holds the
   identity, role, permissions, participants, poll, bounded chat history, and status.
-- `Watch` composes the room bar, responsive lounge, player, and stable portal hosts.
+- `Watch` composes the room bar, player, stable portal hosts, and persistent Chat,
+  People, and Up next panels. `RoomControls` owns the on-demand display-name and
+  room-name editors, invitations, room-permission entry, and provider-aware leave flow.
 - `Chat`, `Poll`, and `Participants` render application data through React. Forms
   keep local drafts; successful server acknowledgments commit shared changes.
 - `PermissionFields` is reused for room defaults and participant overrides.
-- `ThemeProvider`, `Header`, `Footer`, `Dialog`, and `Status` supply shared UI.
+- `ThemeProvider`, `Header`, `Dialog`, and `Status` supply shared UI.
 
 ```mermaid
 flowchart LR
@@ -41,7 +43,11 @@ message popovers use a portal that also moves into the fullscreen shell.
 
 Tailwind is compiled by `@tailwindcss/vite`. Theme tokens reference the original
 CSS variables, preserving dark/light modes. Existing visual rules live in a lower
-cascade layer; Tailwind utilities own new component layout and responsive grids.
+cascade layer; `css/components.css` defines shared controls and `css/watch.css`
+owns the player-page composition and responsive breakpoints. The former layout,
+lounge, and responsive override files have been consolidated into the watch page.
+`css/hub.css` owns the hub composition in the same component layer. The shared
+SVG icon set and native dialogs serve both pages.
 The existing baseline is retained instead of adding Tailwind Preflight over the
 player. Specialized player, caption, animation, and detailed presentation CSS is
 preserved.

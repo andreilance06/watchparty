@@ -1,5 +1,5 @@
 import React, { StrictMode } from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { Hub } from './Hub.jsx';
@@ -32,6 +32,39 @@ describe('HTTP responses', () => {
 });
 
 describe('React hub', () => {
+  it('searches room names and videos and recovers from an empty result', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(response({ rooms: [room, { ...room, id: 'space', name: 'Space club', fileName: 'Orbit.mp4' }] }));
+    const user = userEvent.setup(); render(<ThemeProvider><Hub /></ThemeProvider>);
+    await screen.findByText('Space club');
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    const search = screen.getByRole('searchbox', { name: 'Search rooms' });
+    await user.type(search, 'orbit');
+    expect(screen.getByText('Space club')).toBeVisible();
+    expect(screen.queryByText('Friday films')).not.toBeInTheDocument();
+    await user.clear(search); await user.type(search, 'missing');
+    expect(screen.getByText('No rooms match “missing”.')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Clear search' }));
+    expect(screen.getByText('Friday films')).toBeVisible();
+    expect(screen.getByText('Space club')).toBeVisible();
+  });
+  it('edits the saved display name on request and discards cancelled changes', async () => {
+    localStorage.setItem('watchparty-display-name', 'Alex');
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(response({ rooms: [room] }));
+    const user = userEvent.setup(); render(<ThemeProvider><Hub /></ThemeProvider>);
+    const trigger = screen.getByRole('button', { name: 'Edit display name, currently Alex' });
+    expect(screen.queryByRole('textbox', { name: /Your name/ })).not.toBeInTheDocument();
+    await user.click(trigger);
+    const field = screen.getByRole('textbox', { name: /Your name/ }); expect(field).toHaveFocus();
+    await user.clear(field); await user.type(field, 'Cancelled');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(trigger).toHaveFocus(); expect(localStorage.getItem('watchparty-display-name')).toBe('Alex');
+    await user.click(trigger);
+    expect(screen.getByLabelText(/Your name/)).toHaveValue('Alex');
+    await user.clear(screen.getByLabelText(/Your name/)); await user.type(screen.getByLabelText(/Your name/), '  Sam  ');
+    await user.click(screen.getByRole('button', { name: 'Save name' }));
+    expect(screen.getByRole('button', { name: 'Edit display name, currently Sam' })).toHaveFocus();
+    expect(localStorage.getItem('watchparty-display-name')).toBe('Sam');
+  });
   it('keeps one polling loop through StrictMode, renders room data, and cleans up requests', async () => {
     const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => response({ rooms: [room] }));
     const view = render(<StrictMode><ThemeProvider><Hub /></ThemeProvider></StrictMode>);
@@ -45,13 +78,17 @@ describe('React hub', () => {
     const user = userEvent.setup();
     render(<ThemeProvider><Hub /></ThemeProvider>);
     await screen.findByText('No rooms yet. Create a room to start watching.');
+    await user.click(screen.getByRole('button', { name: /Edit display name/ }));
     await user.type(screen.getByLabelText(/Your name/), 'Sam');
+    await user.click(screen.getByRole('button', { name: 'Save name' }));
     await user.click(screen.getByRole('button', { name: /Create room/ }));
     await user.type(screen.getByLabelText('Room name'), '   ');
-    await user.click(screen.getByRole('button', { name: 'Create room' }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Create room' }));
     expect(screen.getByText('Enter a room name.')).toBeVisible();
+    expect(screen.getByLabelText('Room name')).toHaveFocus();
+    expect(screen.getByLabelText('Room name')).toHaveAccessibleDescription('Enter a room name.');
     await user.clear(screen.getByLabelText('Room name')); await user.type(screen.getByLabelText('Room name'), 'Movie night');
-    await user.click(screen.getByRole('button', { name: 'Create room' }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Create room' }));
     await waitFor(() => expect(fetch.mock.calls.some(([url, options]) => url === '/api/rooms' && options.method === 'POST' && JSON.parse(options.body).displayName === 'Sam')).toBe(true));
   });
   it('preserves a protected-room password after a rejection and allows retry', async () => {
@@ -172,7 +209,7 @@ describe('React room workflows', () => {
   it('renders every room permission and emits an override reset', async () => {
     const change = vi.fn(); render(<PermissionFields values={DEFAULT_PERMISSIONS} person="Sam" overrides={{ seek: true }} onChange={change} />);
     expect(screen.getAllByRole('checkbox')).toHaveLength(19);
-    await userEvent.click(screen.getByLabelText('Use room default for Seek'));
+    await userEvent.click(screen.getByLabelText('Reset to room default for Seek'));
     expect(change).toHaveBeenCalledWith({ seek: null });
   });
   it('bounds retained messages and preserves same-browser moderation markers', () => {

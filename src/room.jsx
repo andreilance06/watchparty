@@ -11,7 +11,7 @@ export function initialRoom(identity) {
   return { ...identity, connected: false, connectionText: 'Connecting…', permissions: DEFAULT_PERMISSIONS,
     roomPermissions: DEFAULT_PERMISSIONS, room: { name: 'Default room', invitePath: '/?room=default' },
     people: [], viewerCount: 0, sourceOwnerId: null, poll: { id: null, status: 'idle' }, suggestions: [], myVoteId: null,
-    messages: [{ id: 'welcome', system: true, message: 'Welcome to WatchParty.' }], reactions: [], responses: [], nameFeedback: null, lastMessage: null, event: 0 };
+    messages: [{ id: 'welcome', system: true, message: 'Welcome to WatchParty.' }], media: null, reactions: [], responses: [], nameFeedback: null, lastMessage: null, event: 0 };
 }
 export function roomReducer(state, action) {
   if (action.type === 'status') return { ...state, connected: action.connected, connectionText: action.text };
@@ -24,12 +24,14 @@ export function roomReducer(state, action) {
   if (m.requestId) next.responses = [...state.responses.filter(item => item.requestId !== m.requestId), m].slice(-64);
   const people = value => (value || []).map(person => ({ ...person, sameBrowser: person.sameBrowser ?? state.people.find(old => old.clientId === person.clientId)?.sameBrowser }));
   switch (m.type) {
+    case 'room-updated': next.room = m.room; break;
     case 'role': next = { ...next, clientId: m.clientId, clientName: m.name || state.clientName, role: m.role, permissions: m.permissions || state.permissions, viewerCount: m.viewerCount }; break;
     case 'presence': next.people = people(m.participants); next.viewerCount = m.count; break;
     case 'party-state':
       next = { ...next, people: people(m.participants), poll: m.poll || state.poll, suggestions: m.suggestions || [], myVoteId: m.myVoteId ?? null, host: m.host };
       break;
-    case 'session-state': if (m.sourceOwnerId !== undefined) next.sourceOwnerId = m.sourceOwnerId; break;
+    case 'session-state': next.media = m; if (m.sourceOwnerId !== undefined) next.sourceOwnerId = m.sourceOwnerId; break;
+    case 'host-left': if (!m.preserveMedia) next.media = { hasVideo: false }; break;
     case 'permissions-updated':
       next.people = state.people.map(person => person.clientId === m.clientId ? { ...person, permissions: m.permissions, permissionOverrides: m.permissionOverrides || {} } : person);
       if (m.clientId === state.clientId) next.permissions = m.permissions;
@@ -159,25 +161,28 @@ export function RoomProvider({ children }) {
 export function useCommand() {
   const { state, send } = useRoom();
   const [status, setStatus] = useState('');
+  const [result, setResult] = useState(null);
   const [pending, setPending] = useState(null);
   const pendingRef = useRef(null);
   useEffect(() => {
     const m = state.responses.find(item => item.requestId === pendingRef.current);
     if (pendingRef.current && m?.requestId === pendingRef.current) {
-      pendingRef.current = null; setPending(null); setStatus(m.type === 'error' ? m.message : 'Updated.');
+      pendingRef.current = null; setPending(null); setResult(m); setStatus(m.type === 'error' ? m.message : 'Updated.');
     }
   }, [state.event, state.lastMessage]);
   useEffect(() => {
     if (!pending) return;
-    const timer = setTimeout(() => { pendingRef.current = null; setPending(null); setStatus('The request timed out. Try again.'); }, 10000);
+    const timer = setTimeout(() => { setResult({ type: 'error', requestId: pendingRef.current }); pendingRef.current = null; setPending(null); setStatus('The request timed out. Try again.'); }, 10000);
     return () => clearTimeout(timer);
   }, [pending]);
-  useEffect(() => { if (!state.connected && pendingRef.current) { pendingRef.current = null; setPending(null); setStatus('Reconnect before updating.'); } }, [state.connected]);
+  useEffect(() => { if (!state.connected && pendingRef.current) { setResult({ type: 'error', requestId: pendingRef.current }); pendingRef.current = null; setPending(null); setStatus('Reconnect before updating.'); } }, [state.connected]);
   const execute = payload => {
-    if (pendingRef.current) return;
+    if (pendingRef.current) return null;
+    setResult(null);
     const requestId = createClientId();
-    if (!state.connected || send({ ...payload, requestId }) === false) { setStatus('Reconnect before updating.'); return; }
+    if (!state.connected || send({ ...payload, requestId }) === false) { setResult({ type: 'error', requestId }); setStatus('Reconnect before updating.'); return null; }
     pendingRef.current = requestId; setPending(requestId); setStatus('Updating…');
+    return requestId;
   };
-  return { execute, pending, status, setStatus };
+  return { execute, pending, status, setStatus, result };
 }

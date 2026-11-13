@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 const ThemeContext = createContext(null);
@@ -13,19 +13,39 @@ export function ThemeProvider({ children }) {
   return <ThemeContext.Provider value={{ theme, toggle: () => setTheme(value => value === 'light' ? 'dark' : 'light') }}>{children}</ThemeContext.Provider>;
 }
 export const useTheme = () => useContext(ThemeContext);
-export function Header({ children }) {
+export function Button({ variant = 'secondary', icon = false, pending = false, pendingLabel, disabled = false, type = 'button', className = '', children, ...props }) {
+  return <button {...props} type={type} className={`ui-button ui-button--${variant}${icon ? ' ui-button--icon' : ''} ${className}`} disabled={disabled || pending} aria-busy={pending || undefined}>
+    {pending && <span className="ui-spinner" aria-hidden="true" />}{pending && pendingLabel ? pendingLabel : children}
+  </button>;
+}
+export function Input({ className = '', ...props }) {
+  return <input {...props} className={`ui-input ${className}`} />;
+}
+export function Field({ id, label, optional = false, hint, error, className = '', 'aria-describedby': describedBy, ...props }) {
+  const generatedId = useId();
+  const inputId = id || generatedId;
+  const description = [describedBy, hint && `${inputId}-hint`, error && `${inputId}-error`].filter(Boolean).join(' ') || undefined;
+  return <div className={`ui-field ${className}`}>
+    <label className="ui-field-label" htmlFor={inputId}>{label}{optional && <span className="ui-field-optional"> (optional)</span>}</label>
+    <Input {...props} id={inputId} aria-describedby={description} aria-invalid={error ? true : props['aria-invalid']} />
+    {hint && <p id={`${inputId}-hint`} className="ui-field-hint">{hint}</p>}
+    {error && <p id={`${inputId}-error`} className="ui-field-error" role="alert">{error}</p>}
+  </div>;
+}
+export function Header({ children, brandHeading = true }) {
   const { theme, toggle } = useTheme();
   const label = `Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`;
   return <header className="site-header flex items-center justify-between gap-4">
-    <a className="brand" href="/"><img className="brand-mark" src="/assets/images/logo/logo_watchparty.png" alt="" /><div><h1>WatchParty</h1><p>Watch together. Chat together.</p></div></a>
-    <div className="header-actions flex items-center gap-3"><button className="theme-toggle" type="button" aria-label={label} title={label} aria-pressed={theme === 'light'} onClick={toggle}>
+    <a className="brand" href="/"><img className="brand-mark" src="/assets/images/logo/logo_watchparty.png" alt="" /><div>{brandHeading ? <h1>WatchParty</h1> : <span className="brand-name">WatchParty</span>}<p>Watch together. Chat together.</p></div></a>
+    <div className="header-actions flex items-center gap-3"><Button icon className="theme-toggle" aria-label={label} title={label} aria-pressed={theme === 'light'} onClick={toggle}>
       <svg className="theme-icon icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></svg>
       <svg className="theme-icon icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.4 15.2A8.5 8.5 0 0 1 8.8 3.6 8.5 8.5 0 1 0 20.4 15.2Z" /></svg>
-    </button>{children}</div>
+    </Button>{children}</div>
   </header>;
 }
-export function Footer() { return <footer className="site-footer flex justify-between gap-4"><span>WatchParty</span><span>Watch together. Chat together.</span></footer>; }
-export function Status({ children, className = '' }) { return <p className={className} role="status" aria-live="polite">{children}</p>; }
+export function Status({ children, className = '', tone = 'neutral', ...props }) {
+  return <p {...props} className={`ui-status ui-status--${tone} ${className}`} role={tone === 'error' ? 'alert' : 'status'} aria-live={tone === 'error' ? 'assertive' : 'polite'}>{children}</p>;
+}
 export function ParticipantPopover({ trigger, title, onClose, children }) {
   const ref = useRef(null), close = useRef(onClose); close.current = onClose;
   useLayoutEffect(() => {
@@ -49,17 +69,29 @@ export function ParticipantPopover({ trigger, title, onClose, children }) {
   }, [trigger]);
   return createPortal(<div ref={ref} className="participant-dropdown" role="dialog" aria-label={title}>{children}</div>, document.body);
 }
-export function Dialog({ open = true, onClose, title, children, className = 'hub-dialog', busy = false }) {
+export function Dialog({ open = true, onClose, title, children, className = '', wide = false, busy = false, returnFocusRef, initialFocusRef, onKeyDown, ...props }) {
   const ref = useRef(null);
   useEffect(() => {
     const dialog = ref.current;
-    if (open && !dialog.open) dialog.showModal();
+    const returnTarget = returnFocusRef?.current || document.activeElement;
+    if (open && !dialog.open) { dialog.showModal(); initialFocusRef?.current?.focus(); }
     else if (!open && dialog.open) dialog.close();
-    return () => { if (dialog.open) dialog.close(); };
-  }, [open]);
-  return <dialog ref={ref} className={className} aria-label={title} onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
+    return () => {
+      if (dialog.open) dialog.close();
+      // React may detach the dialog before passive cleanup; restore focus after native closing.
+      queueMicrotask(() => {
+        if (!dialog.open && returnTarget?.isConnected && !dialog.contains(returnTarget)) returnTarget.focus({ preventScroll: true });
+      });
+    };
+  }, [open, returnFocusRef, initialFocusRef]);
+  return <dialog {...props} ref={ref} className={`ui-dialog${wide ? ' ui-dialog--wide' : ''} ${className}`} aria-label={title} aria-busy={busy || undefined} onKeyDown={event => { if (event.key === 'Escape') event.stopPropagation(); onKeyDown?.(event); }} onCancel={event => { event.preventDefault(); if (!busy) onClose(); }}>
     {children}
   </dialog>;
+}
+export function DialogHeader({ title, eyebrow, onClose, busy = false }) {
+  return <div className="ui-dialog-heading"><div>{eyebrow && <p className="eyebrow">{eyebrow}</p>}<h2>{title}</h2></div>
+    {onClose && <Button onClick={onClose} disabled={busy}>Close</Button>}
+  </div>;
 }
 export async function request(path, options = {}) {
   const response = await fetch(path, options);

@@ -12,21 +12,6 @@
   display: none;
 }
 
-.chat-panel.poll-expanded {
-  min-height: 0;
-  height: auto;
-  max-height: none;
-}
-
-.chat-panel.poll-expanded .chat-body {
-  flex: 0 0 auto;
-}
-
-.chat-panel.poll-expanded .chat-messages {
-  flex: 0 0 auto;
-  height: clamp(10rem, 24dvh, 16rem);
-}
-
 .poll-details {
   min-height: 0;
 }

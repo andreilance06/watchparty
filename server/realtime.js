@@ -35,6 +35,7 @@ function createRealtimeServer(server, { registry, config, movieSearch }) {
   function attachControl(ws, room, member, identity, resumeClientId, resumeToken) {
     const { state, transport, media } = room;
     const { send } = transport;
+    send(ws, { type: "room-updated", room: registry.describe(room).room });
     const { availableGuestName } = createNameRegistry(state.clients);
     const { handleMessage, updatePresence } = createMessageHandler({ state, transport, media, movieSearch });
     room.moderation.setPublish(updatePresence);
@@ -69,6 +70,16 @@ function createRealtimeServer(server, { registry, config, movieSearch }) {
         if (binary || data.length > 16384) throw new Error("Invalid control message.");
         const message = JSON.parse(data.toString());
         if (!message || typeof message !== "object" || Array.isArray(message)) throw new Error("Invalid message.");
+        if (message.type === "set-room-name") {
+          const error = text => send(ws, { type: "error", action: message.type, requestId: message.requestId, message: text });
+          if (state.hostId !== ws.clientId || state.clients.get(ws.clientId)?.role !== "host") { error("Only the current host can rename the room."); return; }
+          const name = typeof message.name === "string" ? message.name.replace(/\s+/g, " ").trim() : "";
+          if (!name || name.length > 80) { error("Enter a room name of at most 80 characters."); return; }
+          room.name = name;
+          transport.broadcast({ type: "room-updated", room: registry.describe(room).room });
+          send(ws, { type: "room-name-updated", requestId: message.requestId });
+          return;
+        }
         if (room.moderation.handle(ws, message)) return;
         if (!await room.source.handleControl(ws, message) && !ws.explicitLeave && ws.readyState === WebSocket.OPEN &&
             state.clients.get(ws.clientId)?.ws === ws) handleMessage(ws, message);

@@ -19,6 +19,30 @@ async function setup(t, config = {}) {
   return { app, base, api, connect };
 }
 
+test("only the host can rename a room, with validation and synchronized metadata", async t => {
+  const { app, api, connect, base } = await setup(t);
+  const created = await api('/api/rooms', { name: 'Original', displayName: 'Host' });
+  const host = await connect(created, 'Host');
+  const joined = await api('/api/rooms/join', { roomId: created.body.room.id, displayName: 'Viewer' });
+  const viewer = await connect(joined, 'Viewer');
+  t.after(() => { host.ws.terminate(); viewer.ws.terminate(); });
+  viewer.send({ type: 'set-room-name', name: 'Denied', requestId: 'denied' });
+  assert.match((await viewer.next('error', m => m.requestId === 'denied')).message, /Only the current host/);
+  for (const name of ['', '   ', 'x'.repeat(81), 123]) {
+    host.send({ type: 'set-room-name', name, requestId: 'invalid' });
+    assert.match((await host.next('error', m => m.requestId === 'invalid')).message, /at most 80/);
+  }
+  host.send({ type: 'set-room-name', name: '  Friday   films  ', requestId: 'rename' });
+  assert.equal((await host.next('room-name-updated')).requestId, 'rename');
+  assert.equal((await viewer.next('room-updated', m => m.room.name === 'Friday films')).room.id, created.body.room.id);
+  assert.equal(app.rooms.get(created.body.room.id).name, 'Friday films');
+  assert.equal(app.state === app.rooms.get(created.body.room.id).state, false);
+  const listing = await (await fetch(base + '/api/rooms')).json();
+  assert.equal(listing.rooms.find(room => room.id === created.body.room.id).name, 'Friday films');
+  const reconnected = await connect(joined, 'Viewer'); t.after(() => reconnected.ws.terminate());
+  assert.equal((await reconnected.next('room-updated')).room.name, 'Friday films');
+});
+
 test("public reconnects replace lingering sockets only for the verified browser", async t => {
   const { app, base, api } = await setup(t);
   const socketUrl = base.replace("http", "ws") + "/ws";

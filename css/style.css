@@ -1,12 +1,9 @@
 /* Ordered entry point; component styles live in focused files. */
 @import "./base.css";
-@import "./layout.css";
 @import "./player.css";
 @import "./chat.css";
 @import "./voting.css";
 @import "./participants.css";
-@import "./responsive.css";
-@import "./lounge.css";
 
 /* Permission controls share the participant switches and remain usable on small screens. */
 .permission-group { margin: 20px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }

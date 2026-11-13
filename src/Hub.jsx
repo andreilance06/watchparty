@@ -1,19 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createClientState } from '../js/state.js';
-import { Dialog, Footer, Header, navigate, post, request, Status } from './shared.jsx';
+import { Button, Dialog, DialogHeader, Field, Header, Input, navigate, post, request, Status } from './shared.jsx';
+import { Icon } from './Icons.jsx';
 
-export function RoomCard({ room, busy, onJoin }) {
+export function RoomCard({ room, busy, joining = false, onJoin }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [room.thumbnailUrl]);
   const preview = room.thumbnailUrl && !failed;
-  return <article className="room-card overflow-hidden rounded-2xl border border-[var(--border)] bg-[var(--surface)]">
+  return <article className="room-card">
     <div className="room-preview">
       {preview && <img src={room.thumbnailUrl} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} />}
-      {!preview && <div className="room-placeholder"><span className="room-placeholder-icon">▶</span><span>{room.fileName ? 'Preview unavailable' : 'Waiting for a video'}</span></div>}
-      <span className="room-badge">{room.passwordRequired ? 'Password protected' : room.id === 'default' ? 'Public room' : 'Open room'}</span>
+      {!preview && <div className="room-placeholder"><span className="room-placeholder-icon"><Icon name="video" /></span><span>{room.fileName ? 'Preview unavailable' : 'Waiting for a video'}</span></div>}
+      {room.passwordRequired && <span className="room-badge"><Icon name="lock" />Password protected</span>}
     </div>
-    <div className="room-card-body"><h3>{room.name}</h3><p className="room-file" title={room.fileName || 'No video selected'}>{room.fileName || 'No video selected'}</p>
-      <div className="room-card-footer flex items-center justify-between gap-3"><span className="room-participants">{room.participantCount} online</span><button className="hub-button hub-primary" disabled={busy} aria-label={`Join ${room.name}`} onClick={() => onJoin(room)}>Join room</button></div>
+    <div className="room-card-body"><h3>{room.name}</h3>{room.fileName && <p className="room-file">{room.fileName}</p>}
+      <div className="room-card-footer"><span className="room-participants"><Icon name="people" /><span>{room.participantCount} online</span></span><Button disabled={busy} pending={joining} pendingLabel="Joining…" aria-label={joining ? `Joining ${room.name}` : `Join ${room.name}`} onClick={() => onJoin(room)}>Join room<Icon name="arrow" /></Button></div>
     </div>
   </article>;
 }
@@ -22,18 +23,34 @@ function EntryDialog({ mode, room, busy, error, onSubmit, onClose, expired }) {
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const creating = mode === 'create';
-  return <Dialog title={creating ? 'Start a watch party' : `Join ${room.name}`} onClose={onClose} busy={busy}>
+  const nameInput = useRef(null), passwordInput = useRef(null);
+  const nameError = creating && error === 'Enter a room name.' ? error : '';
+  useEffect(() => { if (nameError) nameInput.current?.focus(); }, [nameError]);
+  return <Dialog title={creating ? 'Create room' : `Join ${room.name}`} initialFocusRef={creating ? nameInput : passwordInput} onClose={onClose} busy={busy}>
     <form onSubmit={event => { event.preventDefault(); onSubmit({ name: name.trim(), password }); }}>
-      <p className="eyebrow">{creating ? 'MAKE YOURSELF AT HOME' : 'YOUR SEAT IS WAITING'}</p>
-      <h2>{creating ? 'Start a watch party' : `Join ${room.name}`}</h2>
-      <p className="hub-dialog-description">{creating ? 'Make a room for your group. You choose what plays.' : 'This room needs a password. Ask the host if you don’t have it.'}</p>
-      {creating && <label className="hub-field">Room name<input name="roomName" autoFocus required maxLength={80} placeholder="e.g. Friday night films" value={name} onChange={event => setName(event.target.value)} /></label>}
-      <label className="hub-field">{creating ? 'Password (optional)' : 'Room password'}<input name="roomPassword" type="password" autoFocus={!creating} required={!creating} maxLength={128} autoComplete={creating ? 'new-password' : 'current-password'} value={password} onChange={event => setPassword(event.target.value)} /></label>
-      {creating && <p className="hub-field-help">Leave it blank to let anyone join.</p>}
-      <Status className="hub-form-status">{expired ? 'This room is no longer available.' : error || (busy ? 'Entering your room…' : '')}</Status>
-      <div className="hub-dialog-actions"><button className="hub-button" type="button" disabled={busy} onClick={onClose}>Cancel</button><button type="submit" className="hub-button hub-primary" disabled={busy || expired}>{creating ? 'Create room' : 'Join room'}</button></div>
+      <DialogHeader title={creating ? 'Create room' : `Join ${room.name}`} />
+      <p className="ui-dialog-description">{creating ? 'Choose a video from your device, then invite your friends.' : 'Enter the password from the host to join.'}</p>
+      {creating && <Field label="Room name" name="roomName" ref={nameInput} required maxLength={80} placeholder="e.g. Friday night films" value={name} onChange={event => setName(event.target.value)} error={nameError} />}
+      <Field label={creating ? 'Password' : 'Room password'} ref={passwordInput} optional={creating} name="roomPassword" type="password" required={!creating} maxLength={128} autoComplete={creating ? 'new-password' : 'current-password'} value={password} onChange={event => setPassword(event.target.value)} aria-describedby={!creating ? 'hubEntryStatus' : undefined} aria-invalid={!creating && Boolean(error) || undefined} hint={creating ? 'Leave blank for an open room. Room names and previews are public, even with a password.' : undefined} />
+      <Status id="hubEntryStatus" className="hub-form-status" tone={expired || error && !nameError ? 'error' : 'neutral'}>{expired ? 'This room is no longer available.' : nameError ? '' : error || (busy ? 'Entering your room…' : '')}</Status>
+      <div className="hub-dialog-actions"><Button disabled={busy} onClick={onClose}>Cancel</Button><Button type="submit" variant="primary" pending={busy} pendingLabel={creating ? 'Creating…' : 'Joining…'} disabled={expired}>{creating ? 'Create room' : 'Join room'}</Button></div>
     </form>
   </Dialog>;
+}
+
+function HubIdentity({ name, onSave, disabled }) {
+  const [editing, setEditing] = useState(false), [draft, setDraft] = useState(name);
+  const trigger = useRef(null), input = useRef(null);
+  return <>
+    <Button ref={trigger} variant="quiet" className="hub-profile-trigger" aria-label={`Edit display name, currently ${name || 'Guest'}`} title="Edit display name" disabled={disabled} onClick={() => { setDraft(name); setEditing(true); }}><span className="hub-profile-name">{name || 'Guest'}</span><Icon name="edit" /></Button>
+    {editing && <Dialog title="Edit display name" initialFocusRef={input} returnFocusRef={trigger} onClose={() => setEditing(false)}>
+      <DialogHeader title="Edit display name" />
+      <form onSubmit={event => { event.preventDefault(); onSave(draft.replace(/\s+/g, ' ').trim()); setEditing(false); }}>
+        <Field label="Your name" optional ref={input} value={draft} maxLength={24} autoComplete="nickname" onChange={event => setDraft(event.target.value)} hint="Leave blank to join with a guest name." />
+        <div className="hub-dialog-actions"><Button onClick={() => setEditing(false)}>Cancel</Button><Button type="submit" variant="primary">Save name</Button></div>
+      </form>
+    </Dialog>}
+  </>;
 }
 
 export function Hub() {
@@ -46,6 +63,8 @@ export function Hub() {
   const [dialog, setDialog] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [joiningRoom, setJoiningRoom] = useState(null);
+  const [query, setQuery] = useState('');
   const busyRef = useRef(false), nameRef = useRef(name), handledInvite = useRef(false), identityRequest = useRef(null);
   const entryController = useRef(null);
   nameRef.current = name;
@@ -62,7 +81,7 @@ export function Hub() {
   }, [identity]);
   const choose = useCallback(async room => {
     if (busyRef.current) return;
-    busyRef.current = true; setBusy(true); setNotice(''); setError('');
+    busyRef.current = true; setBusy(true); setJoiningRoom(room.id); setNotice(''); setError('');
     entryController.current = new AbortController();
     try {
       if (room.passwordRequired) {
@@ -75,7 +94,7 @@ export function Hub() {
         }
       } else await enter('/api/rooms/join', { roomId: room.id });
     } catch (error) { if (error.name !== 'AbortError') setNotice(error.message); }
-    finally { busyRef.current = false; setBusy(false); }
+    finally { busyRef.current = false; setBusy(false); setJoiningRoom(null); }
   }, [enter]);
   const [refreshToken, setRefreshToken] = useState(0);
   useEffect(() => {
@@ -116,21 +135,28 @@ export function Hub() {
     } catch (error) { if (error.name !== 'AbortError') setError(error.message); }
     finally { busyRef.current = false; setBusy(false); }
   }
-  return <>
-    <Header><button className="hub-button hub-primary" disabled={busy} onClick={() => { setError(''); setDialog({ mode: 'create' }); }}>＋ Create room</button></Header>
-    <main className="hub-main mx-auto w-full max-w-[1280px] px-4 py-8 min-[700px]:px-8">
-      <section className="hub-intro grid grid-cols-1 items-center gap-8 min-[900px]:grid-cols-[minmax(0,1fr)_340px]" aria-labelledby="hubTitle">
-        <div className="hub-intro-copy"><p className="eyebrow">A GOOD TIME, TOGETHER</p><h2 id="hubTitle">Your people.<br />Your next watch.</h2><p>Find a room, say hello, and settle in together.</p></div>
-        <div className="hub-join-profile"><h3>What should we call you?</h3><p>Choose your name, then join any room below.</p><label className="hub-name">Your name <span>(optional)</span><input name="displayName" maxLength={24} autoComplete="nickname" placeholder="Leave blank for a guest name" value={name} onChange={event => setName(event.target.value)} /></label><p className="hub-profile-hint">Just dropping in? We'll give you a guest name.</p></div>
+  const visibleRooms = rooms.filter(room => `${room.name} ${room.fileName || ''}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  return <div className="hub-page">
+    <a className="watch-skip" href="#hubMain">Skip to rooms</a>
+    <Header brandHeading={false}><HubIdentity name={name} disabled={busy} onSave={value => { setName(value); try { localStorage.setItem('watchparty-display-name', value); } catch { /* Optional preference. */ } }} /></Header>
+    <main id="hubMain" tabIndex={-1} className="hub-main">
+      <section className="hub-intro" aria-labelledby="hubTitle">
+        <div><h1 id="hubTitle">Watch together.</h1><p>Join a room or start one for your friends.</p></div>
+        <Button variant="primary" disabled={busy} onClick={() => { setError(''); setDialog({ mode: 'create' }); }}><Icon name="plus" />Create room</Button>
       </section>
-      <section aria-labelledby="roomsTitle"><div className="hub-section-heading"><div><h2 id="roomsTitle">Find your lounge <span className="hub-count">{rooms.length}</span></h2><p>A shared screen. A conversation. A good time.</p></div><span className="hub-live"><span aria-hidden="true" /> Updated live</span></div>
-        {notice && <Status className="hub-notice">{notice}</Status>}
-        <div className="hub-status-row"><Status className="hub-directory-status">{failure ? 'Could not refresh rooms. Check your connection and try again.' : loading ? 'Finding rooms…' : !rooms.length ? 'No rooms yet. Create a room to start watching.' : ''}</Status>{failure && <button className="hub-button" onClick={() => setRefreshToken(value => value + 1)}>Try again</button>}</div>
-        <div className="room-grid grid grid-cols-1 gap-5 min-[700px]:grid-cols-2 min-[1100px]:grid-cols-3" aria-label="Available rooms" aria-busy={loading}>{rooms.map(room => <RoomCard key={room.id} room={room} busy={busy} onJoin={choose} />)}</div>
-        <p className="hub-preview-note">Video previews refresh every 30 seconds. Room names and previews are visible to everyone.</p>
+      <section aria-labelledby="roomsTitle"><div className="hub-section-heading"><h2 id="roomsTitle">Rooms <span className="hub-count" aria-hidden="true">{loading ? '…' : rooms.length}</span><span className="sr-only">{loading ? ', loading' : `, ${rooms.length} available`}</span></h2>
+        <div className="hub-search"><Icon name="search" /><Input type="search" aria-label="Search rooms" placeholder="Search rooms or videos" value={query} onChange={event => setQuery(event.target.value)} /></div></div>
+        {notice && <Status className="hub-notice" tone="warning">{notice}</Status>}
+        {(failure || loading) && <div className="hub-status-row"><Status tone={failure ? 'error' : 'neutral'}>{failure ? 'Could not refresh rooms. Check your connection and try again.' : 'Finding rooms…'}</Status>{failure && <Button onClick={() => setRefreshToken(value => value + 1)}>Try again</Button>}</div>}
+        <div className="room-grid" aria-label="Available rooms" aria-busy={loading}>
+          {loading && !rooms.length ? Array.from({ length: 3 }, (_, index) => <div key={index} className="hub-skeleton" aria-hidden="true"><div /><span /><span /></div>) : visibleRooms.map(room => <RoomCard key={room.id} room={room} busy={busy} joining={joiningRoom === room.id} onJoin={choose} />)}
+        </div>
+        {!loading && !failure && !rooms.length && <div className="hub-empty"><Icon name="video" /><p>No rooms yet. Create a room to start watching.</p></div>}
+        {!loading && rooms.length > 0 && !visibleRooms.length && <div className="hub-empty"><Icon name="search" /><p>No rooms match “{query.trim()}”.</p><Button onClick={() => setQuery('')}>Clear search</Button></div>}
+        {query.trim() && <Status className="sr-only">{visibleRooms.length} matching {visibleRooms.length === 1 ? 'room' : 'rooms'}</Status>}
+        <p className="hub-preview-note">Room names and previews are public, including password-protected rooms.</p>
       </section>
     </main>
     {dialog && <EntryDialog {...dialog} busy={busy} error={error} expired={dialog.mode === 'join' && !rooms.some(room => room.id === dialog.room.id)} onSubmit={submit} onClose={() => { setDialog(null); setError(''); }} />}
-    <Footer />
-  </>;
+  </div>;
 }

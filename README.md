@@ -20,7 +20,7 @@ Its objectives are to keep playback synchronized, make group interaction availab
 | Chat and reactions | Send messages and quoted replies, insert emojis, react to comments, and send floating emoji reactions, including in fullscreen. |
 | Movie polls | Start a poll as host, suggest titles with optional Wikipedia metadata, vote, and post the result when the host finishes the poll. |
 | Participants and moderation | See connected participants; hosts can configure 19 permissions with room defaults and individual overrides, transfer hosting, and delegate moderation. |
-| Responsive interface | Watch beside a wider social lounge on desktop, switch between Chat and People tabs on smaller screens, and choose light or dark themes. |
+| Responsive interface | Video beside the lounge on desktop and above it on mobile, with consistent Chat, People, and Up next tabs, a visible display-name editor, direct room actions, and light/dark themes. |
 
 ## Technologies
 
@@ -69,6 +69,15 @@ Prerequisites: Git, Node.js 24 or newer with npm, and a modern browser. The serv
 
 On Windows, if PowerShell blocks `npm.ps1`, use `npm.cmd ci` and `npm.cmd run dev` instead. If a bundled download is unavailable, install a compatible executable and set `FFMPEG_PATH` or `FFPROBE_PATH` to its path before starting the server.
 
+Bun is also supported for dependency installation and running the development scripts. Keep Node.js 24 installed: the backend and test commands still run on Node.
+
+```sh
+bun install --frozen-lockfile
+bun run dev
+```
+
+Commit both `package-lock.json` and `bun.lock` when dependencies change. To synchronize Bun with npm's resolved versions, remove the old Bun lockfile and run `bun install --lockfile-only --ignore-scripts`; then validate with `bun install --frozen-lockfile --dry-run --ignore-scripts`. Keep the FFmpeg and ffprobe packages in `trustedDependencies` so normal Bun installations can obtain their platform executables. Deployment continues to use `npm ci`.
+
 To run the production version locally:
 
 ```sh
@@ -99,40 +108,42 @@ Follow the [Ubuntu VPS deployment guide](docs/deployment.md) to host WatchParty 
 
 ## Your first watch party
 
-1. Open the room hub at `/` and optionally enter a display name. Select **Create room**, enter a room name and optional password, then create it to open the separate player page. You can also select **Join room** on any listed room, including the public default room.
+1. Open the room hub at `/`. Use the pencil beside your name to choose a display name, or join as a guest. Search rooms by name or video title. Select **Create room**, enter a room name and optional password, then create it to open the separate player page. You can also select **Join room** on any listed room, including the public default room.
 2. Use **Invite** in the player to copy an invitation link. Viewers can follow the link or select your room on the hub; protected rooms prompt for their password. No access code is needed. For viewers on another device, use the server's reachable LAN or HTTPS address rather than `localhost`.
 3. As host, select **Choose Video** and choose one video, optionally with subtitle files. Keep the browser page that supplies the video open throughout the session. Other participants join the room to watch.
-4. Type in the chatroom and select **Send**. Right-click a message (long-press on touch) to reply or choose a reaction. The single emoji button at the bottom opens Message emoji and Global reaction tabs; the latter sends floating reactions to the room.
-5. As host, select **Start poll**. Enter a movie title and select **Find movie**; choose a matching result with **Suggest & vote**, or suggest the title without a poster. Suggesting a title automatically casts your vote. Participants can vote for another suggestion, and the host selects **Finish poll** to post the result in chat. A poll chooses what to watch next; the host still selects the actual video file.
-6. Select a participant's name to inspect permissions. Hosts can customize individual viewers, transfer hosting, or use **Room options > Viewer permissions** to configure room defaults. Use **Leave room** to return to the hub.
+4. Type in the chatroom and select **Send**. Use **Reply / react** on a message to open its actions; right-click, long-press, and Shift+F10 remain shortcuts. The emoji button at the bottom opens Message emoji and Global reaction tabs; the latter sends floating reactions to the room.
+5. As host, select **Start poll** in the lounge header. The poll opens under **Up next**; others can select that tab or the movie-vote notice in Chat. Enter a movie title and select **Find movie**; choose a matching result with **Suggest & vote**, or suggest the title without a poster. Suggesting a title automatically casts your vote. Participants can vote for another suggestion. **Finish poll** is in Up next and posts the result in chat. A poll chooses what to watch next; the host still selects the actual video file.
+6. Your display name appears above the chatroom tabs. Select its **pencil icon** to edit it, then **Save name** or **Cancel**. **People** shows the participant count; **Chat** shows unread messages in a circular badge. Use **People** to select a participant, then **Edit permissions** as host or **View permissions** as viewer. The dialog distinguishes **Room default: On/Off** from **Custom: On/Off** and provides resets. Changes save immediately across that participant's browser tabs in the room. Host transfer and blocking require confirmation, including a playback warning when blocking the video provider. Use **Room permissions** in the room bar to configure defaults, **Invite friends** to share the room, or **Leave room** to return to the hub. Leaving the browser that supplies the video also asks for confirmation.
+
+Hosts can also select the pencil beside the room title to rename the room. Choose **Save name** to update it for everyone or **Cancel** to discard the edit.
 
 ## Screenshots
 
-These captures show the current application with local demonstration data, a generated video, two participants, chat, and an active movie poll.
+These captures show the redesigned application with local demonstration data. The video is a generated test clip.
 
 ### Room selection
 
 The room hub lists rooms with video previews, participant counts, and optional password protection.
 
-![WatchParty room hub with room cards, a video preview, and create/join controls](docs/screenshots/room-selection.png)
+![WatchParty hub with searchable room cards and create/join controls](design-system/watchparty/hub-redesign-desktop.png)
 
 ### Desktop room
 
-Video sits beside the social lounge, with participants, a compact movie poll, and chat. Room options contains profile settings and host permission controls.
+Video sits beside Chat, People, and Up next. Pencil buttons open the room and display-name editors; invitations and room permissions are directly available.
 
-![Desktop room showing a demonstration video, two participants, an Arrival poll, and chat](docs/screenshots/desktop-room.png)
+![Desktop room with demonstration video, compact chatroom tabs, and composer](design-system/watchparty/player-current-desktop.png)
 
 ### Mobile room
 
-Video sits above the lounge with Chat and People tabs. This full-page capture uses a 390-pixel mobile viewport.
+Video sits above the chatroom with the same Chat, People, and Up next tabs. This full-page capture uses a 375-pixel mobile viewport.
 
-<img src="docs/screenshots/mobile-room.png" alt="Mobile room showing the demonstration video, Chat and People tabs, a compact movie poll, and chat composer" width="390">
+<img src="design-system/watchparty/player-current-mobile.png" alt="Mobile room with video, compact chatroom navigation, and message composer" width="375">
 
 ### Viewer permissions
 
 Hosts can configure room defaults, then customize individual viewers from the participant list. The grouped controls scroll to include polls, identity, and moderation.
 
-![Viewer permissions dialog showing grouped room defaults for playback, media, chat, and polls](docs/screenshots/permissions.png)
+![Individual permissions with room defaults, custom overrides, and reset actions](design-system/watchparty/individual-permissions-mobile.png)
 
 ## Team and contributions
 
