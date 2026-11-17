@@ -8,6 +8,8 @@ Start: npm start
 Health check: /healthz
 ```
 
+These commands are for Render. On Railway, dependency installation belongs in Railpack's install phase and the build command is only `npm run build`; see the [Railway guide](railway.md).
+
 Set these environment variables as separate key/value entries:
 
 ```dotenv

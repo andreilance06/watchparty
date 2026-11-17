@@ -80,7 +80,7 @@ function createHosting(room, { config, scheduleExpiry }) {
       if (previous) previous.role = "viewer";
       state.hostId = null; state.hostIdentity = null; state.hostName = null;
     }
-    transport.broadcast({ type: "host-left", preserveMedia: Boolean(state.mediaPath), hostId: state.hostId });
+    transport.broadcast({ type: "host-left", preserveMedia: Boolean(state.mediaPath || state.sourceType === 'screen'), hostId: state.hostId });
     transport.broadcast(sessionState(state, "host-transfer"));
     publish();
     scheduleExpiry(room);

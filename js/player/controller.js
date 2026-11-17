@@ -9,16 +9,25 @@ import { createSubtitles } from "./subtitles.js";
 import { createFullscreen } from "./fullscreen.js";
 import { createPlaybackSync } from "./sync.js";
 import { createSeekPresentation } from "./seek-presentation.js";
+import { createLiveStreamPlayback } from "./live-stream.js";
+import { createLiveQualityMenu } from "./live-quality-menu.js";
 import { can, canControl, DEFAULT_PERMISSIONS } from "../permissions.js";
 
-export function createPlayer({ elements, state: session, send, report, files, attention }) {
+export function createPlayer({ elements, state: session, send, report, files, attention, onScreenQuality }) {
   const life = createLifecycle();
   const { video, videoPlaceholder, placeholderTitle, placeholderText, viewerControls,
     chooseVideoButton, hostControls, roleBadge, fileName, syncStatus } = elements;
   const playbackStatus = createPlaybackStatus(video);
   const subtitles = createSubtitles({ elements, report, playbackStatus, onAddCaptions: files.chooseCaptions, onRemoveCaption: files.removeCaption });
-  const sync = createPlaybackSync({ elements, state: session, send });
+  const sync = createPlaybackSync({ elements, state: session, send, attention });
   const mediaEvents = createMediaEventBridge(video);
+  const livePlayback = createLiveStreamPlayback({ video, attention, isActive: () => session.sourceType === "screen",
+    onReady() {
+      session.sourceSwitching = false; session.suppressVideoEvents = false;
+      mediaEvents.connect(); videoPlaceholder.hidden = true;
+    },
+    onWaiting() { videoPlaceholder.hidden = false; }
+  });
   const compatibilityBuffer = createCompatibilityBuffer(video);
   const fullscreen = createFullscreen({ elements, getHostPaused: () => session.latestHostPaused, afterResize: subtitles.refreshLayout, attention });
   let latest, latestAt = 0, sourceKey = "", generation = 0, mode = "", pendingCompatibility;
@@ -52,6 +61,7 @@ export function createPlayer({ elements, state: session, send, report, files, at
       } else setVideoSource(message.url, "application/vnd.apple.mpegurl", "hlsjs native");
     }
   });
+  const liveQuality = createLiveQualityMenu({ video, isActive: () => session.sourceType === 'screen', onChange: onScreenQuality });
   function clearPipelines() {
     pipelines.clear(); pipelineGenerations.clear(); activeRendition = null; session.activeEncoder = "";
   }
@@ -172,6 +182,7 @@ export function createPlayer({ elements, state: session, send, report, files, at
     session.sourceSwitching = true;
     session.suppressVideoEvents = true;
     video.pause();
+    livePlayback.detach();
     const previousPlayer = video.player;
     video.querySelectorAll("source[data-watchparty-source]").forEach((source) => source.remove());
     if (!url) {
@@ -205,9 +216,11 @@ export function createPlayer({ elements, state: session, send, report, files, at
 
   function presentEmptyRoom() {
     placeholderTitle.textContent = can(session, "chooseVideo") ? "Your screen is ready" : "Waiting for the host";
-    placeholderText.textContent = can(session, "chooseVideo") ? "Choose a video below, invite your people, and settle in." : "The host will choose a video file and start the watch party.";
+    placeholderText.textContent = can(session, "chooseVideo") ? "Choose a video file or share a screen, window, or tab." : "The host will choose a video or share their screen.";
   }
   function showNoVideo(status = "Waiting for host") {
+    session.sourceType = null;
+    clearCompatibilityRequest();
     seekPresentation.clear();
     quality.reset(null);
     cancelRecovery(); terminalError = false; recoveryUsed = false;
@@ -221,6 +234,7 @@ export function createPlayer({ elements, state: session, send, report, files, at
     videoPlaceholder.hidden = false; viewerControls.hidden = true;
     presentEmptyRoom();
     fileName.textContent = "No video selected"; syncStatus.textContent = status;
+    updateControls();
   }
 
   function sendCompatibilityRequest() {
@@ -283,6 +297,21 @@ export function createPlayer({ elements, state: session, send, report, files, at
     const key = `${state.sessionId || ""}:${state.mediaVersion ?? ""}:${state.originalUrl || state.mediaUrl || ""}`;
     session.mediaVersion = state.mediaVersion;
     session.latestHostPaused = Boolean(state.paused);
+    if (state.sourceType === 'screen') {
+      const liveKey = `screen:${state.sourceId}`;
+      if (sourceKey !== liveKey) {
+        showNoVideo(); sourceKey = liveKey;
+        placeholderTitle.textContent = 'Connecting to screen share';
+        placeholderText.textContent = 'Waiting for live video from the sharer.';
+      }
+      session.sourceType = 'screen'; session.latestHostPaused = true;
+      fileName.textContent = state.fileName || 'Shared screen';
+      syncStatus.textContent = 'Live screen share'; viewerControls.hidden = true;
+      updateControls();
+      return;
+    }
+    session.sourceType = state.sourceType;
+    updateControls();
     subtitles.setAvailability({ hasVideo: Boolean(state.hasVideo && !state.processing), canAdd: can(session, "addCaptions"), canRemove: can(session, "removeCaptions") });
     if (state.processing) {
       seekPresentation.clear();
@@ -361,13 +390,13 @@ export function createPlayer({ elements, state: session, send, report, files, at
     hostControls.hidden = role !== "host"; viewerControls.hidden = true; video.controls = true;
     video.removeAttribute("thumb");
     updateControls();
-    if (role === "host") {
+    if (role === "host" && session.sourceType !== "screen") {
       video.muted = false;
       if (!Number.isFinite(video.volume) || video.volume < 0.05) video.volume = 1;
-      video.setAttribute("fastseek", "buttons keys gestures");
       video.setAttribute("persist", "stablevolume aspect"); video.setAttribute("persistkey", "watchparty-host");
     } else { video.removeAttribute("persist"); }
-    if (latest?.hasVideo) sync.status();
+    if (session.sourceType === "screen") syncStatus.textContent = "Live screen share";
+    else if (latest?.hasVideo) sync.status();
     else { syncStatus.textContent = role === "host" ? "" : "Waiting for the host"; if (!session.sourceSwitching) presentEmptyRoom(); }
   }
 
@@ -377,16 +406,19 @@ export function createPlayer({ elements, state: session, send, report, files, at
 
   function updateControls() {
     hostControls.hidden = !can(session, "chooseVideo");
-    subtitles.setAvailability({ canAdd: can(session, "addCaptions"), canRemove: can(session, "removeCaptions") });
+    const live = session.sourceType === "screen";
+    subtitles.setAvailability({ canAdd: !live && can(session, "addCaptions"), canRemove: !live && can(session, "removeCaptions") });
     const host = session.role === "host";
     const flags = [];
-    if (!host) flags.push("noloop", "nopip", "noplaylist");
-    if (!canControl(session, "play")) flags.push("noplay", "nocenterplay");
-    if (!canControl(session, "seek")) flags.push("noseekbuttons", "noprogress", "notimeline", "nochapters");
-    if (!canControl(session, "rate")) flags.push("nospeed");
+    if (!host) flags.push("nopip", "noplaylist");
+    if (!host || live) flags.push("noloop");
+    if (live) flags.push("noquality", "nocc", "nocrop", "notime", "nowatchparty-playback-rate");
+    if (!live && !canControl(session, "play")) flags.push("noplay", "nocenterplay");
+    if (live || !canControl(session, "seek")) flags.push("noseekbuttons", "noprogress", "notimeline", "nochapters");
+    if (live || !canControl(session, "rate")) flags.push("nospeed");
     video.setAttribute("controlslist", flags.join(" "));
-    video.toggleAttribute("nohotkeys", !host);
-    if (canControl(session, "seek")) video.setAttribute("fastseek", host ? "buttons keys gestures" : "buttons gestures");
+    video.toggleAttribute("nohotkeys", live || !host);
+    if (!live && canControl(session, "seek")) video.setAttribute("fastseek", host ? "buttons keys gestures" : "buttons gestures");
     else video.setAttribute("fastseek", "false");
   }
 
@@ -404,7 +436,7 @@ export function createPlayer({ elements, state: session, send, report, files, at
   }
 
   function localIntent(mode, target) {
-    if (session.suppressVideoEvents || session.sourceSwitching) return;
+    if (session.sourceType === "screen" || session.suppressVideoEvents || session.sourceSwitching) return;
     if (mode === "rate" && sync.isAppliedRate()) return;
     if (!canControl(session, mode)) {
       if (latest && session.activeMediaUrl) {
@@ -432,9 +464,16 @@ export function createPlayer({ elements, state: session, send, report, files, at
   // Movi's built-in keyboard handler does not gate all transport shortcuts.
   // Viewers use this small permission-aware handler while hosts keep Movi's.
   life.listen(video, "keydown", event => {
-    if (session.role === "host" || event.ctrlKey || event.metaKey || event.altKey || !session.activeMediaUrl) return;
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
     if ((event.composedPath?.() || []).some(node => /^(INPUT|TEXTAREA|SELECT|BUTTON)$/i.test(node.tagName) || node.isContentEditable)) return;
     const key = event.key.toLowerCase();
+    if (session.sourceType === "screen") {
+      if ([" ", "k"].includes(key)) { event.preventDefault(); if (video.paused) livePlayback.play(); else video.pause(); }
+      else if (key === "m") { event.preventDefault(); video.muted = !video.muted; }
+      else if (key === "f") { event.preventDefault(); fullscreen.toggle(); }
+      return;
+    }
+    if (session.role === "host" || !session.activeMediaUrl) return;
     if ([" ", "k"].includes(key) && canControl(session, "play")) {
       event.preventDefault();
       if (video.paused) video.play().catch(() => {}); else video.pause();
@@ -497,7 +536,10 @@ export function createPlayer({ elements, state: session, send, report, files, at
   life.listen(video, "loadedmetadata", ready);
   life.listen(video, "canplay", ready);
   life.listen(video, "loadeddata", progress);
-  life.listen(video, "playing", progress);
+  life.listen(video, "playing", () => {
+    if (session.sourceType === "screen") attention?.setPlaybackBlocked?.(false);
+    else progress();
+  });
   life.listen(document, "visibilitychange", resetProgress);
   let hdrAssessment = 0;
   async function reassessHdr() {
@@ -538,7 +580,7 @@ export function createPlayer({ elements, state: session, send, report, files, at
     progress();
   });
   life.listen(video, "pointerdown", () => {
-    if (session.role !== "viewer" || session.sourceSwitching) return;
+    if (session.sourceType === "screen" || session.role !== "viewer" || session.sourceSwitching) return;
     video.muted = false;
     if (!Number.isFinite(video.volume) || video.volume < 0.05) video.volume = 1;
     if (!session.latestHostPaused && video.paused) video.play().catch(() => {});
@@ -547,15 +589,18 @@ export function createPlayer({ elements, state: session, send, report, files, at
   life.listen(video, "play", () => { resetProgress(); localIntent("play"); });
   life.listen(video, "pause", () => { resetProgress(); localIntent("pause"); });
   life.listen(video, "watchparty-seek-intent", event => {
-    if (!session.suppressVideoEvents && !session.sourceSwitching && !canControl(session, "seek")) event.preventDefault();
+    if (session.sourceType === "screen" || !session.suppressVideoEvents && !session.sourceSwitching && !canControl(session, "seek")) event.preventDefault();
     localIntent("seek", event.detail.time);
   });
   life.listen(video, "seeking", () => {
     metrics.seekStarted = performance.now(); lastProgress = performance.now();
     if (!video.player?.getHLSVideoElement?.()) localIntent("seek");
   });
-  life.listen(video, "ratechange", () => localIntent("rate"));
-  life.interval(() => { if (session.role === "host" && !video.paused) sync.broadcast("tick"); }, 2000);
+  life.listen(video, "ratechange", () => {
+    if (session.sourceType === "screen") { if (video.playbackRate !== 1) video.playbackRate = 1; return; }
+    localIntent("rate");
+  });
+  life.interval(() => { if (session.sourceType !== "screen" && session.role === "host" && !video.paused) sync.broadcast("tick"); }, 2000);
   life.interval(() => {
     if (!latest || !session.activeMediaUrl || terminalError || pendingCompatibility || mode === "compatibility") return;
     const active = surface(), time = Number(active.currentTime) || 0, now = performance.now();
@@ -588,7 +633,8 @@ export function createPlayer({ elements, state: session, send, report, files, at
   life.listen(video, "nativeaudiounsupported", () => {
     if (latest?.mediaInfo?.hasAudio) requestCompatibility("native audio decoder unavailable");
   });
-  return { applyRole, applyPermissions, rejectPlayback, applySessionState, applyCompatibility, updateCaptions, updateEncoder, showMediaError, showNoVideo,
-    destroy() { generation++; latest = null; terminalError = true; life.dispose(); clearCompatibilityRequest(); cancelRecovery(); sync.destroy(); seekPresentation.dispose(); quality.destroy(); subtitles.destroy(); playbackStatus.clearAll(); mediaEvents.destroy(); compatibilityBuffer.destroy(); fullscreen.destroy(); files.disconnect(); video.dispose?.(); },
+  return { applyRole, applyPermissions, rejectPlayback, applySessionState, applyCompatibility, updateCaptions, updateEncoder, showMediaError, showNoVideo, setScreenStream: livePlayback.setStream, setScreenQuality: liveQuality.update,
+    retryPlayback() { if (session.sourceType === "screen") livePlayback.play(); else sync.retryPlayback(); }, setChatVisible: fullscreen.setChatVisible,
+    destroy() { generation++; latest = null; terminalError = true; life.dispose(); liveQuality.destroy(); livePlayback.destroy(); clearCompatibilityRequest(); cancelRecovery(); sync.destroy(); seekPresentation.dispose(); quality.destroy(); subtitles.destroy(); playbackStatus.clearAll(); mediaEvents.destroy(); compatibilityBuffer.destroy(); fullscreen.destroy(); files.disconnect(); video.dispose?.(); },
     handleQuality: quality.handle, disconnect: () => { seekPresentation.clear(); quality.reset(null); subtitles.setTracks([], { reset: true, key: "disconnected" }); playbackStatus.clearAll(); } };
 }

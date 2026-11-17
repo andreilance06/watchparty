@@ -38,8 +38,8 @@
 }
 
 .name-form input:focus {
-  border-color: rgba(124, 92, 255, .65);
-  box-shadow: 0 0 0 3px rgba(124, 92, 255, .1);
+  border-color: color-mix(in srgb, var(--text-brand) 65%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-brand) 10%, transparent);
 }
 
 .name-form input[aria-invalid="true"] {
@@ -181,8 +181,8 @@ body > .reaction-feed .reaction-item {
   padding: .85rem 1rem;
   border-color: rgba(255, 255, 255, .15);
   border-radius: .65rem;
-  background: rgba(30, 31, 34, .92);
-  color: #f2f3f5;
+  background: color-mix(in srgb, var(--media-surface) 94%, transparent);
+  color: var(--media-text);
   font-family: var(--font-readable);
   font-size: 16px;
   line-height: 1.4;
@@ -518,8 +518,8 @@ body > .reaction-feed .reaction-item {
 }
 
 .chat-form input:focus {
-  border-color: rgba(124, 92, 255, .65);
-  box-shadow: 0 0 0 3px rgba(124, 92, 255, .1);
+  border-color: color-mix(in srgb, var(--text-brand) 65%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-brand) 10%, transparent);
 }
 
 .chat-compose-row > button[type="submit"] {

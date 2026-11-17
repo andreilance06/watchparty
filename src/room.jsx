@@ -67,7 +67,7 @@ export function RoomProvider({ children }) {
     let disposed = false, connection;
     const controller = new AbortController();
     function blocked() {
-      connection?.dispose(); player.current?.files.disconnect();
+      connection?.dispose(); player.current?.files.disconnect(); player.current?.screenShare?.disconnect();
       navigate('/?blocked=1');
     }
     function receive(message) {
@@ -75,7 +75,7 @@ export function RoomProvider({ children }) {
       const media = player.current;
       const previous = stateRef.current;
       dispatch({ type: 'message', message, id: createClientId(), now: Date.now() });
-      if (media?.files.handleMessage(message) || media?.controller.handleQuality(message)) return;
+      if (media?.screenShare?.handleMessage(message) || media?.files.handleMessage(message) || media?.controller.handleQuality(message)) return;
       switch (message.type) {
         case 'role':
           session.current.clientId = message.clientId;
@@ -137,7 +137,7 @@ export function RoomProvider({ children }) {
           onStatus: (connected, text) => {
             if (disposed) return;
             dispatch({ type: 'status', connected, text });
-            if (!connected) { player.current?.files.disconnect(); player.current?.controller.disconnect(); }
+            if (!connected) { player.current?.files.disconnect(); player.current?.screenShare?.disconnect(); player.current?.controller.disconnect(); }
           },
         });
         transport.current = connection; connection.connect();
@@ -146,7 +146,7 @@ export function RoomProvider({ children }) {
     void start();
     const timer = setInterval(() => dispatch({ type: 'expire-reactions', now: Date.now() }), 1000);
     const restore = event => { if (event.persisted) location.reload(); };
-    const hide = () => { connection?.dispose(); player.current?.files.disconnect(); };
+    const hide = () => { connection?.dispose(); player.current?.files.disconnect(); player.current?.screenShare?.disconnect(); };
     window.addEventListener('pagehide', hide); window.addEventListener('pageshow', restore);
     return () => { disposed = true; controller.abort(); connection?.dispose(); transport.current = null; clearInterval(timer); window.removeEventListener('pagehide', hide); window.removeEventListener('pageshow', restore); };
   }, [roomId, system]);

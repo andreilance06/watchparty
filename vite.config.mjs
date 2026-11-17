@@ -22,8 +22,8 @@ export default defineConfig({
   optimizeDeps: { noDiscovery: true, include: ['react', 'react-dom/client', 'react/jsx-runtime'] },
   server: {
     host: '0.0.0.0',
-    proxy: Object.fromEntries(['/api', '/rooms', '/hls', '/ws', '/media'].map(path => [path, {
-      target: 'http://127.0.0.1:3000', ws: path === '/ws' || path === '/rooms', changeOrigin: false,
+    proxy: Object.fromEntries(['/api', '/rooms', '/hls', '/ws', '/source', '/media'].map(path => [path, {
+      target: 'http://127.0.0.1:3000', ws: ['/ws', '/source', '/rooms'].includes(path), changeOrigin: false,
     }])),
   },
   // Player modules intentionally remain external, beside their WASM and workers.

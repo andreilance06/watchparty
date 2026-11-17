@@ -1,11 +1,12 @@
 import { canControl } from "../permissions.js";
 import { createPlaybackRateDisplay } from "./playback-rate-display.js";
 
-export function createPlaybackSync({ elements, state: session, send }) {
+export function createPlaybackSync({ elements, state: session, send, attention }) {
   const { video, syncStatus } = elements;
   const rateDisplay = createPlaybackRateDisplay(video);
   let sequence = 0, commandSequence = 0, pendingSeek, queuedTransport, queuedRate;
   let appliedRate;
+  let latestState, latestAt = 0;
   let cleanup = () => {}, applying = false, settle = () => {};
   const surface = () => video.player?.getHLSVideoElement?.() || video.player?.getVideoElement?.() || video;
 
@@ -52,6 +53,8 @@ export function createPlaybackSync({ elements, state: session, send }) {
   }
 
   function apply(state, sourceChanged) {
+    latestState = state; latestAt = performance.now();
+    if (state.paused) attention?.setPlaybackBlocked?.(false);
     sourceChanged ||= Boolean(session.sourceSwitching);
     if (queuedTransport && canControl(session, queuedTransport)) state = { ...state, paused: queuedTransport === "pause" };
     if (Number.isFinite(queuedRate) && canControl(session, "rate")) state = { ...state, playbackRate: queuedRate };
@@ -78,8 +81,13 @@ export function createPlaybackSync({ elements, state: session, send }) {
         if (!active.paused) video.pause();
       } else if (active.paused) {
         resuming = true;
-        Promise.resolve(video.play()).catch(() => {
-          if (token === sequence) syncStatus.textContent = "Tap fullscreen once if your browser blocks playback";
+        Promise.resolve(video.play()).then(() => {
+          if (token === sequence) attention?.setPlaybackBlocked?.(false);
+        }).catch(() => {
+          if (token === sequence) {
+            syncStatus.textContent = "Use Join playback to allow video playback in this browser";
+            attention?.setPlaybackBlocked?.(true);
+          }
         }).finally(() => {
           resuming = false;
           if (token === sequence) finish();
@@ -179,5 +187,10 @@ export function createPlaybackSync({ elements, state: session, send }) {
   // Drift correction must never become a viewer's shared speed command.
   function isAppliedRate() { return Number.isFinite(appliedRate) && Math.abs(video.playbackRate - appliedRate) <= 0.005; }
 
-  return { apply, accept, cancel, reject, status, isAppliedRate, destroy() { cancel(); rateDisplay.destroy(); }, update: () => settle(), isApplying: () => applying, broadcast: broadcastVideoState };
+  function retryPlayback() {
+    if (!latestState || latestState.paused) return;
+    const time = latestState.time + (performance.now() - latestAt) / 1000 * (latestState.playbackRate || 1);
+    apply({ ...latestState, time, syncMode: "play" }, false);
+  }
+  return { apply, accept, cancel, reject, status, isAppliedRate, retryPlayback, destroy() { cancel(); rateDisplay.destroy(); }, update: () => settle(), isApplying: () => applying, broadcast: broadcastVideoState };
 }

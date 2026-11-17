@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createClientState } from '../js/state.js';
 import { Button, Dialog, DialogHeader, Field, Header, Input, navigate, post, request, Status } from './shared.jsx';
 import { Icon } from './Icons.jsx';
+import { BROWSER_PREFERENCE_KEY, readBrowserPreferences, selectRooms, SORT_OPTIONS } from './room-browser.js';
 
 export function RoomCard({ room, busy, joining = false, onJoin }) {
   const [failed, setFailed] = useState(false);
@@ -11,9 +12,9 @@ export function RoomCard({ room, busy, joining = false, onJoin }) {
     <div className="room-preview">
       {preview && <img src={room.thumbnailUrl} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} />}
       {!preview && <div className="room-placeholder"><span className="room-placeholder-icon"><Icon name="video" /></span><span>{room.fileName ? 'Preview unavailable' : 'Waiting for a video'}</span></div>}
-      {room.passwordRequired && <span className="room-badge"><Icon name="lock" />Password protected</span>}
     </div>
-    <div className="room-card-body"><h3>{room.name}</h3>{room.fileName && <p className="room-file">{room.fileName}</p>}
+    <div className="room-card-body"><h3>{room.name}</h3><p className={`room-file${room.fileName ? '' : ' room-file-empty'}`}>{room.fileName || 'Waiting for a video'}</p>
+      <span className={`room-badge${room.passwordRequired ? '' : ' room-access-open'}`}>{room.passwordRequired ? <><Icon name="lock" />Password protected</> : 'Open'}</span>
       <div className="room-card-footer"><span className="room-participants"><Icon name="people" /><span>{room.participantCount} online</span></span><Button disabled={busy} pending={joining} pendingLabel="Joining…" aria-label={joining ? `Joining ${room.name}` : `Join ${room.name}`} onClick={() => onJoin(room)}>Join room<Icon name="arrow" /></Button></div>
     </div>
   </article>;
@@ -65,6 +66,12 @@ export function Hub() {
   const [busy, setBusy] = useState(false);
   const [joiningRoom, setJoiningRoom] = useState(null);
   const [query, setQuery] = useState('');
+  const [preferences, setPreferences] = useState(readBrowserPreferences);
+  const [access, setAccess] = useState('all'), [video, setVideo] = useState('all');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  useEffect(() => {
+    try { localStorage.setItem(BROWSER_PREFERENCE_KEY, JSON.stringify(preferences)); } catch { /* Optional preference. */ }
+  }, [preferences]);
   const busyRef = useRef(false), nameRef = useRef(name), handledInvite = useRef(false), identityRequest = useRef(null);
   const entryController = useRef(null);
   nameRef.current = name;
@@ -135,7 +142,10 @@ export function Hub() {
     } catch (error) { if (error.name !== 'AbortError') setError(error.message); }
     finally { busyRef.current = false; setBusy(false); }
   }
-  const visibleRooms = rooms.filter(room => `${room.name} ${room.fileName || ''}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  const visibleRooms = selectRooms(rooms, { query, access, video, sort: preferences.sort });
+  const activeFilters = Number(access !== 'all') + Number(video !== 'all');
+  const narrowed = Boolean(query.trim() || activeFilters);
+  const clearBrowsing = () => { setQuery(''); setAccess('all'); setVideo('all'); };
   return <div className="hub-page">
     <a className="watch-skip" href="#hubMain">Skip to rooms</a>
     <Header brandHeading={false}><HubIdentity name={name} disabled={busy} onSave={value => { setName(value); try { localStorage.setItem('watchparty-display-name', value); } catch { /* Optional preference. */ } }} /></Header>
@@ -146,14 +156,23 @@ export function Hub() {
       </section>
       <section aria-labelledby="roomsTitle"><div className="hub-section-heading"><h2 id="roomsTitle">Rooms <span className="hub-count" aria-hidden="true">{loading ? '…' : rooms.length}</span><span className="sr-only">{loading ? ', loading' : `, ${rooms.length} available`}</span></h2>
         <div className="hub-search"><Icon name="search" /><Input type="search" aria-label="Search rooms" placeholder="Search rooms or videos" value={query} onChange={event => setQuery(event.target.value)} /></div></div>
+        <div className="hub-browser-controls">
+          <label className="hub-sort">Sort by<select className="ui-input" value={preferences.sort} onChange={event => setPreferences(previous => ({ ...previous, sort: event.target.value }))}>{SORT_OPTIONS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+          <Button aria-expanded={filtersOpen} aria-controls="hubFilters" onClick={() => setFiltersOpen(value => !value)}><Icon name="filter" />Filters{activeFilters > 0 && <span className="hub-filter-count">{activeFilters}<span className="sr-only"> active</span></span>}</Button>
+          <div className="hub-view-toggle" role="group" aria-label="Room view">{[['cards', 'Cards'], ['list', 'List']].map(([view, label]) => <Button key={view} aria-pressed={preferences.view === view} onClick={() => setPreferences(previous => ({ ...previous, view }))}><Icon name={view} /><span>{label}</span></Button>)}</div>
+        </div>
+        <div id="hubFilters" className="hub-filters" hidden={!filtersOpen} role="group" aria-label="Room filters">
+          <label>Access<select className="ui-input" value={access} onChange={event => setAccess(event.target.value)}><option value="all">All rooms</option><option value="open">Open</option><option value="protected">Password protected</option></select></label>
+          <label>Video<select className="ui-input" value={video} onChange={event => setVideo(event.target.value)}><option value="all">All rooms</option><option value="selected">Video selected</option><option value="waiting">Waiting for a video</option></select></label>
+        </div>
+        {narrowed && <div className="hub-results"><Status>{visibleRooms.length} of {rooms.length} rooms</Status><Button variant="quiet" onClick={clearBrowsing}>Clear all<span className="sr-only"> search and filters</span></Button></div>}
         {notice && <Status className="hub-notice" tone="warning">{notice}</Status>}
         {(failure || loading) && <div className="hub-status-row"><Status tone={failure ? 'error' : 'neutral'}>{failure ? 'Could not refresh rooms. Check your connection and try again.' : 'Finding rooms…'}</Status>{failure && <Button onClick={() => setRefreshToken(value => value + 1)}>Try again</Button>}</div>}
-        <div className="room-grid" aria-label="Available rooms" aria-busy={loading}>
+        <div className="room-grid" data-view={preferences.view} aria-label="Available rooms" aria-busy={loading}>
           {loading && !rooms.length ? Array.from({ length: 3 }, (_, index) => <div key={index} className="hub-skeleton" aria-hidden="true"><div /><span /><span /></div>) : visibleRooms.map(room => <RoomCard key={room.id} room={room} busy={busy} joining={joiningRoom === room.id} onJoin={choose} />)}
         </div>
         {!loading && !failure && !rooms.length && <div className="hub-empty"><Icon name="video" /><p>No rooms yet. Create a room to start watching.</p></div>}
-        {!loading && rooms.length > 0 && !visibleRooms.length && <div className="hub-empty"><Icon name="search" /><p>No rooms match “{query.trim()}”.</p><Button onClick={() => setQuery('')}>Clear search</Button></div>}
-        {query.trim() && <Status className="sr-only">{visibleRooms.length} matching {visibleRooms.length === 1 ? 'room' : 'rooms'}</Status>}
+        {!loading && rooms.length > 0 && !visibleRooms.length && <div className="hub-empty"><Icon name="search" /><p>No rooms match your search or filters.</p></div>}
         <p className="hub-preview-note">Room names and previews are public, including password-protected rooms.</p>
       </section>
     </main>

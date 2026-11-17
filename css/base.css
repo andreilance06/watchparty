@@ -14,8 +14,8 @@ body {
   margin: 0;
   color: var(--text);
   background:
-    radial-gradient(ellipse at 16% -8%, rgba(124, 92, 255, .15), transparent 31rem),
-    radial-gradient(ellipse at 96% 22%, rgba(58, 112, 190, .055), transparent 32rem),
+    radial-gradient(ellipse at 16% -8%, color-mix(in srgb, var(--action-primary) 10%, transparent), transparent 31rem),
+    radial-gradient(ellipse at 96% 22%, color-mix(in srgb, var(--palette-blue) 8%, transparent), transparent 32rem),
     var(--bg);
   transition: background-color .2s ease, color .2s ease;
 }

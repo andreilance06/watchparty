@@ -1,5 +1,6 @@
 // Isolate the same pinned Movi Settings hooks used by native-caption-menu.
 // The vendor bundle and decoder APIs remain untouched.
+import { removeEmptySettingsSections } from './settings-sections.js';
 export function createNativeQualityMenu({ video, onChange }) {
   const hooks = [];
   let state = {}, qualitySelect, bitrateSlider, bitrateAuto, bitrateLabel, auto, status, container;
@@ -201,17 +202,17 @@ export function createNativeQualityMenu({ video, onChange }) {
       if (title) title.textContent = "Resolution";
     }
   }
-  hook("buildSettingsRoot", (original, ...args) => { const result = original?.(...args); renameResolution(); return result; });
+  hook("buildSettingsRoot", (original, ...args) => { const result = original?.(...args); renameResolution(); removeEmptySettingsSections(video.shadowRoot?.querySelector('.movi-settings-root')); return result; });
   hook("openSettingsPage", (original, ...args) => { const result = original?.(...args); renameResolution(); return result; });
   hook("closeSettingsPage", (original, ...args) => { cancelDrag(); const result = original?.(...args); renameResolution(); return result; });
   hook("clampSettingsPanel", (original, panel) => {
     original?.(panel);
-    // Movi measures the timeline to place Settings above the controls. Viewers
-    // without seek permission have a hidden timeline (a zero-sized rectangle).
+    // Movi measures the timeline to place Settings above the controls. Live
+    // streams and viewers without seek permission have a hidden timeline.
     // Its viewport origin must not become a several-hundred-pixel bottom inset.
     const row = panel?.closest?.(".movi-buttons-row");
     const progress = panel?.closest?.(".movi-controls-bar")?.querySelector(".movi-progress-container");
-    if (state.enabled && row && progress && !progress.getBoundingClientRect().height &&
+    if (row && progress && !progress.getBoundingClientRect().height &&
         typeof getComputedStyle === "function" && getComputedStyle(panel).position !== "fixed") {
       panel.style.bottom = `${Math.round(row.getBoundingClientRect().height + 6)}px`;
     }

@@ -153,7 +153,7 @@
   color: #a5aabe;
   pointer-events: none;
   background:
-    radial-gradient(circle at center, rgba(124, 92, 255, .08), transparent 55%),
+    radial-gradient(circle at center, color-mix(in srgb, var(--text-brand) 8%, transparent), transparent 55%),
     #050608;
 }
 

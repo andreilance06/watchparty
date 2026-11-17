@@ -34,6 +34,7 @@ function createMediaService({ state, config, encoderPromise, broadcast, thumbnai
   }
 
   function select(sourcePath, fileName = path.basename(sourcePath)) {
+    state.sourceType = 'file'; state.screenShare = null;
     preview.reset();
     state.mediaPath = sourcePath;
     state.mediaVersion += 1;
@@ -132,11 +133,12 @@ function createMediaService({ state, config, encoderPromise, broadcast, thumbnai
 
   function reset() {
     state.transcodeInfo = null;
-    if (state.mediaPath || state.hlsDirectory || state.mediaProcessing) state.mediaVersion += 1;
+    if (state.mediaPath || state.hlsDirectory || state.mediaProcessing || state.sourceType === 'screen') state.mediaVersion += 1;
     state.playbackRevision += 1;
     state.mediaPath = null;
     state.sourceId = null;
     state.sourceOwnerId = null;
+    state.sourceType = null; state.screenShare = null;
     state.fileName = null;
     state.mediaReady = false;
     state.mediaProcessing = false;

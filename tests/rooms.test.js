@@ -22,6 +22,8 @@ async function setup(t, config = {}) {
 test("only the host can rename a room, with validation and synchronized metadata", async t => {
   const { app, api, connect, base } = await setup(t);
   const created = await api('/api/rooms', { name: 'Original', displayName: 'Host' });
+  const createdAt = app.rooms.get(created.body.room.id).createdAt;
+  assert.ok(Number.isFinite(createdAt));
   const host = await connect(created, 'Host');
   const joined = await api('/api/rooms/join', { roomId: created.body.room.id, displayName: 'Viewer' });
   const viewer = await connect(joined, 'Viewer');
@@ -39,6 +41,8 @@ test("only the host can rename a room, with validation and synchronized metadata
   assert.equal(app.state === app.rooms.get(created.body.room.id).state, false);
   const listing = await (await fetch(base + '/api/rooms')).json();
   assert.equal(listing.rooms.find(room => room.id === created.body.room.id).name, 'Friday films');
+  assert.equal(listing.rooms.find(room => room.id === created.body.room.id).createdAt, createdAt);
+  assert.ok(Number.isFinite(listing.rooms.find(room => room.id === 'default').createdAt));
   const reconnected = await connect(joined, 'Viewer'); t.after(() => reconnected.ws.terminate());
   assert.equal((await reconnected.next('room-updated')).room.name, 'Friday films');
 });

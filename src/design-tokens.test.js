@@ -20,11 +20,13 @@ it.each([['dark', dark], ['light', light]])('keeps text and controls readable in
   for (const fill of ['--action-primary', '--action-primary-hover', '--action-primary-pressed']) {
     expect(contrast(tokens, '--on-action', fill), `button text on ${fill}`).toBeGreaterThanOrEqual(4.5);
   }
-  for (const surface of ['--canvas', '--surface', '--surface-subtle', '--surface-raised']) {
+  for (const surface of ['--canvas', '--surface', '--surface-subtle', '--surface-raised', '--surface-selected']) {
     for (const text of ['--text-primary', '--text-secondary', '--text-brand', '--text-success', '--text-warning', '--text-danger']) {
       expect(contrast(tokens, text, surface), `${text} on ${surface}`).toBeGreaterThanOrEqual(4.5);
     }
     expect(contrast(tokens, '--border-control', surface), `control boundary on ${surface}`).toBeGreaterThanOrEqual(3);
     expect(contrast(tokens, '--focus-ring', surface), `focus on ${surface}`).toBeGreaterThanOrEqual(3);
   }
+  expect(contrast(tokens, '--on-accent', '--surface-accent'), 'accent badge text').toBeGreaterThanOrEqual(4.5);
+  expect(contrast(tokens, '--meter-fill', '--border-subtle'), 'vote-meter fill').toBeGreaterThanOrEqual(3);
 });

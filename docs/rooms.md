@@ -2,9 +2,11 @@
 
 The root page is a room hub. The player is a separate page at `/watch?roomId=ID`, or `/watch` for the public default room. Old `/?roomId=ID` bookmarks redirect to the player. Invitation URLs use `/?room=ID` to select a room on the hub. There are no access codes.
 
+Live screen/tab sources use the same membership and video-selection permissions. See [screen sharing](screen-sharing.md) for the WebRTC protocol, browser support, and ICE/TURN configuration. The byte relay below remains the file playback path.
+
 ## Room directory and video previews
 
-`GET /api/rooms` returns `{ rooms: [...] }`. Each entry contains `id`, `name`, `passwordRequired`, `participantCount`, `fileName` (or null), `thumbnailUrl` (or null), `invitePath`, and `watchPath`. The permanent public default room and all existing user-created rooms are included. Empty rooms remain listed until their existing idle expiry; room discovery does not extend that deadline. Counts include connected browser tabs.
+`GET /api/rooms` returns `{ rooms: [...] }`. Each entry contains `id`, `name`, `createdAt` (Unix milliseconds), `passwordRequired`, `participantCount`, `fileName` (or null), `thumbnailUrl` (or null), `invitePath`, and `watchPath`. Creation time is assigned once when the in-memory room is built, including the default room at server startup; renames, joins, and refreshes do not change it. The permanent public default room and all existing user-created rooms are included. Empty rooms remain listed until their existing idle expiry; room discovery does not extend that deadline. Counts include connected browser tabs.
 
 Room names, filenames, and thumbnail images are public, including for protected rooms. Password hashes, membership credentials, original media URLs, and internal relay URLs are never included. Listing rooms does not grant membership or start a room WebSocket.
 
@@ -301,5 +303,10 @@ One membership has one active control socket. A reconnect replaces it; replacing
 The video provider must keep the page open and connected, including after transferring host. Refreshing loses File objects; browser/mobile suspension can interrupt file reads. There is no installed helper, full-file staging, or background hosting service.
 
 Rooms are in memory, expire after 30 minutes without control connections (including rooms whose creator never connects), and disappear on restart. Source sockets, pending reads, encoding/subtitle jobs, memberships, and temporary files are cleared on departure/expiry/shutdown. The default room does not expire.
+
+## Live reaction protocol
+
+The existing `{ type: "reaction", emoji, requestId? }` command retains the `globalReactions` permission and single-emoji validation. Accepted reactions broadcast as before; commands with a requestId also receive `{ type: "reaction-sent", requestId }`. A per-sender 500 ms cooldown returns an acknowledged error when exceeded. `watchparty-live-reactions` stores only the local shown/hidden preference; it does not affect outgoing permissions, other participants, or comment reactions.
+
 
 `createApplication({ config })` supports `roomIdleMs`, `sourceReadTimeoutMs`, `sourceChunkBytes` (default 256 KiB; do not exceed the browser's 256 KiB response limit), and `sourceMaxReads` (default four), primarily for deterministic testing. Encoder detection is shared, but streams, clocks, jobs, and caches are independent. The old `/api/select-video` returns `410`; native server dialogs have been removed.

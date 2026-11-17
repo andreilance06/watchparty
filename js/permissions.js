@@ -2,7 +2,7 @@ const PERMISSION_CATALOG = Object.freeze([
   { key: "playPause", label: "Play/pause", group: "Playback", default: true },
   { key: "seek", label: "Seek", group: "Playback", default: false },
   { key: "playbackRate", label: "Playback speed", group: "Playback", default: false },
-  { key: "chooseVideo", label: "Choose/replace video", group: "Media", default: false },
+  { key: "chooseVideo", label: "Choose video / share screen", group: "Media", default: false },
   { key: "addCaptions", label: "Add captions", group: "Media", default: false },
   { key: "removeCaptions", label: "Remove captions", group: "Media", default: false },
   { key: "sendChat", label: "Send messages", group: "Chat", default: true },

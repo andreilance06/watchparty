@@ -15,6 +15,8 @@ function createSession() {
     blockedParticipants: new Map(),
     sourceId: null,
     sourceOwnerId: null,
+    sourceType: null,
+    screenShare: null,
     hostId: null,
     hostIdentity: null,
     hostName: null,
@@ -58,11 +60,13 @@ function currentTime(state) {
 }
 
 function sessionState(state, syncMode = "tick") {
+  const live = state.sourceType === 'screen';
   const compatibilityUrl = state.mediaPath && state.mediaReady
     ? `${state.basePath || ""}/hls/master.m3u8?s=${state.sessionId}&v=${state.mediaVersion}&g=${state.streamGeneration || 0}` : null;
   return {
-    type: "session-state", sessionId: state.sessionId, hasVideo: Boolean(state.mediaPath && state.mediaReady),
+    type: "session-state", sessionId: state.sessionId, hasVideo: live || Boolean(state.mediaPath && state.mediaReady),
     sourceId: state.sourceId, sourceOwnerId: state.sourceOwnerId,
+    sourceType: state.sourceType, ...(live ? { screenShare: state.screenShare } : {}),
     processing: state.mediaProcessing, mediaVersion: state.mediaVersion,
     mediaUrl: compatibilityUrl,
     playbackRevision: state.playbackRevision,
@@ -71,7 +75,7 @@ function sessionState(state, syncMode = "tick") {
     originalUrl: state.mediaPath && state.mediaReady ? `${state.basePath || ""}/media/original?s=${state.sessionId}&v=${state.mediaVersion}` : null,
     compatibilityUrl,
     mediaInfo: state.mediaInfo,
-    fileName: state.mediaPath ? state.fileName || path.basename(state.mediaPath) : null,
+    fileName: live ? state.fileName : state.mediaPath ? state.fileName || path.basename(state.mediaPath) : null,
     duration: state.mediaDuration, encoder: state.selectedEncoder,
     ...(state.transcodeInfo ? { transcodeInfo: state.transcodeInfo } : {}),
     paused: state.playback.paused, time: currentTime(state), playbackRate: state.playback.rate,

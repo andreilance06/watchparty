@@ -40,6 +40,7 @@ function createRealtimeServer(server, { registry, config, movieSearch }) {
     const { handleMessage, updatePresence } = createMessageHandler({ state, transport, media, movieSearch });
     room.moderation.setPublish(updatePresence);
     room.hosting.setPublish(updatePresence);
+    room.screenShare.setPublish(updatePresence);
     // The token also authenticates reloads after the old socket has been removed.
     // Keep live-socket verification for clients deployed before tokens were added.
     const signedResume = identity && /^[\da-f-]{36}$/i.test(resumeClientId || "") && /^[\da-f]{64}$/i.test(resumeToken || "") &&
@@ -81,6 +82,7 @@ function createRealtimeServer(server, { registry, config, movieSearch }) {
           return;
         }
         if (room.moderation.handle(ws, message)) return;
+        if (room.screenShare.handle(ws, message)) return;
         if (!await room.source.handleControl(ws, message) && !ws.explicitLeave && ws.readyState === WebSocket.OPEN &&
             state.clients.get(ws.clientId)?.ws === ws) handleMessage(ws, message);
       } catch { send(ws, { type: "error", message: "Invalid message." }); }

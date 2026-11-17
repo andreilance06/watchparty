@@ -5,6 +5,27 @@ const { bitrateRange, qualityOptions, resolveQuality } = require('../server/medi
 const { createEncoderBudget } = require('../server/media/encoder-budget');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
+test('Settings stays above controls with a hidden timeline even when file quality is disabled', async () => {
+  const b = createBrowserDouble(), video = b.elements.get('video');
+  const { createNativeQualityMenu } = await b.load('js/player/native-quality-menu.js');
+  let position = 'absolute', timelineHeight = 0;
+  b.context.getComputedStyle = () => ({ position });
+  const original = video.clampSettingsPanel = panel => { panel.style.bottom = '1985px'; };
+  const row = { getBoundingClientRect: () => ({ height: 44 }) };
+  const progress = { getBoundingClientRect: () => ({ height: timelineHeight }) };
+  const bar = { querySelector: () => progress };
+  const panel = { style: {}, closest: selector => selector === '.movi-buttons-row' ? row : bar };
+  const menu = createNativeQualityMenu({ video, onChange() {} });
+  menu.update({ enabled: false });
+  video.clampSettingsPanel(panel);
+  assert.equal(panel.style.bottom, '50px');
+  position = 'fixed'; video.clampSettingsPanel(panel);
+  assert.equal(panel.style.bottom, '1985px', 'mobile bottom sheets retain native placement');
+  position = 'absolute'; timelineHeight = 8; video.clampSettingsPanel(panel);
+  assert.equal(panel.style.bottom, '1985px', 'visible timelines retain native placement');
+  menu.destroy(); assert.equal(video.clampSettingsPanel, original);
+});
+
 test('finite quality profiles preserve aspect ratio, never upscale, and reject unbounded values', () => {
   const info = { width: 1920, height: 1080 };
   assert.deepEqual(qualityOptions(info).map(option => option.quality), ['1080','720','480','360']);

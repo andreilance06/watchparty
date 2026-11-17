@@ -42,8 +42,8 @@ describe('React hub', () => {
     expect(screen.getByText('Space club')).toBeVisible();
     expect(screen.queryByText('Friday films')).not.toBeInTheDocument();
     await user.clear(search); await user.type(search, 'missing');
-    expect(screen.getByText('No rooms match “missing”.')).toBeVisible();
-    await user.click(screen.getByRole('button', { name: 'Clear search' }));
+    expect(screen.getByText('No rooms match your search or filters.')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: /Clear all/ }));
     expect(screen.getByText('Friday films')).toBeVisible();
     expect(screen.getByText('Space club')).toBeVisible();
   });
@@ -200,7 +200,7 @@ describe('React room workflows', () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Search unavailable.'));
     const state = { ...initial(), connected: true, poll: { id: 'poll', status: 'open' }, suggestions: [{ id: 'arrival', title: 'Arrival', votes: 1, canRemove: true }], myVoteId: null };
     const send = vi.fn(() => true); render(wrap(state, <Poll expanded onToggle={() => {}} />, send));
-    await userEvent.type(screen.getByLabelText('Suggest a video title'), 'Dune'); await userEvent.click(screen.getByText('Find movie'));
+    await userEvent.click(screen.getByRole('button', { name: 'Suggest a movie' })); await userEvent.type(screen.getByLabelText('Movie title'), 'Dune'); await userEvent.click(screen.getByRole('button', { name: 'Search' }));
     await userEvent.click(await screen.findByText('Suggest “Dune” without a poster'));
     expect(send).toHaveBeenCalledWith({ type: 'suggest-video', title: 'Dune', pollId: 'poll' });
     await userEvent.click(screen.getByLabelText('Vote for Arrival'));

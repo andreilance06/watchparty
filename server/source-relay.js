@@ -120,6 +120,7 @@ function createHostSource({ room, bridge, config }) {
   }
 
   function disconnectControl(ws) {
+    room.screenShare?.disconnect(ws);
     const source = active;
     if (!source) return;
     if (source.owner === ws) { unavailable(source); return; }
@@ -385,8 +386,11 @@ function createHostSource({ room, bridge, config }) {
         const captions = (message.captions || []).map((file) => validateFile(file, true));
         const files = new Map([video, ...captions].map((file) => [file.id, file]));
         if (files.size !== captions.length + 1) throw new Error("File IDs must be unique.");
+        const wasScreen = room.state.sourceType === 'screen';
+        room.screenShare?.reset();
         reset();
         room.media.reset();
+        if (wasScreen) room.transport.broadcast(sessionState(room.state, 'source'));
         active = { id: crypto.randomUUID(), token: crypto.randomBytes(32).toString("base64url"), owner: ws,
           files, videoId: video.id, captionIds: captions.map((file) => file.id), pending: new Map(), queue: [],
           cache: new Map(), reads: new Map(), nextRequest: 1, closed: false,

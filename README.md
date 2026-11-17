@@ -16,11 +16,13 @@ Its objectives are to keep playback synchronized, make group interaction availab
 | --- | --- |
 | Room hub | Browse all rooms, see the current video filename and a preview refreshed every 30 seconds, create a room with an optional password, or join the public room. Invite others with a link. |
 | Shared playback | Watch a video supplied by the host's browser, with synchronized playback and automatic compatibility streaming when needed. |
+| Screen and tab sharing | Share a screen, window, or browser tab live, with audio when supported. Use Share screen beside Choose video, then Stop sharing to end capture. See the [sharing setup guide](docs/screen-sharing.md). |
 | Captions | Add SRT, VTT, ASS, or SSA subtitles and choose a caption track independently. |
-| Chat and reactions | Send messages and quoted replies, insert emojis, react to comments, and send floating emoji reactions, including in fullscreen. |
+| Chat and reactions | Send messages and quoted replies, insert emojis, and react to comments, including in fullscreen. |
 | Movie polls | Start a poll as host, suggest titles with optional Wikipedia metadata, vote, and post the result when the host finishes the poll. |
 | Participants and moderation | See connected participants; hosts can configure 19 permissions with room defaults and individual overrides, transfer hosting, and delegate moderation. |
-| Responsive interface | Video beside the lounge on desktop and above it on mobile, with consistent Chat, People, and Up next tabs, a visible display-name editor, direct room actions, and light/dark themes. |
+| Theater layout | Watch in an edge-to-edge player with a resizable, collapsible right-side chat dock, including in fullscreen. Its width and open/closed state are remembered in this browser. Chat moves below the video on phones; drafts, tabs, and unread counts survive hiding and reopening it. |
+| Responsive interface | Consistent Chat, People, and Up next tabs, a visible display-name editor, direct room actions, and light/dark themes. |
 
 ## Technologies
 
@@ -104,18 +106,22 @@ For another device on the same network, open one of the LAN addresses printed by
 
 For Render hosting, follow the [Render deployment guide](docs/render.md), including the low-memory profile and `/healthz` deployment check. A [Render Blueprint](render.yaml) is included for new services.
 
+For Railway hosting, follow the [Railway deployment guide](docs/railway.md). The included [Railpack configuration](railpack.json) installs dependencies before building; use `npm run build` as Railway's build command so `npm ci` does not try to remove a mounted Vite cache.
+
 Follow the [Ubuntu VPS deployment guide](docs/deployment.md) to host WatchParty at **https://ypothesi.space** with HTTPS, a persistent Node service, and update/rollback instructions. Create real parties on that public site so **Invite** copies a usable public room link. Localhost is a separate development environment: its rooms are not available on the hosted server, and changing an invite's hostname does not transfer a room.
 
 ## Your first watch party
 
 1. Open the room hub at `/`. Use the pencil beside your name to choose a display name, or join as a guest. Search rooms by name or video title. Select **Create room**, enter a room name and optional password, then create it to open the separate player page. You can also select **Join room** on any listed room, including the public default room.
 2. Use **Invite** in the player to copy an invitation link. Viewers can follow the link or select your room on the hub; protected rooms prompt for their password. No access code is needed. For viewers on another device, use the server's reachable LAN or HTTPS address rather than `localhost`.
-3. As host, select **Choose Video** and choose one video, optionally with subtitle files. Keep the browser page that supplies the video open throughout the session. Other participants join the room to watch.
-4. Type in the chatroom and select **Send**. Use **Reply / react** on a message to open its actions; right-click, long-press, and Shift+F10 remain shortcuts. The emoji button at the bottom opens Message emoji and Global reaction tabs; the latter sends floating reactions to the room.
-5. As host, select **Start poll** in the lounge header. The poll opens under **Up next**; others can select that tab or the movie-vote notice in Chat. Enter a movie title and select **Find movie**; choose a matching result with **Suggest & vote**, or suggest the title without a poster. Suggesting a title automatically casts your vote. Participants can vote for another suggestion. **Finish poll** is in Up next and posts the result in chat. A poll chooses what to watch next; the host still selects the actual video file.
+3. As host, select **Choose video** for a file, optionally with subtitle files, or **Share screen** for a screen, window, or browser tab. Enable audio in the browser picker when offered. Keep the sharing browser open throughout the session. Other participants join the room to watch. Live sharing requires HTTPS or localhost; see [screen-sharing setup](docs/screen-sharing.md) for relay configuration and browser requirements.
+4. Type in the chatroom and select **Send**. Use **Reply / react** on a message to open its actions; right-click, long-press, and Shift+F10 remain shortcuts. The composer emoji button inserts emoji into your draft.
+5. Open **Up next** and, as host, select **Start poll**. Suggest a movie using **Search**, then **Suggest & vote**, or add a title without a poster. With existing choices, **Suggest a movie** opens the search editor. Participants can change their vote. **Finish poll** asks for confirmation before closing voting and posting the result in chat; winner/tie cards and the next-poll action appear in Up next. The host still selects the actual video file.
 6. Your display name appears above the chatroom tabs. Select its **pencil icon** to edit it, then **Save name** or **Cancel**. **People** shows the participant count; **Chat** shows unread messages in a circular badge. Use **People** to select a participant, then **Edit permissions** as host or **View permissions** as viewer. The dialog distinguishes **Room default: On/Off** from **Custom: On/Off** and provides resets. Changes save immediately across that participant's browser tabs in the room. Host transfer and blocking require confirmation, including a playback warning when blocking the video provider. Use **Room permissions** in the room bar to configure defaults, **Invite friends** to share the room, or **Leave room** to return to the hub. Leaving the browser that supplies the video also asks for confirmation.
 
 Hosts can also select the pencil beside the room title to rename the room. Choose **Save name** to update it for everyone or **Cancel** to discard the edit.
+
+On the hub, switch between **Cards** and **List**, or sort by participant count, room name, or creation time. **Filters** combines open/password-protected access with video-selected/waiting status, alongside room/video search. **Clear all** resets search and filters. Layout and sorting are remembered on this browser; search and filters reset when the hub reopens. A first visit uses cards with the most populated rooms first.
 
 ## Screenshots
 
@@ -221,7 +227,7 @@ Click a name in **Participants** (the **People** tab on mobile) to inspect effec
 | Group | Configurable permissions | Initial viewer defaults |
 | --- | --- | --- |
 | Playback | Play/pause, seek, playback speed | Play/pause enabled |
-| Media | Choose/replace video, add captions, remove captions | All disabled |
+| Media | Choose video / share screen, add captions, remove captions | All disabled |
 | Chat | Send messages, send replies, react to messages, send floating reactions | All enabled |
 | Polls | Start polls, finish polls, suggest titles, vote, remove own suggestions, remove any suggestion | Suggest, vote, and remove own enabled |
 | Identity | Change display name | Enabled |
@@ -237,9 +243,9 @@ Permissions are checked on the server and remembered for the same browser profil
 
 ## Chat and reactions
 
-Use the single emoji button in chat to open the searchable picker. Its Message emoji tab inserts at the cursor; its Global reaction tab sends a floating reaction to everyone in the room without changing your draft. The picker defaults to Message emoji each time it opens. There is no separate reaction panel. Brief sender/emoji notices also announce global reactions, including with reduced motion enabled.
+Use the composer emoji button to insert emoji at the cursor. Use the visible **Reply / react** action on a message to reply or add a comment reaction. These controls remain available in fullscreen.
 
-Messages use rounded incoming/outgoing bubbles with timestamps and compact reaction pills. Right-click a message, long-press it on touch, or focus it and press Shift+F10/Menu to open its action menu. Choose a quick reaction, or click the downward-chevron icon to expand more emoji rows beneath the quick reactions inside the same menu. Click the chevron again to collapse the rows. The expanded section scrolls independently and stays open after selecting reactions. Escape collapses the rows first; press it again to close the menu. Each new message menu starts collapsed. Each person has one reaction per message: choosing another replaces the previous one. Existing reaction-count pills remain clickable: clicking another person's reaction adds yours, and clicking your highlighted reaction removes it. Counts and highlighted ownership follow the server and stay synchronized across tabs and reconnections using the existing browser identity. Different browsers or cleared cookies have separate identities. The bottom emoji picker stays open after selections, preserving its tab, search, and scroll position. Consecutive message emojis insert in order at the cursor. Close the picker with Escape, an outside click, or another click on its opener button; fullscreen changes also dismiss it. Message action menus dismiss on an outside click, chat scrolling, fullscreen changes, or removal of their target message.
+Messages use rounded incoming/outgoing bubbles with timestamps and compact reaction pills. Right-click a message, long-press it on touch, or focus it and press Shift+F10/Menu to open its action menu. Choose a quick reaction, or click the downward-chevron icon to expand more emoji rows beneath the quick reactions inside the same menu. Click the chevron again to collapse the rows. The expanded section scrolls independently and stays open after selecting reactions. Escape collapses the rows first; press it again to close the menu. Each new message menu starts collapsed. Each person has one reaction per message: choosing another replaces the previous one. Existing reaction-count pills remain clickable: clicking another person's reaction adds yours, and clicking your highlighted reaction removes it. Counts and highlighted ownership follow the server and stay synchronized across tabs and reconnections using the existing browser identity. Different browsers or cleared cookies have separate identities. The bottom emoji picker stays open after selections, preserving search and scroll position. Consecutive message emojis insert in order at the cursor. Close the picker with Escape, an outside click, or another click on its opener button; fullscreen changes also dismiss it. Message action menus dismiss on an outside click, chat scrolling, fullscreen changes, or removal of their target message.
 
 Choose Reply from a message's action menu to show its author and text above the composer. Cancel with the preview's close button, or choose another message without losing your draft. Replies appear in the regular chat stream with a quoted preview; selecting the quote scrolls to and highlights the original when it is still available locally. Quotes remain readable if the original is absent. A failed send keeps the draft and reply target; an expired target asks you to cancel the reply or select another message.
 
@@ -280,6 +286,10 @@ For release testing, use real desktop Chrome/Edge/Firefox/Safari, Android Chrome
 `server.js` composes the backend; `src/main.jsx` mounts the React frontend. `src/Hub.jsx` handles the directory and admission forms; the room context, player adapter, and lounge components handle the watch page. `js/connection.js`, `js/host-files.js`, and `js/player/` retain transport and media logic. The frontend is compiled into `dist`, which is the only frontend directory served in production. Server media modules handle probing, lazy caption extraction, compatibility playlists and continuous encoding runs; `server/source-relay.js` owns browser files and authenticated range serving. Player modules handle source selection, synchronization, Movi controls, and the JASSUB adapter.
 
 Third-party distributions are bundled locally; replace generated distributions as a unit rather than editing them. Movi Player **0.4.1** (slim JS/WASM) is covered by `vendor/MOVI_PLAYER_LICENSE.txt`; JASSUB **2.5.16** and its worker/WASM assets are covered by `vendor/jassub/LICENSE.txt`.
+
+`js/player/live-stream.js` uses Movi's `srcObject` API for screen/tab shares. It extends the pinned player's source detection for fullscreen and enables live Aspect settings through the native surface's CSS fit. The shared Settings placement correction also applies when file quality is disabled and the live timeline is hidden. Live seeking and speed controls/shortcuts are disabled; mute/play/pause remain local. Verify stream rendering, Settings, fullscreen, and file/live replacement when upgrading Movi; the vendor bundle remains unchanged.
+
+`js/player/live-quality-menu.js` adds provider-owned capture resolution/frame-rate controls to Movi Settings. `js/screen-share-quality.js` derives choices from capture capabilities; `js/screen-share.js` applies constraints to the current local track without restarting peers. Errors retain the prior selection; late results after replacement are ignored. Empty native Settings sections are removed by `js/player/settings-sections.js`.
 
 The hls.js pause/resume bridge uses Movi 0.4.1's internal stream-wrapper loader because Movi has no public adaptive-loader pause API. This dependency is isolated in `js/player/compatibility-buffer.js`; verify its integration when upgrading Movi.
 

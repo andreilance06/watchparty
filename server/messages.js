@@ -167,7 +167,7 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
         break;
       }
       case "compatibility-request": {
-        if (!state.mediaReady || message.mediaVersion !== state.mediaVersion) {
+        if (state.sourceType === 'screen' || !state.mediaReady || message.mediaVersion !== state.mediaVersion) {
           send(ws, { type: "error", requestId: message.requestId, message: "The video source changed." });
           break;
         }
@@ -316,10 +316,16 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
       }
       case "reaction": {
         if (!isSingleEmoji(message.emoji)) {
-          send(ws, { type: "error", message: "That emoji reaction is not supported." });
+          send(ws, { type: "error", action: "reaction", requestId: message.requestId, message: "That emoji reaction is not supported." });
           break;
         }
+        if (Date.now() - (client.lastReactionAt ?? -Infinity) < 500) {
+          send(ws, { type: "error", action: "reaction", requestId: message.requestId, message: "Give your reaction a moment before sending another." });
+          break;
+        }
+        client.lastReactionAt = Date.now();
         broadcast({ type: "reaction", clientId: ws.clientId, name: client.name, emoji: message.emoji });
+        if (message.requestId) send(ws, { type: "reaction-sent", requestId: message.requestId });
         break;
       }
       case "suggest-video": {
@@ -432,10 +438,9 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
           state.playbackRevision += 1;
           media.restartStream();
         }
-        // Echo viewer play/pause back to its sender so its local shared-state
-        // flag is updated too. Host-originated state already matches locally.
+        // Echo explicit controls so every client receives confirmed shared state.
         broadcast({ ...sessionState(state, syncMode), ...(syncMode === "seek" ? { seekSequence: message.commandSequence, commandClientId: ws.clientId } : {}) },
-          viewerCommand || syncMode === "seek" ? null : ws.clientId);
+          viewerCommand || ["play", "pause", "seek", "rate"].includes(syncMode) ? null : ws.clientId);
         break;
       }
     }

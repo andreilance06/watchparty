@@ -1,14 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 
 export function useAttention(attentionRef, socialVisible) {
-  const [view, setView] = useState({ active: false, chatVisible: true, unread: 0, controlsVisible: true, revealing: false });
+  const [showReactions, setShowReactions] = useState(() => { try { return localStorage.getItem('watchparty-live-reactions') !== 'hidden'; } catch { return true; } });
+  const reactionsVisible = useRef(showReactions); reactionsVisible.current = showReactions;
+  useEffect(() => {
+    try { localStorage.setItem('watchparty-live-reactions', showReactions ? 'shown' : 'hidden'); } catch { /* Optional preference. */ }
+    if (!showReactions) { setFloating([]); setNotices(value => value.filter(item => item.message)); }
+  }, [showReactions]);
+  const [view, setView] = useState({ active: false, chatVisible: true, unread: 0, controlsVisible: true, revealing: false, playbackBlocked: false });
   const [notices, setNotices] = useState([]), [floating, setFloating] = useState([]);
   const current = useRef(view); current.current = view;
   const visible = useRef(socialVisible); visible.current = socialVisible;
   const atLatest = useRef(true), shown = useRef(null), timers = useRef(new Set()), audio = useRef(null), lastSound = useRef(-Infinity), serial = useRef(0);
   const revealTimer = useRef(null);
   const later = (callback, delay) => { const timer = setTimeout(() => { timers.current.delete(timer); callback(); }, delay); timers.current.add(timer); return timer; };
-  const chatShown = () => current.current.active ? current.current.chatVisible : visible.current;
+  const chatShown = () => visible.current && (!current.current.active || current.current.chatVisible);
   const focused = () => !document.hidden && document.hasFocus();
   const latestVisible = () => {
     const node = document.getElementById('chatMessages');
@@ -47,13 +53,16 @@ export function useAttention(attentionRef, socialVisible) {
       }
     },
     receiveReaction(message) {
-      if (!current.current.active || !current.current.chatVisible) notice({ emoji: message.emoji, name: message.name });
-      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-      const items = Array.from({ length: 6 }, (_, index) => ({ id: ++serial.current, emoji: message.emoji, left: `${10 + Math.random() * 80}%`, delay: `${index * 70}ms` }));
-      setFloating(value => [...value, ...items].slice(-30));
+      if (!reactionsVisible.current) return;
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (reducedMotion || !current.current.active || !current.current.chatVisible) notice({ emoji: message.emoji, name: message.name });
+      if (reducedMotion) return;
+      const items = [{ id: ++serial.current, emoji: message.emoji, left: `${10 + Math.random() * 65}%`, delay: '0ms' }];
+      setFloating(value => [...value, ...items].slice(-6));
       later(() => setFloating(value => value.filter(item => !items.some(old => old.id === item.id))), 2700);
     },
     controlsChange(value) { setView(view => ({ ...view, controlsVisible: value })); },
+    setPlaybackBlocked(value) { setView(view => ({ ...view, playbackBlocked: value })); },
     refresh,
   });
   attentionRef.current = apiRef.current;
@@ -73,5 +82,5 @@ export function useAttention(attentionRef, socialVisible) {
       for (const timer of timers.current) clearTimeout(timer); timers.current.clear(); audio.current?.close().catch(() => {}); audio.current = null;
     };
   }, []);
-  return { ...view, notices, floating };
+  return { ...view, notices, floating, showReactions, setShowReactions };
 }

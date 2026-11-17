@@ -1,50 +1,12 @@
-import { createPortal } from 'react-dom';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { EMOJI_CHOICES } from '../js/emoji-choices.js';
 import { can } from '../js/permissions.js';
 import { createClientId } from '../js/utils/client-id.js';
 import { Button, Input, Status } from './shared.jsx';
 import { useRoom } from './room.jsx';
+import { Popover } from './Popover.jsx';
 
 const QUICK = ['❤️', '👍', '😂', '🔥', '😮', '😢', '👏', '🎉'];
-function Popover({ target, trigger, point, className, label, menu, onClose, children }) {
-  const ref = useRef(null), closeRef = useRef(onClose); closeRef.current = onClose;
-  useLayoutEffect(() => {
-    const box = ref.current;
-    const position = () => {
-      if (!trigger?.isConnected) { closeRef.current(); return; }
-      const viewport = window.visualViewport;
-      const width = viewport?.width || innerWidth, height = viewport?.height || innerHeight;
-      const left = (viewport?.offsetLeft || 0) + 8, top = (viewport?.offsetTop || 0) + 8;
-      box.style.maxWidth = `${width - 16}px`; box.style.maxHeight = `${height - 16}px`;
-      box.style.setProperty('--message-menu-height', `${height - 16}px`);
-      const anchor = trigger.getBoundingClientRect(), bounds = box.getBoundingClientRect();
-      box.style.left = `${Math.max(left, Math.min(point?.x ?? anchor.right - bounds.width, left + width - bounds.width - 16))}px`;
-      box.style.top = `${Math.max(top, Math.min(point?.y ?? anchor.top - bounds.height - 8, top + height - bounds.height - 16))}px`;
-    };
-    position();
-    const observer = new ResizeObserver(position); observer.observe(box);
-    const outside = event => { if (!box.contains(event.target) && !trigger?.contains(event.target)) closeRef.current(); };
-    const keyboard = event => {
-      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeRef.current(); trigger?.focus({ preventScroll: true }); }
-      if (menu && ['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) {
-        event.preventDefault();
-        const items = [...box.querySelectorAll('button:not(:disabled)')];
-        const index = items.indexOf(document.activeElement);
-        items[event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (['ArrowUp', 'ArrowLeft'].includes(event.key) ? -1 : 1) + items.length) % items.length]?.focus();
-      }
-      if (event.key === 'Tab' && menu) closeRef.current();
-    };
-    const layout = event => { if (!box.contains(event.target)) closeRef.current(); };
-    document.addEventListener('pointerdown', outside, true); document.addEventListener('keydown', keyboard, true);
-    window.addEventListener('resize', position); window.addEventListener('scroll', layout, true);
-    window.visualViewport?.addEventListener('resize', position); window.visualViewport?.addEventListener('scroll', position);
-    const focus = box.querySelector('input, button:not(:disabled)'); focus?.focus({ preventScroll: true });
-    return () => { observer.disconnect(); document.removeEventListener('pointerdown', outside, true); document.removeEventListener('keydown', keyboard, true); window.removeEventListener('resize', position); window.removeEventListener('scroll', layout, true); window.visualViewport?.removeEventListener('resize', position); window.visualViewport?.removeEventListener('scroll', position); };
-  }, [trigger, point, menu]);
-  return createPortal(<div ref={ref} className={className} role={menu ? 'menu' : 'dialog'} aria-label={label}>{children}</div>, target);
-}
-
 export function Chat({ overlayTarget, layoutKey }) {
   const { state, send, attention } = useRoom();
   const canReply = can(state, 'replyChat') && can(state, 'sendChat'), canReact = can(state, 'reactMessages');
@@ -54,7 +16,7 @@ export function Chat({ overlayTarget, layoutKey }) {
   const pendingRef = useRef(null), draftRef = useRef(draft), replyRef = useRef(reply);
   draftRef.current = draft; replyRef.current = reply;
   const [picker, setPicker] = useState(null), [menu, setMenu] = useState(null), [expanded, setExpanded] = useState(false), [highlight, setHighlight] = useState(null);
-  const [search, setSearch] = useState(''), [mode, setMode] = useState('message');
+  const [search, setSearch] = useState('');
   const input = useRef(null), messages = useRef(null), press = useRef(null), highlightTimer = useRef(null), suppress = useRef(0);
   const selection = useRef({ start: 0, end: 0 });
   const cancelPress = () => { clearTimeout(press.current?.timer); press.current = null; };
@@ -109,9 +71,7 @@ export function Chat({ overlayTarget, layoutKey }) {
     clearTimeout(highlightTimer.current); highlightTimer.current = setTimeout(() => setHighlight(null), 1600);
   }
   function chooseEmoji(emoji) {
-    if (mode === 'global') {
-      if (!can(state, 'globalReactions') || !state.connected || send({ type: 'reaction', emoji }) === false) setStatus('Reconnect or ask the host to enable floating reactions.');
-    } else if (can(state, 'sendChat')) {
+    if (can(state, 'sendChat')) {
       const { start, end } = selection.current;
       const next = draftRef.current.slice(0, start) + emoji + draftRef.current.slice(end);
       if (next.length > 300) return;
@@ -152,17 +112,15 @@ export function Chat({ overlayTarget, layoutKey }) {
       {!can(state, 'sendChat') ? <Status className="chat-permission-status">Chat is read-only for you. Ask the host to enable messages. Your draft is kept here.</Status> : !state.connected && <Status className="chat-permission-status">Reconnect to send messages. Your draft is kept here.</Status>}
       <label className="sr-only" htmlFor="chatInput">Message</label>
       <div className="chat-compose-row"><Input ref={input} id="chatInput" name="message" value={draft} onChange={event => setDraft(event.target.value)} aria-disabled={!can(state, 'sendChat')} maxLength={300} placeholder="Say something..." required />
-        <Button icon variant="quiet" className="chat-emoji-button" aria-label="Emojis and global reactions" aria-expanded={Boolean(picker)} disabled={!can(state, 'sendChat') && !can(state, 'globalReactions')} onClick={event => {
+        <Button icon variant="quiet" className="chat-emoji-button" aria-label="Message emoji" aria-expanded={Boolean(picker)} disabled={!can(state, 'sendChat')} onClick={event => {
           if (picker) { setPicker(null); return; }
           selection.current = { start: input.current.selectionStart ?? draft.length, end: input.current.selectionEnd ?? draft.length };
-          setMenu(null); setSearch(''); setMode(can(state, 'sendChat') ? 'message' : 'global'); setPicker(event.currentTarget);
+          setMenu(null); setSearch(''); setPicker(event.currentTarget);
         }}><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M8 14a4 4 0 0 0 8 0M8 9h.01M16 9h.01" /></svg></Button><Button type="submit" variant="primary" aria-label="Send message" pending={Boolean(pending)} pendingLabel="Sending…" disabled={!state.connected || !can(state, 'sendChat') || Boolean(reply && !can(state, 'replyChat'))}>Send</Button>
       </div>
     </form>
-    {picker && <Popover target={overlayTarget} trigger={picker} className="emoji-picker" label="Emojis and global reactions" onClose={() => setPicker(null)}>
-      <div className="emoji-picker-tabs" role="tablist" aria-label="Emoji action" onKeyDown={event => { if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) { event.preventDefault(); const next = mode === 'message' && can(state, 'globalReactions') ? 'global' : can(state, 'sendChat') ? 'message' : 'global'; setMode(next); event.currentTarget.querySelector(`[data-mode="${next}"]`)?.focus(); } }}>
-        <button type="button" role="tab" data-mode="message" aria-selected={mode === 'message'} tabIndex={mode === 'message' ? 0 : -1} disabled={!can(state, 'sendChat')} onClick={() => setMode('message')}>Message emoji</button><button type="button" role="tab" data-mode="global" aria-selected={mode === 'global'} tabIndex={mode === 'global' ? 0 : -1} disabled={!can(state, 'globalReactions')} onClick={() => setMode('global')}>Global reaction</button>
-      </div><p className="emoji-picker-hint">{mode === 'message' ? 'Insert an emoji into your message.' : 'Send a floating reaction to everyone in the room.'}</p>
+    {picker && <Popover target={overlayTarget} trigger={picker} className="emoji-picker" label="Message emoji" onClose={() => setPicker(null)}>
+      <p className="emoji-picker-hint">Insert an emoji into your message.</p>
       <label className="sr-only" htmlFor="emojiSearch">Search emojis</label><Input className="emoji-search" id="emojiSearch" name="emojiSearch" type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Search emojis..." />
       <div className="emoji-picker-grid" aria-label="Emoji choices">{EMOJI_CHOICES.filter(item => `${item.emoji} ${item.label}`.includes(search.trim().toLowerCase())).map(item => <button className="emoji-choice" type="button" key={item.emoji} aria-label={item.label} title={item.label} onClick={() => chooseEmoji(item.emoji)}>{item.emoji}</button>)}</div>
       {!EMOJI_CHOICES.some(item => `${item.emoji} ${item.label}`.includes(search.trim().toLowerCase())) && <p className="emoji-picker-empty">No matching emojis.</p>}

@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { can } from '../js/permissions.js';
-import { Button, Field, request, Status } from './shared.jsx';
+import { Button, Dialog, DialogHeader, Field, request, Status } from './shared.jsx';
+import { Icon } from './Icons.jsx';
 import { useRoom } from './room.jsx';
 
 function Poster({ url, title, className }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [url]);
-  return <div className={`${className}${!url || failed ? ' movie-poster-placeholder' : ''}`}>{url && !failed ? <img src={url} alt={`Poster for ${title}`} loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} /> : 'No poster'}</div>;
+  return <div className={`${className}${!url || failed ? ' movie-poster-placeholder' : ''}`}>{url && !failed ? <img src={url} alt={`Poster for ${title}`} loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} /> : <Icon name="video" />}</div>;
 }
+
 export function PollLauncher({ onStart }) {
   const { state, send } = useRoom();
   const [starting, setStarting] = useState(false), [status, setStatus] = useState('');
@@ -24,24 +26,64 @@ export function PollLauncher({ onStart }) {
     return () => clearTimeout(timer);
   }, [starting]);
   if (!can(state, 'startPoll') || state.poll.status === 'open') return null;
-  return <div className="poll-launcher"><Button disabled={!state.connected} pending={starting} pendingLabel="Starting…" onClick={() => {
+  return <div className="poll-launcher"><Button variant="primary" disabled={!state.connected} pending={starting} pendingLabel="Starting…" onClick={() => {
     if (sent.current || !state.connected) return;
     if (send({ type: 'start-video-poll' }) === false) { setStatus('Reconnect before starting a poll.'); return; }
     sent.current = true; setStarting(true); setStatus(''); onStart?.();
-  }}>Start poll</Button>{status && <Status tone="error">{status}</Status>}</div>;
+  }}><Icon name="plus" />{state.poll.status === 'closed' ? 'Start another poll' : 'Start poll'}</Button>{status && <Status tone="error">{status}</Status>}</div>;
 }
-export function Poll({ expanded, onToggle, disclosure = true }) {
+
+function PollResults({ poll, onStart, resultRef }) {
+  const { state } = useRoom();
+  const result = poll.result;
+  const winners = result?.suggestions?.filter(item => result.winnerIds?.includes(item.id)) || [];
+  const others = result?.suggestions?.filter(item => !result.winnerIds?.includes(item.id)).sort((a, b) => b.votes - a.votes) || [];
+  return <div ref={resultRef} className="poll-resting">
+    <div className="poll-resting-heading"><span className="poll-resting-icon"><Icon name="vote" /></span><h2>{poll.status === 'closed' ? 'The votes are in' : 'What’s next?'}</h2>
+      <p>{poll.status !== 'closed' ? 'Suggest movies and pick your next watch together.' : winners.length ? `${result.totalVotes} ${result.totalVotes === 1 ? 'vote' : 'votes'} · ${winners.length > 1 ? 'It’s a tie' : 'Your next pick'}` : 'No votes this time. Start another poll to choose together.'}</p>
+    </div>
+    {winners.map(option => <article className="poll-winner" key={option.id}><Poster className="poll-choice-poster" url={option.movie?.posterUrl} title={option.title} /><div><span className="poll-result-label">{winners.length > 1 ? 'Tied winner' : 'Winner'}</span><h3>{option.title}</h3><p>{option.votes} {option.votes === 1 ? 'vote' : 'votes'}</p></div><Icon name="check" /></article>)}
+    {winners.length > 0 && <p className="poll-result-note">The host can choose the video file when everyone is ready.</p>}
+    {others.length > 0 && <details className="poll-other-results"><summary>{winners.length ? 'Other results' : 'All results'}</summary><ul>{others.map(option => <li key={option.id}><span>{option.title}</span><span>{option.votes} {option.votes === 1 ? 'vote' : 'votes'}</span></li>)}</ul></details>}
+    {can(state, 'startPoll') ? <PollLauncher onStart={onStart} /> : <p className="poll-result-note">The host can start a movie poll here.</p>}
+  </div>;
+}
+
+export function Poll({ expanded = true, onToggle, disclosure = true }) {
   const { state, send } = useRoom();
   const { poll, suggestions: options } = state;
   const [query, setQuery] = useState(''), [searched, setSearched] = useState(''), [movies, setMovies] = useState([]);
-  const [status, setStatus] = useState(''), [searching, setSearching] = useState(false);
-  const searchRef = useRef(null), input = useRef(null);
+  const [status, setStatus] = useState(''), [searching, setSearching] = useState(false), [error, setError] = useState('');
+  const [adding, setAdding] = useState(false), [confirmFinish, setConfirmFinish] = useState(false), [finishing, setFinishing] = useState(false);
+  const searchRef = useRef(null), input = useRef(null), addButton = useRef(null), finishButton = useRef(null), keepVoting = useRef(null);
+  const requestedStart = useRef(false), requestedFinish = useRef(false), resultRef = useRef(null);
+  const pendingSuggestion = useRef(null);
   const canSuggest = state.connected && poll.status === 'open' && can(state, 'suggestTitles');
   useEffect(() => {
-    searchRef.current?.abort(); setQuery(''); setSearched(''); setMovies([]); setStatus(''); setSearching(false);
+    searchRef.current?.abort(); setQuery(''); setSearched(''); setMovies([]); setStatus(''); setError(''); setSearching(false); setAdding(false); setConfirmFinish(false); setFinishing(false);
+    pendingSuggestion.current = null;
+    if (!state.connected) requestedStart.current = requestedFinish.current = false;
+    if (poll.status === 'open' && requestedStart.current) { requestedStart.current = false; requestAnimationFrame(() => input.current?.focus({ preventScroll: true })); }
+    if (poll.status === 'closed' && requestedFinish.current) { requestedFinish.current = false; requestAnimationFrame(() => resultRef.current?.querySelector('button')?.focus({ preventScroll: true })); }
     return () => searchRef.current?.abort();
   }, [poll.id, poll.status, state.connected]);
-  if (poll.status !== 'open') return null;
+  useEffect(() => { if (adding) input.current?.focus({ preventScroll: true }); }, [adding]);
+  useEffect(() => {
+    const title = pendingSuggestion.current;
+    if (!title || !options.some(option => option.title.toLocaleLowerCase() === title.toLocaleLowerCase())) return;
+    pendingSuggestion.current = null; setStatus(`Suggested “${title}”.`);
+    requestAnimationFrame(() => addButton.current?.focus({ preventScroll: true }));
+  }, [options]);
+  useEffect(() => {
+    if (!finishing) return;
+    const timer = setTimeout(() => { setFinishing(false); setStatus('The poll did not close. Try again.'); }, 10000);
+    return () => clearTimeout(timer);
+  }, [finishing]);
+  useEffect(() => {
+    if (!can(state, 'finishPoll') || !state.connected) { setConfirmFinish(false); setFinishing(false); }
+    if (state.lastMessage?.type === 'error' && state.lastMessage.action === 'finish-video-poll') { setFinishing(false); setStatus(state.lastMessage.message); }
+  }, [state.role, state.permissions, state.connected, state.event]);
+  if (poll.status !== 'open') return <PollResults poll={poll} resultRef={resultRef} onStart={() => { requestedStart.current = true; }} />;
   function sendPoll(payload) {
     const permission = { 'finish-video-poll': 'finishPoll', 'suggest-video': 'suggestTitles', 'vote-video': 'vote' }[payload.type];
     if (!state.connected || permission && !can(state, permission)) return false;
@@ -49,50 +91,63 @@ export function Poll({ expanded, onToggle, disclosure = true }) {
   }
   function suggest(title, movie) {
     if (!canSuggest || sendPoll({ type: 'suggest-video', title, ...(movie ? { movie } : {}) }) === false) { setStatus('Reconnect before suggesting a movie.'); return; }
-    setQuery(''); setSearched(''); setMovies([]); setStatus(`Suggested “${title}”. ${can(state, 'vote') ? 'Your vote is recorded automatically.' : ''}`); input.current?.focus();
+    setQuery(''); setSearched(''); setMovies([]); setAdding(false); setStatus(`Suggestion sent: “${title}”.`);
+    pendingSuggestion.current = title;
+    requestAnimationFrame(() => (addButton.current || input.current)?.focus({ preventScroll: true }));
   }
   async function search(event) {
     event.preventDefault();
     if (!canSuggest) return;
     const title = query.replace(/\s+/g, ' ').trim().slice(0, 80);
-    if (title.length < 2) { setStatus('Enter at least two characters to search.'); return; }
-    searchRef.current?.abort(); const controller = new AbortController(); searchRef.current = controller;
-    setSearching(true); setMovies([]); setSearched(''); setStatus('Searching Wikipedia for movie matches…');
+    if (title.length < 2) { setError('Enter at least two characters.'); input.current?.focus(); return; }
+    setError(''); searchRef.current?.abort(); const controller = new AbortController(); searchRef.current = controller;
+    setSearching(true); setMovies([]); setSearched(''); setStatus('Searching for movies…');
     try {
       const result = await request(`/api/movies/search?q=${encodeURIComponent(title)}`, { signal: controller.signal });
       if (controller.signal.aborted) return;
       const choices = Array.isArray(result.movies) ? result.movies : [];
-      setMovies(choices); setSearched(title); setStatus(choices.length ? `Choose the matching movie for “${title}”.` : `No matches for “${title}”. You can still suggest it without a poster.`);
+      setMovies(choices); setSearched(title); setStatus(choices.length ? `${choices.length} ${choices.length === 1 ? 'match' : 'matches'} for “${title}”.` : `No matches for “${title}”. You can still suggest the title.`);
     } catch (error) {
-      if (!controller.signal.aborted) { setSearched(title); setStatus(`${error.message} You can still suggest the title without a poster.`); }
+      if (!controller.signal.aborted) { setSearched(title); setStatus(`${error.message} You can still suggest the title.`); }
     } finally { if (!controller.signal.aborted) setSearching(false); }
   }
   const total = options.reduce((sum, item) => sum + Math.max(0, Number(item.votes) || 0), 0);
-  const high = Math.max(0, ...options.map(item => item.votes || 0));
-  const leaders = options.filter(item => item.votes === high && high > 0);
-  const leader = !leaders.length ? options.length ? 'No votes yet.' : 'No suggestions yet.' : `${leaders.length > 1 ? 'Tie' : 'Leading'}: ${leaders.map(item => item.title).join(', ')} (${high} ${high === 1 ? 'vote' : 'votes'}${leaders.length > 1 ? ' each' : ''})`;
-  return <section className="vote-panel" aria-labelledby="vote-title">
-    <div className="vote-heading"><div><p className="eyebrow">UP NEXT</p><h2 id="vote-title">Movie poll</h2></div><span className="vote-status" role="status" aria-live="polite" aria-atomic="true"><span className="sr-only">Movie poll: </span>{total} {total === 1 ? 'vote' : 'votes'} cast</span></div>
-    <p className="vote-leader">{leader}</p>
-    {disclosure && <Button variant={expanded ? 'secondary' : 'primary'} className="poll-toggle" aria-expanded={expanded} aria-controls="pollDetails" onClick={onToggle}>{expanded ? 'Hide poll' : can(state, 'vote') ? 'Vote on next movie' : 'View movie poll'}</Button>}
+  const showForm = can(state, 'suggestTitles') && (adding || options.length === 0);
+  return <section className="vote-panel poll-workspace" aria-labelledby="vote-title">
+    <div className="poll-heading"><div><h2 id="vote-title">Movie vote</h2><p>{options.length} {options.length === 1 ? 'suggestion' : 'suggestions'}</p></div><span className="poll-vote-total" role="status" aria-atomic="true"><span className="sr-only">Movie vote: </span>{total} {total === 1 ? 'vote' : 'votes'}</span></div>
+    {disclosure && <Button variant="secondary" className="poll-toggle" aria-expanded={expanded} aria-controls="pollDetails" onClick={onToggle}>{expanded ? 'Hide poll' : can(state, 'vote') ? 'Vote on next movie' : 'View movie poll'}</Button>}
     <div id="pollDetails" className="poll-details" hidden={!expanded}>
-      <p className="poll-explanation">Choose what to watch next. The host still selects the video file.</p>
-      {!can(state, 'suggestTitles') && <p className="poll-explanation">The host has disabled movie suggestions for you.</p>}
-      {!can(state, 'vote') && <p className="poll-explanation">You can view this poll. Ask the host to enable voting for you.</p>}
-      <form className="suggestion-form" autoComplete="off" onSubmit={search}><Field label="Suggest a video title" id="suggestionInput" name="title" ref={input} value={query} onChange={event => setQuery(event.target.value)} maxLength={80} placeholder="Search for a movie..." required disabled={!canSuggest} /><Button type="submit" variant="primary" disabled={!canSuggest} pending={searching} pendingLabel="Searching…">Find movie</Button></form>
-      <Status className="suggestion-status">{status}</Status>
-      <div className="suggestion-results" aria-label="Movie search results">{movies.map(movie => <article className="movie-search-result" key={movie.pageId}>
-        <Poster className="movie-search-poster" url={movie.posterUrl} title={movie.title} /><div className="movie-search-details"><h3>{movie.title}</h3><p>{movie.description}</p><a href={movie.pageUrl} target="_blank" rel="noopener noreferrer">Wikipedia</a><Button variant="primary" className="movie-search-select" disabled={!canSuggest} onClick={() => suggest(movie.title, movie)}>{can(state, 'vote') ? 'Suggest & vote' : 'Suggest'}</Button></div>
-      </article>)}{searched && <Button className="suggestion-title-only" disabled={!canSuggest} onClick={() => suggest(searched)}>Suggest “{searched}” without a poster</Button>}</div>
-      <div className="vote-options" aria-label="Next-video options">{!options.length && <p className="vote-empty">Suggest a title to start voting.</p>}{options.map(option => {
+      {!state.connected && <Status>Reconnect to vote or suggest a movie.</Status>}
+      {!can(state, 'vote') && <Status>Voting is disabled for you. You can still view the results.</Status>}
+      <div className="poll-choices" aria-label="Next-video options">{options.map(option => {
         const votes = Math.max(0, Number(option.votes) || 0), percentage = total ? Math.round(votes / total * 100) : 0, selected = option.id === state.myVoteId;
-        return <article key={option.id} className={`vote-option${selected ? ' selected' : ''}`}>
-          <Poster className="vote-poster" url={option.movie?.posterUrl} title={option.title} /><div className="vote-option-details"><h3>{option.title}</h3><span className="vote-count">{votes} {votes === 1 ? 'vote' : 'votes'} · {percentage}%</span><div className="vote-meter" aria-hidden="true"><span style={{ width: `${percentage}%` }} /></div>{option.movie?.description && <p className="vote-description">{option.movie.description}</p>}{option.movie?.pageUrl && <a className="vote-source" href={option.movie.pageUrl} target="_blank" rel="noopener noreferrer">Wikipedia</a>}<p className="vote-suggester">Suggested by {option.ownerName || 'a participant'}</p></div>
-          <Button className="vote-button" aria-pressed={selected} aria-label={`${selected ? 'Your vote for' : 'Vote for'} ${option.title}`} disabled={selected || !state.connected || !can(state, 'vote')} onClick={() => sendPoll({ type: 'vote-video', suggestionId: option.id })}>{selected ? 'Your vote' : 'Vote'}</Button>
-          {option.canRemove && <Button variant="danger" className="vote-remove-button" aria-label={`Remove suggestion for ${option.title}`} disabled={!state.connected} onClick={() => sendPoll({ type: 'remove-video-suggestion', suggestionId: option.id })}>Remove</Button>}
+        return <article key={option.id} className={`poll-choice${selected ? ' is-selected' : ''}`}>
+          <div className="poll-choice-heading"><Poster className="poll-choice-poster" url={option.movie?.posterUrl} title={option.title} /><div className="poll-choice-title"><h3>{option.title}</h3><p>Suggested by {option.ownerName || 'a participant'}</p></div>
+            {option.canRemove && <Button icon variant="quiet" className="poll-remove" title={`Remove ${option.title}`} aria-label={`Remove suggestion for ${option.title}`} disabled={!state.connected} onClick={() => sendPoll({ type: 'remove-video-suggestion', suggestionId: option.id })}><Icon name="trash" /></Button>}
+          </div>
+          <div className="poll-choice-meter" aria-hidden="true"><span style={{ width: `${percentage}%` }} /></div>
+          <div className="poll-choice-footer"><span className="poll-choice-count">{votes} {votes === 1 ? 'vote' : 'votes'} <span>· {percentage}%</span></span><Button variant={selected ? 'secondary' : 'primary'} className="poll-choice-vote" aria-pressed={selected} aria-label={`${selected ? 'Your vote for' : 'Vote for'} ${option.title}`} disabled={selected || !state.connected || !can(state, 'vote')} onClick={() => sendPoll({ type: 'vote-video', suggestionId: option.id })}>{selected && <Icon name="check" />}{selected ? 'Your vote' : 'Vote'}</Button></div>
+          {(option.movie?.description || option.movie?.pageUrl) && <details className="poll-choice-info"><summary>Movie details</summary>{option.movie.description && <p>{option.movie.description}</p>}{option.movie.pageUrl && <a href={option.movie.pageUrl} target="_blank" rel="noopener noreferrer">View on Wikipedia</a>}</details>}
         </article>;
       })}</div>
-      {can(state, 'finishPoll') && <div className="poll-management"><p>Finishing closes voting and posts the result in chat.</p><Button variant="quiet" className="finish-poll-button" disabled={!state.connected} onClick={() => sendPoll({ type: 'finish-video-poll' })}>Finish poll</Button></div>}
+      {options.length > 0 && can(state, 'vote') && <p className="poll-vote-help">You can change your vote until the poll closes.</p>}
+      <div className="poll-suggestions">
+        {can(state, 'suggestTitles') && options.length > 0 && !adding && <Button ref={addButton} className="poll-add" disabled={!state.connected} onClick={() => setAdding(true)}><Icon name="plus" />Suggest a movie</Button>}
+        {showForm && <div className="poll-suggestion-editor"><div className="poll-editor-heading"><h3>{options.length ? 'Suggest a movie' : 'Add the first movie'}</h3>{options.length > 0 && <Button icon variant="quiet" aria-label="Close suggestions" onClick={() => { searchRef.current?.abort(); setSearching(false); setAdding(false); requestAnimationFrame(() => addButton.current?.focus()); }}><Icon name="close" /></Button>}</div>
+          <form className="poll-search-form" autoComplete="off" onSubmit={search}><Field label="Movie title" id="suggestionInput" name="title" ref={input} value={query} onChange={event => { searchRef.current?.abort(); setSearching(false); setQuery(event.target.value); setMovies([]); setSearched(''); setStatus(''); setError(''); }} error={error} maxLength={80} placeholder="Search movies…" required disabled={!canSuggest} /><Button type="submit" variant="primary" disabled={!canSuggest} pending={searching} pendingLabel="Searching…"><Icon name="search" />Search</Button></form>
+        </div>}
+        {!can(state, 'suggestTitles') && options.length === 0 && <p className="poll-vote-help">Waiting for someone to suggest a movie. Suggestions are disabled for you.</p>}
+        {status && <Status className="poll-search-status">{status}</Status>}
+        {showForm && <div className="poll-search-results" aria-label="Movie search results">{movies.map(movie => <article className="poll-search-result" key={movie.pageId}>
+          <Poster className="poll-search-poster" url={movie.posterUrl} title={movie.title} /><div><h3>{movie.title}</h3><p>{movie.description}</p><a href={movie.pageUrl} target="_blank" rel="noopener noreferrer">Wikipedia</a><Button variant="secondary" disabled={!canSuggest} onClick={() => suggest(movie.title, movie)}>{can(state, 'vote') ? 'Suggest & vote' : 'Suggest'}</Button></div>
+        </article>)}{searched && <Button variant="quiet" className="poll-title-only" disabled={!canSuggest} onClick={() => suggest(searched)}>Suggest “{searched}” without a poster</Button>}</div>}
+      </div>
+      {can(state, 'finishPoll') && <div className="poll-finish"><Button ref={finishButton} variant="quiet" disabled={!state.connected} onClick={() => { setStatus(''); setConfirmFinish(true); }}>Finish poll</Button></div>}
     </div>
+    {confirmFinish && <Dialog title="Finish this poll?" onClose={() => setConfirmFinish(false)} returnFocusRef={finishButton} initialFocusRef={keepVoting} busy={finishing}>
+      <DialogHeader title="Finish this poll?" /><p>Close voting and post {total ? 'the result' : 'a result with no votes'} in chat. Everyone can keep voting until you finish.</p>
+      {status && <Status>{status}</Status>}
+      <div className="confirmation-actions"><Button ref={keepVoting} disabled={finishing} onClick={() => setConfirmFinish(false)}>Keep voting</Button><Button variant="primary" pending={finishing} pendingLabel="Finishing…" disabled={!state.connected || !can(state, 'finishPoll')} onClick={() => { if (sendPoll({ type: 'finish-video-poll' }) === false) { setStatus('Reconnect before finishing the poll.'); return; } requestedFinish.current = true; setFinishing(true); }}>Finish poll</Button></div>
+    </Dialog>}
   </section>;
 }

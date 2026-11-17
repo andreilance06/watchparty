@@ -1,10 +1,10 @@
-# WatchParty design system — proposal
+# WatchParty design system
 
-Status: foundations, social actions/permissions, player page, and hub redesign implemented. Updated: 2026-11-14. See [watch-page overrides](pages/watch.md), [hub overrides](pages/hub.md), and [implementation and validation](IMPLEMENTATION.md).
+Status: foundations, social actions/permissions, player page, and hub redesign implemented. Updated: 2026-11-17. See [watch-page overrides](pages/watch.md), [hub overrides](pages/hub.md), and [implementation and validation](IMPLEMENTATION.md).
 
 ## Direction
 
-**A shared cinema with a welcoming lounge.** Preserve the existing violet identity, logo, dark surfaces, room previews, and video-first composition. Make controls, status, and social features easier to discover. Keep the existing light theme as a first-class option.
+**A shared cinema with a welcoming lounge.** Use the supplied burgundy, sand, ivory, and blue palette: #790D16, #E5D3AF, #F5EFE1, and #AEC4D4. Keep the logo, room previews, and video-first composition. Light mode uses warm ivory/sand surfaces and burgundy actions; dark mode uses warm charcoal, ivory text, rose actions, and blue accents. Make controls, status, and social features easier to discover. Keep the existing light theme as a first-class option.
 
 Product: a responsive web app for friends, classmates, and small groups watching a host's local video. Stack: React 19, Vite, Tailwind 4, specialized CSS, and a Movi player adapter.
 
@@ -18,27 +18,31 @@ Principles:
 
 ## Color tokens
 
-Use primitive palette values through semantic roles, then component roles. For example: violet palette → action background → primary button background. Components should not choose arbitrary colors. Existing CSS variables can remain aliases during migration.
+Use primitive palette values through semantic roles, then component roles. For example: burgundy palette → action background → primary button background. Components should not choose arbitrary colors. Existing CSS variables can remain aliases during migration.
 
 | Semantic role | Dark | Light | Use |
 | --- | --- | --- | --- |
-| canvas | #0B0D12 | #F4F2F8 | Page background |
-| surface | #12151D | #FFFFFF | Cards and panels |
-| surface-subtle | #181C26 | #F8F6FC | Inputs and grouped content |
-| surface-raised | #202532 | #ECE9F3 | Popovers and selected surfaces |
-| text-primary | #F5F7FB | #211D2B | Titles, messages, field values |
-| text-secondary | #A8B0C2 | #625D70 | Help, metadata, placeholders |
-| border-subtle | #292F3D | #DED9E8 | Decorative dividers and card edges |
-| border-control | #778197 | #82798F | Boundaries needed to identify inputs or controls |
-| action-primary | #6D4AE6 | #6441D9 | Primary button fill |
-| action-primary-hover | #7957EE | #5735C6 | Hover fill |
-| action-primary-pressed | #5B38CE | #4B2AB5 | Pressed fill |
-| on-action | #FFFFFF | #FFFFFF | Primary button text/icons |
-| text-brand | #B9A7FF | #513BB0 | Links and selected text |
-| focus-ring | #B9A7FF | #6441D9 | Focus outline, separated from the control |
-| text-success | #36D399 | #126B4B | Successful status plus icon/text |
-| text-warning | #F5C36B | #805000 | Attention plus icon/text |
-| text-danger | #FF8296 | #B42343 | Errors and destructive labels |
+| canvas | #151213 | #F5EFE1 | Page background |
+| surface | #211B1D | #FFFAF1 | Cards and panels |
+| surface-subtle | #2B2325 | #F0E5CF | Inputs and grouped content |
+| surface-raised | #372D30 | #E5D3AF | Raised surfaces |
+| surface-selected | #302C31 | #E3EBED | Selected voting choices |
+| surface-accent | #293D4B | #AEC4D4 | Blue count/status badges |
+| on-accent | #D9E7EF | #293D4B | Text/icons on blue surfaces |
+| text-primary | #F5EFE1 | #2D2323 | Titles, messages, values |
+| text-secondary | #CBBDA8 | #655149 | Metadata and help |
+| border-subtle | #4D3E41 | #D3C1A6 | Decorative dividers |
+| border-control | #9F8C84 | #89705C | Input and control boundaries |
+| action-primary | #A93645 | #790D16 | Primary button fill |
+| action-primary-hover | #B44250 | #650B12 | Hover fill |
+| action-primary-pressed | #922B39 | #51080F | Pressed fill |
+| on-action | #F5EFE1 | #F5EFE1 | Primary button text/icons |
+| text-brand | #F0ADB1 | #790D16 | Links and active text |
+| focus-ring | #AEC4D4 | #790D16 | Focus outline |
+| meter-fill | #AEC4D4 | #496579 | Vote meter |
+| text-success | #97D4B1 | #245B3C | Success plus text/icon |
+| text-warning | #E5D3AF | #70490D | Attention plus text/icon |
+| text-danger | #FFABB3 | #922331 | Errors and destructive labels |
 
 Separate action fill from brand text; a single accent token cannot safely serve every role. Never use border-subtle as the sole identifying boundary for a form field. Meaningful icons and control boundaries target 3:1; ordinary text targets 4.5:1.
 
@@ -46,13 +50,12 @@ Measured solid-color pairs using the WCAG relative-luminance formula:
 
 | Pair | Ratio |
 | --- | --- |
-| White on dark primary / hover | 5.57:1 / 4.76:1 |
-| White on light primary | 6.36:1 |
-| Dark primary / secondary text on surface-raised | 14.27:1 / 7.04:1 |
-| Dark brand text on surface-raised | 7.31:1 |
-| Light secondary text on surface-raised | 5.28:1 |
-| Dark control border on surface-subtle | 4.36:1 |
-| Light control border on white | 4.13:1 |
+| Dark on-action / primary | 5.55:1 |
+| Dark on-action / hover | 4.78:1 |
+| Light on-action / primary | 9.73:1 |
+| Dark secondary / raised surface | 7.20:1 |
+| Light secondary / sand surface | 5.05:1 |
+| Dark / light accent badge text | 8.92 / 6.25:1 |
 
 These checks validate listed pairs, not the whole interface. Measure all rendered states, alpha blends, scrims, and video overlays during implementation. Keep the video canvas black in both themes. Use opaque badge surfaces over previews so image variation cannot undermine readability.
 
@@ -97,7 +100,7 @@ Avoid essential instructions below 14px. Use tabular figures for playback timers
 | Room card | Preview, room name, video title, participant count, access badge, Join action. Waiting and unavailable-preview states stay distinct. Mark only the chosen room as Joining… while preventing duplicate submissions. |
 | Status | Text plus optional icon; never color alone. Neutral pending, success, warning, error variants. Use polite announcements for routine updates; urgent errors get an appropriate alert. |
 | Chat message | Visible Message actions control, also available on focus. Keep context menu and long-press as shortcuts. Reply quote, reactions, and timestamp remain readable. Preserve scroll when reading earlier messages; expose Latest messages. |
-| Composer | Visible Message label; input, emoji picker, Send. Show Sending… while pending. Keep draft on disconnect or failure. Explain permission restrictions beside the composer. |
+| Composer | Screen-reader Message label; input, message emoji picker, Send. Show Sending… while pending. Keep draft on disconnect or failure. Explain permission restrictions beside the composer. |
 | Poll summary | Named Vote on next movie action, leader, contextual vote count, expanded state. Starting a poll is visible to authorized users in the lounge header. Finish poll is secondary and separated from voting. |
 | Poll details | Visible search label, pending/search failure/no-match states, title-only fallback, suggestions, selected vote. State clearly: a poll chooses a title; the host still selects the file. |
 | People | Name, You, Host/Viewer, connection state. Quick participant details stay compact; detailed permission editing opens a properly sized dialog rather than placing 19 settings in a narrow popover. |

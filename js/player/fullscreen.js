@@ -2,11 +2,13 @@ import { createLifecycle } from "../utils/lifecycle.js";
 export function createFullscreen({ elements, getHostPaused, afterResize, attention }) {
   const life = createLifecycle();
   const { video, videoShell, fullscreenButton, syncStatus, chatConversation, chatMessages,
-    fullscreenChat, fullscreenChatToggle, floatingReactions, reactionFeed, emojiPicker, messageMenu } = elements;
+    fullscreenChat, fullscreenChatToggle, floatingReactions, reactionFeed, emojiPicker, messageMenu, theaterRoot } = elements;
+  // Whole-room theater keeps the sidebar mounted; standalone players move their conversation.
+  const fullscreenRoot = theaterRoot || videoShell;
   let previousBodyOverflow = "";
   let mounted = false, chatVisible = true;
   let chatScrollTop = 0;
-  const slots = [chatConversation, floatingReactions, reactionFeed, emojiPicker, messageMenu].map(node => {
+  const slots = [...(theaterRoot ? [] : [chatConversation]), floatingReactions, reactionFeed, emojiPicker, messageMenu].map(node => {
     const anchor = document.createElement("span");
     anchor.hidden = true;
     node.parentNode.insertBefore(anchor, node);
@@ -14,10 +16,12 @@ export function createFullscreen({ elements, getHostPaused, afterResize, attenti
   });
 
   function updateChatVisibility() {
-    fullscreenChat.hidden = !mounted || !chatVisible;
-    fullscreenChatToggle.hidden = !mounted;
-    fullscreenChatToggle.setAttribute("aria-expanded", String(chatVisible));
-    if (!mounted || chatVisible) chatMessages.scrollTop = chatScrollTop;
+    if (!theaterRoot) {
+      fullscreenChat.hidden = !mounted || !chatVisible;
+      fullscreenChatToggle.hidden = !mounted;
+      fullscreenChatToggle.setAttribute("aria-expanded", String(chatVisible));
+      if (!mounted || chatVisible) chatMessages.scrollTop = chatScrollTop;
+    }
   }
 
   function rememberChatScroll() {
@@ -25,19 +29,21 @@ export function createFullscreen({ elements, getHostPaused, afterResize, attenti
     if (chatMessages.getBoundingClientRect().height) chatScrollTop = chatMessages.scrollTop;
   }
 
-  life.listen(fullscreenChatToggle, "click", () => {
+  function setChatVisible(visible) {
     document.dispatchEvent(new Event("watchparty-fullscreen-change"));
     rememberChatScroll();
-    chatVisible = !chatVisible;
+    chatVisible = visible;
     updateChatVisibility();
     attention?.setFullscreen({ active: mounted, chatVisible });
-  });
+    afterResize();
+  }
+  if (!theaterRoot) life.listen(fullscreenChatToggle, "click", () => setChatVisible(!chatVisible));
 
   function updateViewport() {
     const viewport = window.visualViewport;
-    videoShell.style.setProperty("--chat-viewport-height", `${viewport?.height || window.innerHeight}px`);
-    videoShell.style.setProperty("--chat-viewport-top", `${viewport?.offsetTop || 0}px`);
-    videoShell.classList.toggle("chat-compact-viewport", (viewport?.height || window.innerHeight) < 360);
+    fullscreenRoot.style.setProperty("--chat-viewport-height", `${viewport?.height || window.innerHeight}px`);
+    fullscreenRoot.style.setProperty("--chat-viewport-top", `${viewport?.offsetTop || 0}px`);
+    fullscreenRoot.classList.toggle("chat-compact-viewport", (viewport?.height || window.innerHeight) < 360);
   }
   life.listen(window.visualViewport, "resize", updateViewport);
   life.listen(window.visualViewport, "scroll", updateViewport);
@@ -48,7 +54,7 @@ export function createFullscreen({ elements, getHostPaused, afterResize, attenti
   }
   
   function updateFullscreenUi() {
-    const active = fullscreenElement() === videoShell || videoShell.classList.contains("pseudo-fullscreen");
+    const active = fullscreenElement() === fullscreenRoot || fullscreenRoot.classList.contains("pseudo-fullscreen");
     if (active !== mounted) {
       document.dispatchEvent(new Event("watchparty-fullscreen-change"));
       rememberChatScroll();
@@ -56,8 +62,8 @@ export function createFullscreen({ elements, getHostPaused, afterResize, attenti
       const restoreFocus = chatConversation.contains(focused);
       mounted = active;
       if (active) {
-        fullscreenChat.appendChild(chatConversation);
-        for (const node of [floatingReactions, reactionFeed, emojiPicker, messageMenu]) videoShell.appendChild(node);
+        if (!theaterRoot) fullscreenChat.appendChild(chatConversation);
+        for (const node of [floatingReactions, reactionFeed, emojiPicker, messageMenu]) fullscreenRoot.appendChild(node);
       } else {
         for (const { node, anchor } of slots) anchor.parentNode.insertBefore(node, anchor);
       }
@@ -78,23 +84,23 @@ export function createFullscreen({ elements, getHostPaused, afterResize, attenti
       else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
       return;
     }
-    if (videoShell.classList.contains("pseudo-fullscreen")) {
-      videoShell.classList.remove("pseudo-fullscreen");
+    if (fullscreenRoot.classList.contains("pseudo-fullscreen")) {
+      fullscreenRoot.classList.remove("pseudo-fullscreen");
       document.body.style.overflow = previousBodyOverflow;
       updateFullscreenUi();
       return;
     }
-    if (videoShell.requestFullscreen) {
-      await videoShell.requestFullscreen();
+    if (fullscreenRoot.requestFullscreen) {
+      await fullscreenRoot.requestFullscreen();
       return;
     }
-    if (videoShell.webkitRequestFullscreen) {
-      videoShell.webkitRequestFullscreen();
+    if (fullscreenRoot.webkitRequestFullscreen) {
+      fullscreenRoot.webkitRequestFullscreen();
       return;
     }
     previousBodyOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    videoShell.classList.add("pseudo-fullscreen");
+    fullscreenRoot.classList.add("pseudo-fullscreen");
     updateFullscreenUi();
   }
   
@@ -125,16 +131,16 @@ export function createFullscreen({ elements, getHostPaused, afterResize, attenti
   life.listen(document, "fullscreenchange", updateFullscreenUi);
   life.listen(document, "webkitfullscreenchange", updateFullscreenUi);
   life.listen(document, "keydown", (event) => {
-    if (event.key === "Escape" && !event.defaultPrevented && videoShell.classList.contains("pseudo-fullscreen")) {
-      videoShell.classList.remove("pseudo-fullscreen");
+    if (event.key === "Escape" && !event.defaultPrevented && fullscreenRoot.classList.contains("pseudo-fullscreen")) {
+      fullscreenRoot.classList.remove("pseudo-fullscreen");
       document.body.style.overflow = previousBodyOverflow;
       updateFullscreenUi();
     }
   });
 
-  return { toggle: toggleFullscreenSurface, updateUi: updateFullscreenUi, destroy() {
+  return { toggle: toggleFullscreenSurface, updateUi: updateFullscreenUi, setChatVisible, destroy() {
     life.dispose();
     for (const { node, anchor } of slots) { if (anchor.parentNode) anchor.parentNode.insertBefore(node, anchor); anchor.remove(); }
-    if (videoShell.classList.contains("pseudo-fullscreen")) { videoShell.classList.remove("pseudo-fullscreen"); document.body.style.overflow = previousBodyOverflow; }
+    if (fullscreenRoot.classList.contains("pseudo-fullscreen")) { fullscreenRoot.classList.remove("pseudo-fullscreen"); document.body.style.overflow = previousBodyOverflow; }
   } };
 }

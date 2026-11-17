@@ -4,6 +4,7 @@ const { createSession } = require("./state");
 const { createTransport } = require("./transport");
 const { createMediaService } = require("./media");
 const { createHostSource } = require("./source-relay");
+const { createScreenShare } = require('./screen-share');
 const { sanitizeDisplayName } = require("./names");
 const { createModeration } = require("./moderation");
 const { createHosting } = require("./hosting");
@@ -60,8 +61,9 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
     state.basePath = id === "default" ? "" : `/rooms/${id}`;
     const transport = createTransport(state.clients);
     const media = createMediaService({ state, config, encoderPromise, broadcast: transport.broadcast, thumbnails });
-    const room = { id, name, passwordHash, salt, state, transport, media, members: new Map(), activeResponses: new Map() };
+    const room = { id, name, createdAt: Date.now(), passwordHash, salt, state, transport, media, members: new Map(), activeResponses: new Map() };
     room.source = createHostSource({ room, bridge, config });
+    room.screenShare = createScreenShare(room, config);
     room.hosting = createHosting(room, { config, scheduleExpiry });
     room.moderation = createModeration(room, scheduleExpiry);
     rooms.set(id, room);
@@ -76,6 +78,7 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
     room.state.shuttingDown = true;
     room.hosting.cancel();
     room.source.reset();
+    room.screenShare.reset();
     room.media.reset();
     for (const client of room.state.clients.values()) client.ws.terminate();
     room.members.clear();
@@ -176,7 +179,7 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
     list: () => [...rooms.values()].map(room => {
       room.media.refreshThumbnail();
       const thumbnail = room.media.thumbnail();
-      return { ...describe(room).room, participantCount: room.state.clients.size,
+      return { ...describe(room).room, createdAt: room.createdAt, participantCount: room.state.clients.size,
         fileName: room.state.fileName, thumbnailUrl: thumbnail ? `/api/rooms/${room.id}/thumbnail?v=${thumbnail.version}&r=${thumbnail.revision}` : null };
     }),
     get: (id) => rooms.get(id), close: () => { closing = true; for (const room of [...rooms.values()]) destroy(room); } };

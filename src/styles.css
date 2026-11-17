@@ -4,6 +4,7 @@
 @import "../css/style.css" layer(legacy);
 @import "../css/components.css" layer(components);
 @import "../css/watch.css" layer(components);
+@import "../css/polls.css" layer(components);
 @import "../css/hub.css" layer(components);
 
 @theme inline {

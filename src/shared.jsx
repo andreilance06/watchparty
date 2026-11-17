@@ -32,11 +32,12 @@ export function Field({ id, label, optional = false, hint, error, className = ''
     {error && <p id={`${inputId}-error`} className="ui-field-error" role="alert">{error}</p>}
   </div>;
 }
-export function Header({ children, brandHeading = true }) {
+export function Header({ children, context, brandHeading = true, onBrandClick, brandRef }) {
   const { theme, toggle } = useTheme();
   const label = `Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`;
   return <header className="site-header flex items-center justify-between gap-4">
-    <a className="brand" href="/"><img className="brand-mark" src="/assets/images/logo/logo_watchparty.png" alt="" /><div>{brandHeading ? <h1>WatchParty</h1> : <span className="brand-name">WatchParty</span>}<p>Watch together. Chat together.</p></div></a>
+    <a ref={brandRef} className="brand" href="/" aria-label="WatchParty" onClick={onBrandClick}><img className="brand-mark" src="/assets/images/logo/logo_watchparty.png" alt="" /><div>{brandHeading ? <h1>WatchParty</h1> : <span className="brand-name">WatchParty</span>}<p>Watch together. Chat together.</p></div></a>
+    {context}
     <div className="header-actions flex items-center gap-3"><Button icon className="theme-toggle" aria-label={label} title={label} aria-pressed={theme === 'light'} onClick={toggle}>
       <svg className="theme-icon icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></svg>
       <svg className="theme-icon icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.4 15.2A8.5 8.5 0 0 1 8.8 3.6 8.5 8.5 0 1 0 20.4 15.2Z" /></svg>

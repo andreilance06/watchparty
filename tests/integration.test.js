@@ -96,6 +96,9 @@ test("HTTP modules, chat names, host-only file sharing, and host handoff work to
   viewer.send({ type: "reaction", emoji: "🥰" });
   assert.equal((await host.next("reaction")).emoji, "🥰");
   viewer.send({ type: "reaction", emoji: "😂" });
+  assert.match((await viewer.next("error", message => message.action === "reaction")).message, /moment/);
+  await new Promise(resolve => setTimeout(resolve, 510));
+  viewer.send({ type: "reaction", emoji: "😂" });
   assert.equal((await host.next("reaction")).emoji, "😂");
   viewer.send({ type: "reaction", emoji: "unsupported" });
   assert.equal((await viewer.next("error")).message, "That emoji reaction is not supported.");

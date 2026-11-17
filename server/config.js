@@ -33,6 +33,8 @@ function createConfig(overrides = {}) {
     mediaPreparationMs: 30000,
     trustProxy: process.env.TRUST_PROXY === "loopback" ? "loopback" : false,
     publicOrigin: process.env.PUBLIC_ORIGIN || "",
+    rtcIceServers: process.env.WATCHPARTY_ICE_SERVERS ? JSON.parse(process.env.WATCHPARTY_ICE_SERVERS) : [{ urls: 'stun:stun.cloudflare.com:3478' }],
+    rtcMaxViewers: 16,
     ffmpegPath: resolveFfmpegPath(),
     ffprobePath: null,
     ...overrides
@@ -40,6 +42,13 @@ function createConfig(overrides = {}) {
   if (process.env.WATCHPARTY_LOW_MEMORY !== undefined && !["0", "1"].includes(process.env.WATCHPARTY_LOW_MEMORY)) throw new Error("WATCHPARTY_LOW_MEMORY must be 0 or 1.");
   if (!Number.isInteger(config.ffmpegThreads) || config.ffmpegThreads < 0 || config.ffmpegThreads > 64) throw new Error("ffmpegThreads must be an integer between 0 and 64.");
   if (!Number.isInteger(config.maxEncoders) || config.maxEncoders < 1) throw new Error("maxEncoders must be a positive integer.");
+  if (!Number.isInteger(config.rtcMaxViewers) || config.rtcMaxViewers < 1 || config.rtcMaxViewers > 64) throw new Error('rtcMaxViewers must be between 1 and 64.');
+  if (!Array.isArray(config.rtcIceServers) || config.rtcIceServers.length > 16 || config.rtcIceServers.some(server => {
+    const urls = typeof server?.urls === 'string' ? [server.urls] : server?.urls;
+    return !Array.isArray(urls) || !urls.length || urls.some(url => typeof url !== 'string' || !/^(stun|stuns|turn|turns):[^\s]+$/.test(url)) ||
+      server.username !== undefined && typeof server.username !== 'string' || server.credential !== undefined && typeof server.credential !== 'string';
+  })) throw new Error('WATCHPARTY_ICE_SERVERS must contain valid WebRTC ICE server objects.');
+  config.rtcIceServers = config.rtcIceServers.map(server => ({ urls: server.urls, ...(server.username !== undefined ? { username: server.username } : {}), ...(server.credential !== undefined ? { credential: server.credential } : {}) }));
   config.encoderBudget ||= createEncoderBudget(config.maxEncoders);
   if (!Number.isFinite(config.hostReconnectGraceMs) || config.hostReconnectGraceMs < 0) throw new Error("hostReconnectGraceMs must be a non-negative number.");
   if (config.publicOrigin) {

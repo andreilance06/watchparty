@@ -276,8 +276,8 @@
 }
 
 .vote-option.selected {
-  border-color: rgba(124, 92, 255, .55);
-  background: rgba(124, 92, 255, .09);
+  border-color: color-mix(in srgb, var(--text-brand) 55.00000000000001%, transparent);
+  background: color-mix(in srgb, var(--text-brand) 9%, transparent);
 }
 
 .vote-option-details {
@@ -357,10 +357,10 @@
   min-width: 3rem;
   min-height: 2.25rem;
   padding: .4rem .45rem;
-  border: 1px solid rgba(124, 92, 255, .45);
+  border: 1px solid color-mix(in srgb, var(--text-brand) 45%, transparent);
   border-radius: .55rem;
   color: var(--accent-soft-text);
-  background: rgba(124, 92, 255, .18);
+  background: color-mix(in srgb, var(--text-brand) 18%, transparent);
   font-size: .68rem;
   font-weight: 700;
   cursor: pointer;

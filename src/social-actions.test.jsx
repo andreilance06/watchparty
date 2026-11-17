@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, it, vi } from 'vitest';
 import { Chat } from './Chat.jsx';
@@ -59,8 +59,63 @@ it('makes voting the visible poll action and separates finishing from voting', a
   expect(screen.queryByRole('button', { name: 'Finish poll' })).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole('button', { name: 'Vote on next movie' }));
   expect(screen.getByRole('button', { name: 'Hide poll' })).toHaveAttribute('aria-expanded', 'true');
-  expect(screen.getByText('Choose what to watch next. The host still selects the video file.')).toBeVisible();
-  expect(screen.getByRole('button', { name: 'Finish poll' }).closest('.poll-management')).not.toBeNull();
+  expect(screen.getByRole('heading', { name: 'Add the first movie' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Finish poll' }).closest('.poll-finish')).not.toBeNull();
+});
+
+it('confirms finishing with safe focus, then shows tied winners and offers another poll', async () => {
+  const user = userEvent.setup(), send = vi.fn(() => true);
+  let state = { ...hostState(), poll: { id: 'poll', status: 'open' }, suggestions: [
+    { id: 1, title: 'Arrival', votes: 1, ownerName: 'Alex', canRemove: true },
+    { id: 2, title: 'Dune', votes: 1, ownerName: 'Sam' },
+  ] };
+  const view = render(wrap(state, <Poll expanded disclosure={false} />, send));
+  expect(screen.queryByRole('textbox', { name: 'Movie title' })).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Suggest a movie' }));
+  expect(screen.getByRole('textbox', { name: 'Movie title' })).toHaveFocus();
+  await user.click(screen.getByRole('button', { name: 'Close suggestions' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Suggest a movie' })).toHaveFocus());
+  const finish = screen.getByRole('button', { name: 'Finish poll' });
+  await user.click(finish);
+  const dialog = screen.getByRole('dialog', { name: 'Finish this poll?' });
+  expect(within(dialog).getByRole('button', { name: 'Keep voting' })).toHaveFocus();
+  expect(send).not.toHaveBeenCalled();
+  await user.click(within(dialog).getByRole('button', { name: 'Keep voting' }));
+  await waitFor(() => expect(finish).toHaveFocus());
+  await user.click(finish);
+  await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Finish poll' }));
+  expect(send).toHaveBeenCalledExactlyOnceWith({ type: 'finish-video-poll', pollId: 'poll' });
+  state = { ...state, poll: { id: 'poll', status: 'closed', result: { suggestions: state.suggestions, winnerIds: [1, 2], totalVotes: 2 } } };
+  view.rerender(wrap(state, <Poll expanded disclosure={false} />, send));
+  expect(screen.getByRole('heading', { name: 'The votes are in' })).toBeVisible();
+  expect(screen.getAllByText('Tied winner')).toHaveLength(2);
+  expect(screen.getByRole('heading', { name: 'Arrival' })).toBeVisible();
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Start another poll' })).toHaveFocus());
+});
+
+it('keeps poll viewing available when voting and suggesting are restricted', async () => {
+  const state = { ...hostState(), role: 'viewer', permissions: { ...DEFAULT_PERMISSIONS, vote: false, suggestTitles: false }, poll: { id: 'poll', status: 'open' }, suggestions: [{ id: 1, title: 'Arrival', votes: 2, movie: { description: '', pageUrl: 'https://en.wikipedia.org/wiki/Arrival_(film)' } }] };
+  render(wrap(state, <Poll expanded disclosure={false} />));
+  expect(screen.getByRole('heading', { name: 'Arrival' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Vote for Arrival' })).toBeDisabled();
+  expect(screen.queryByRole('button', { name: 'Suggest a movie' })).not.toBeInTheDocument();
+  expect(screen.getByText('Movie vote:').parentElement).toHaveTextContent('Movie vote: 2 votes');
+  expect(screen.getByText('Voting is disabled for you. You can still view the results.')).toBeVisible();
+  await userEvent.click(screen.getByText('Movie details'));
+  expect(screen.getByRole('link', { name: 'View on Wikipedia' })).toHaveAttribute('href', 'https://en.wikipedia.org/wiki/Arrival_(film)');
+});
+
+it('moves focus to suggesting another movie after the first suggestion is confirmed', async () => {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, status: 200, json: async () => ({ movies: [] }) });
+  const user = userEvent.setup(), send = vi.fn(() => true);
+  const state = { ...hostState(), poll: { id: 'poll', status: 'open' } };
+  const view = render(wrap(state, <Poll expanded disclosure={false} />, send));
+  await user.type(screen.getByRole('textbox', { name: 'Movie title' }), 'Dune');
+  await user.click(screen.getByRole('button', { name: 'Search' }));
+  await user.click(await screen.findByRole('button', { name: 'Suggest “Dune” without a poster' }));
+  view.rerender(wrap({ ...state, suggestions: [{ id: 1, title: 'Dune', votes: 1, ownerName: 'Alex' }], myVoteId: 1 }, <Poll expanded disclosure={false} />, send));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Suggest a movie' })).toHaveFocus());
+  expect(screen.getByText('Suggested “Dune”.')).toBeVisible();
 });
 
 it.each([['Transfer host', 'transfer-host'], ['Kick and block', 'block-participant']])('requires confirmation for %s, with safe Cancel focus and no request on cancellation', async (label, type) => {
