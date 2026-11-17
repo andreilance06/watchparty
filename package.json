@@ -2,6 +2,7 @@
   "name": "watchparty",
   "version": "1.0.0",
   "private": true,
+  "packageManager": "npm@11.20.0",
   "description": "A synchronized watch party with direct playback, compatibility streaming, Movi Player and chat.",
   "main": "server.js",
   "scripts": {

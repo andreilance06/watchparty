@@ -106,7 +106,7 @@ For another device on the same network, open one of the LAN addresses printed by
 
 For Render hosting, follow the [Render deployment guide](docs/render.md), including the low-memory profile and `/healthz` deployment check. A [Render Blueprint](render.yaml) is included for new services.
 
-For Railway hosting, follow the [Railway deployment guide](docs/railway.md). The included [Railpack configuration](railpack.json) installs dependencies before building; use `npm run build` as Railway's build command so `npm ci` does not try to remove a mounted Vite cache.
+For Railway hosting, follow the [Railway deployment guide](docs/railway.md). The included [Railpack configuration](railpack.json) copies both npm manifests into the install layer before installing dependencies. Both lockfiles are retained; `package.json` selects npm explicitly and Railway installs from `package-lock.json`. Use `npm run build` as Railway's build command so `npm ci` does not try to remove a mounted Vite cache.
 
 Follow the [Ubuntu VPS deployment guide](docs/deployment.md) to host WatchParty at **https://ypothesi.space** with HTTPS, a persistent Node service, and update/rollback instructions. Create real parties on that public site so **Invite** copies a usable public room link. Localhost is a separate development environment: its rooms are not available on the hosted server, and changing an invite's hostname does not transfer a room.
 

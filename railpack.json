@@ -6,7 +6,12 @@
   },
   "steps": {
     "install": {
-      "commands": ["npm ci --include=dev"]
+      "commands": [
+        "COPY:package.json package.json",
+        "COPY:package-lock.json package-lock.json",
+        "npm install --global corepack@0.36.0 && corepack enable npm && corepack prepare npm@11.20.0 --activate",
+        "npm ci --include=dev"
+      ]
     },
     "build": {
       "commands": ["npm run build"]
