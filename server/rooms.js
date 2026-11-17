@@ -30,7 +30,29 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
   const rooms = new Map();
   const thumbnails = createThumbnailQueue();
   const identitySecret = crypto.randomBytes(32);
+  const invitationSecret = crypto.randomBytes(32);
   let closing = false;
+
+  function encryptInvitation(room) {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', invitationSecret, iv);
+    cipher.setAAD(Buffer.from(room.id));
+    const encrypted = Buffer.concat([cipher.update(room.inviteKey, 'utf8'), cipher.final()]);
+    return `v1.${Buffer.concat([iv, cipher.getAuthTag(), encrypted]).toString('base64url')}`;
+  }
+
+  function validInvitation(room, token) {
+    if (!room.inviteKey || typeof token !== 'string' || !/^v1\.[\w-]{95}$/.test(token)) return false;
+    try {
+      const payload = Buffer.from(token.slice(3), 'base64url');
+      const decipher = crypto.createDecipheriv('aes-256-gcm', invitationSecret, payload.subarray(0, 12));
+      decipher.setAAD(Buffer.from(room.id));
+      decipher.setAuthTag(payload.subarray(12, 28));
+      const key = Buffer.concat([decipher.update(payload.subarray(28)), decipher.final()]);
+      const expected = Buffer.from(room.inviteKey);
+      return key.length === expected.length && crypto.timingSafeEqual(key, expected);
+    } catch { return false; }
+  }
 
   function browserIdentity(req, res) {
     const cookie = (req.headers.cookie || "").split(";").map(part => part.trim())
@@ -62,6 +84,8 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
     const transport = createTransport(state.clients);
     const media = createMediaService({ state, config, encoderPromise, broadcast: transport.broadcast, thumbnails });
     const room = { id, name, createdAt: Date.now(), passwordHash, salt, state, transport, media, members: new Map(), activeResponses: new Map() };
+    room.inviteKey = passwordHash ? crypto.randomBytes(32).toString('base64url') : null;
+    room.inviteToken = room.inviteKey ? encryptInvitation(room) : null;
     room.source = createHostSource({ room, bridge, config });
     room.screenShare = createScreenShare(room, config);
     room.hosting = createHosting(room, { config, scheduleExpiry });
@@ -135,6 +159,7 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
     const prefix = room.state.basePath;
     return {
       room: { id: room.id, name: room.name, passwordRequired: Boolean(room.passwordHash),
+        ...(member && !member.revoked && room.inviteToken ? { inviteAccessPath: `/?room=${encodeURIComponent(room.id)}#invite=${room.inviteToken}` } : {}),
         invitePath: `/?room=${encodeURIComponent(room.id)}`, watchPath: room.id === "default" ? "/watch" : `/watch?roomId=${room.id}` },
       member: member ? { clientId: member.id, role: room.state.hostId === member.id ? "host" : "viewer" } : null,
       endpoints: { session: `${prefix}/api/session`, leave: `${prefix}/api/leave`, websocket: `${prefix}/ws`, source: `${prefix}/source` }
@@ -164,7 +189,8 @@ function createRoomRegistry({ config, encoderPromise, bridge }) {
     assertAdmission(req, room);
     const existing = authenticate(req, room);
     if (existing) return { room, member: existing };
-    if (room.passwordHash) {
+    const invited = validInvitation(room, body.inviteKey);
+    if (room.passwordHash && !invited) {
       if (typeof body.password !== "string" || body.password.length > 128) throw failure(401, "Incorrect room password.");
       const candidate = await scrypt(body.password, room.salt, 64);
       if (!crypto.timingSafeEqual(candidate, room.passwordHash)) throw failure(401, "Incorrect room password.");

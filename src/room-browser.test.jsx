@@ -15,6 +15,20 @@ const rooms = [
 ];
 const response = (data, status = 200) => ({ ok: status < 400, status, json: async () => data });
 const ids = result => result.map(room => room.id);
+it('redeems protected invite access from the fragment and clears it from the address bar', async () => {
+  history.replaceState(null, '', '/?room=z#invite=private-access-key');
+  const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+    if (url === '/api/rooms') return response({ rooms });
+    if (url === '/api/viewer-identity') return response({});
+    return response({ room: { watchPath: '/watch?roomId=z' } });
+  });
+  mount();
+  await waitFor(() => expect(fetch).toHaveBeenCalledWith('/api/rooms/join', expect.objectContaining({ body: expect.any(String) })));
+  const call = fetch.mock.calls.find(([url]) => url === '/api/rooms/join');
+  expect(JSON.parse(call[1].body)).toMatchObject({ roomId: 'z', inviteKey: 'private-access-key' });
+  expect(location.hash).toBe('');
+  expect(screen.queryByLabelText('Room password')).not.toBeInTheDocument();
+});
 const renderedNames = () => screen.queryAllByRole('heading', { level: 3 }).map(node => node.textContent);
 function mount() { return render(<ThemeProvider><Hub /></ThemeProvider>); }
 

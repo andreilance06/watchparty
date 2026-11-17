@@ -112,7 +112,8 @@ button,
   width: 2.65rem;
   height: 2.65rem;
   flex: 0 0 auto;
-  object-fit: contain;
+  background: linear-gradient(135deg, var(--text-brand), var(--action-primary) 60%, var(--palette-sand));
+  mask: url("/assets/images/logo/logo_watchparty.png") center / contain no-repeat;
 }
 
 .brand h1,

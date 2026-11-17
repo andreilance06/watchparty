@@ -1,39 +1,22 @@
-const API_URL = "https://en.wikipedia.org/w/api.php";
+const API_URL = "https://api.themoviedb.org/3/search/movie";
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const MAX_CACHE_ENTRIES = 100;
 
-function normalizeMoviePage(page) {
-  if (!Number.isSafeInteger(page?.pageid) || typeof page.title !== "string" ||
-      typeof page.fullurl !== "string") return null;
-
-  let pageUrl;
-  try { pageUrl = new URL(page.fullurl); } catch { return null; }
-  if (pageUrl.protocol !== "https:" || pageUrl.hostname !== "en.wikipedia.org" ||
-      !pageUrl.pathname.startsWith("/wiki/")) return null;
-
-  let posterUrl = null;
-  if (typeof page.thumbnail?.source === "string") {
-    try {
-      const imageUrl = new URL(page.thumbnail.source);
-      if (imageUrl.protocol === "https:" &&
-          ["upload.wikimedia.org", "thumb.wikimedia.org"].includes(imageUrl.hostname) &&
-          imageUrl.pathname.startsWith("/wikipedia/")) posterUrl = imageUrl.href;
-    } catch {}
-  }
-
-  const description = typeof page.extract === "string"
-    ? page.extract.replace(/\s+/g, " ").trim().slice(0, 200)
-    : "";
+function normalizeMoviePage(movie) {
+  if (!Number.isSafeInteger(movie?.id) || movie.id <= 0 || typeof movie.title !== "string" || !movie.title.trim() || movie.adult === true) return null;
+  const year = typeof movie.release_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(movie.release_date) ? movie.release_date.slice(0, 4) : "";
+  const title = movie.title.replace(/\s+/g, " ").trim().slice(0, year ? 93 : 100);
   return {
-    pageId: page.pageid,
-    title: page.title.slice(0, 100),
-    description,
-    pageUrl: pageUrl.href,
-    posterUrl
+    tmdbId: movie.id,
+    title: year ? title + " (" + year + ")" : title,
+    description: typeof movie.overview === "string" ? movie.overview.replace(/\s+/g, " ").trim().slice(0, 200) : "",
+    pageUrl: "https://www.themoviedb.org/movie/" + movie.id,
+    posterUrl: typeof movie.poster_path === "string" && /^\/[a-zA-Z0-9_-]+\.(?:jpg|png|webp)$/.test(movie.poster_path)
+      ? "https://image.tmdb.org/t/p/w342" + movie.poster_path : null
   };
 }
 
-function createMovieSearch({ fetchImpl = globalThis.fetch, now = Date.now } = {}) {
+function createMovieSearch({ fetchImpl = globalThis.fetch, now = Date.now, apiToken = process.env.TMDB_READ_ACCESS_TOKEN || "", apiKey = process.env.TMDB_API_KEY || "" } = {}) {
   const cache = new Map();
   const selections = new Map();
 
@@ -48,29 +31,17 @@ function createMovieSearch({ fetchImpl = globalThis.fetch, now = Date.now } = {}
     if (cached && cached.expiresAt > now()) return cached.movies;
     if (cached) cache.delete(key);
 
+    if (!apiToken && !apiKey) throw Object.assign(new Error("Movie search is temporarily unavailable. You can still suggest the title without a poster."), { status: 503 });
     const url = new URL(API_URL);
-    url.search = new URLSearchParams({
-      action: "query",
-      generator: "search",
-      gsrsearch: normalized,
-      gsrnamespace: "0",
-      gsrlimit: "8",
-      prop: "pageimages|extracts|info",
-      inprop: "url",
-      exintro: "1",
-      explaintext: "1",
-      piprop: "thumbnail",
-      pithumbsize: "360",
-      pilicense: "any",
-      format: "json",
-      formatversion: "2"
-    }).toString();
+    url.search = new URLSearchParams({ query: normalized, include_adult: "false", language: "en-US", page: "1" }).toString();
+    if (!apiToken) url.searchParams.set("api_key", apiKey);
 
     let response;
     try {
       response = await fetchImpl(url, {
         headers: {
           Accept: "application/json",
+          ...(apiToken ? { Authorization: `Bearer ${apiToken}` } : {}),
           "User-Agent": "WatchParty/1.0 (https://github.com/andreilance06/watchparty)"
         },
         signal: AbortSignal.timeout(8000)
@@ -86,24 +57,24 @@ function createMovieSearch({ fetchImpl = globalThis.fetch, now = Date.now } = {}
     try { payload = await response.json(); } catch {
       throw new Error("Movie search returned an invalid response. You can still suggest the title without a poster.");
     }
-    if (payload?.error) {
+    if (payload?.success === false || !Array.isArray(payload?.results)) {
       throw new Error("Movie search is temporarily unavailable. You can still suggest the title without a poster.");
     }
 
-    const movies = (Array.isArray(payload?.query?.pages) ? payload.query.pages : [])
+    const movies = payload.results
       .map(normalizeMoviePage)
-      .filter(Boolean);
+      .filter(Boolean).slice(0, 8);
     cache.set(key, { expiresAt: now() + CACHE_TTL_MS, movies });
-    for (const movie of movies) selections.set(movie.pageId, { movie, expiresAt: now() + CACHE_TTL_MS });
+    for (const movie of movies) selections.set(movie.tmdbId, { movie, expiresAt: now() + CACHE_TTL_MS });
     while (cache.size > MAX_CACHE_ENTRIES) cache.delete(cache.keys().next().value);
     while (selections.size > MAX_CACHE_ENTRIES * 8) selections.delete(selections.keys().next().value);
     return movies;
   }
 
-  function getSelection(pageId) {
-    const selection = selections.get(pageId);
+  function getSelection(tmdbId) {
+    const selection = selections.get(tmdbId);
     if (!selection || selection.expiresAt <= now()) {
-      selections.delete(pageId);
+      selections.delete(tmdbId);
       return null;
     }
     return selection.movie;

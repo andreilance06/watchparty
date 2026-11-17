@@ -15,15 +15,31 @@ function wrap(state, child, send = vi.fn(() => true)) {
 }
 const personButton = () => screen.getByRole('button', { name: /Sam.*Viewer/ });
 
-it('opens message actions by a visible button, returns focus on Escape, and preserves drafts', async () => {
+it('searches and submits a TMDB movie selection with its poster and release year', async () => {
+  const movie = { tmdbId: 329865, title: 'Arrival (2016)', description: 'A science fiction film.', pageUrl: 'https://www.themoviedb.org/movie/329865', posterUrl: 'https://image.tmdb.org/t/p/w342/poster.jpg' };
+  const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: true, json: async () => ({ movies: [movie] }) });
+  const user = userEvent.setup(), send = vi.fn(() => true);
+  render(wrap({ ...hostState(), poll: { id: 'poll', status: 'open' } }, <Poll expanded disclosure={false} />, send));
+  await user.type(screen.getByLabelText('Movie title'), 'Arrival');
+  await user.click(screen.getByRole('button', { name: 'Search', exact: true }));
+  expect(fetch).toHaveBeenCalledWith('/api/movies/search?q=Arrival', expect.any(Object));
+  expect(await screen.findByRole('heading', { name: 'Arrival (2016)' })).toBeVisible();
+  expect(screen.getByRole('img', { name: 'Poster for Arrival (2016)' })).toHaveAttribute('src', movie.posterUrl);
+  await user.click(screen.getByRole('button', { name: 'Suggest & vote' }));
+  expect(send).toHaveBeenCalledWith({ type: 'suggest-video', pollId: 'poll', title: movie.title, movie });
+});
+
+it('opens reply and reactions with a mobile tap and preserves drafts and focus', async () => {
+  vi.spyOn(window, 'matchMedia').mockReturnValueOnce({ matches: true }).mockReturnValueOnce({ matches: true });
   const state = roomReducer(hostState(), { message: { type: 'chat', commentId: 'one', clientId: 'sam', name: 'Sam', message: 'Movie night?', time: '12:00' } });
   const send = vi.fn(() => true), user = userEvent.setup();
   render(wrap(state, <Chat overlayTarget={document.body} layoutKey="normal" />, send));
   await user.type(screen.getByLabelText('Message'), 'My draft');
-  const trigger = screen.getByRole('button', { name: 'Reply / react: Sam: Movie night?' });
-  expect(trigger).toHaveTextContent('Reply / react');
+  const trigger = screen.getByRole('article');
+  expect(screen.queryByRole('button', { name: /^(React|Reply):/ })).not.toBeInTheDocument();
   await user.click(trigger);
   expect(screen.getByRole('menu', { name: 'Message actions' })).toBeVisible();
+  expect(screen.getByRole('group', { name: 'Quick reactions' })).toBeVisible();
   await user.keyboard('{Escape}');
   expect(trigger).toHaveFocus();
   await user.click(trigger);
@@ -31,6 +47,32 @@ it('opens message actions by a visible button, returns focus on Escape, and pres
   expect(screen.getByText('Reply to Sam')).toBeVisible();
   expect(screen.getByLabelText('Message')).toHaveValue('My draft');
   expect(send).not.toHaveBeenCalled();
+});
+
+it('keeps desktop text clicks passive and opens actions with Enter', async () => {
+  const state = roomReducer(hostState(), { message: { type: 'chat', commentId: 'one', name: 'Sam', message: 'Hello' } });
+  const user = userEvent.setup();
+  render(wrap(state, <Chat overlayTarget={document.body} layoutKey="normal" />));
+  const bubble = screen.getByRole('article');
+  await user.click(bubble);
+  expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+  bubble.focus(); await user.keyboard('{Enter}');
+  expect(screen.getByRole('menu', { name: 'Message actions' })).toBeVisible();
+});
+
+it('groups consecutive messages by sender identity and resets names after system messages', () => {
+  let state = hostState();
+  for (const [commentId, clientId, name] of [['one', 'sam', 'Sam'], ['two', 'sam', 'Sam'], ['three', 'other', 'Sam'], ['four', 'other', 'New name']]) {
+    state = roomReducer(state, { message: { type: 'chat', commentId, clientId, name, message: commentId } });
+  }
+  state = { ...state, messages: [...state.messages, { id: 'notice', system: true, message: 'Joined' }, { ...state.messages.at(-1), id: 'five', commentId: 'five', message: 'five' }] };
+  render(wrap(state, <Chat overlayTarget={document.body} layoutKey="normal" />));
+  const bubbles = screen.getAllByRole('article');
+  expect(bubbles[0].querySelector('.name')).toHaveTextContent('Sam');
+  expect(bubbles[1].querySelector('.name')).toBeNull();
+  expect(bubbles[2].querySelector('.name')).toHaveTextContent('Sam');
+  expect(bubbles[3].querySelector('.name')).toHaveTextContent('New name');
+  expect(bubbles[4].querySelector('.name')).toHaveTextContent('New name');
 });
 
 it('hides message actions when both replies and reactions are disallowed', () => {
@@ -94,7 +136,7 @@ it('confirms finishing with safe focus, then shows tied winners and offers anoth
 });
 
 it('keeps poll viewing available when voting and suggesting are restricted', async () => {
-  const state = { ...hostState(), role: 'viewer', permissions: { ...DEFAULT_PERMISSIONS, vote: false, suggestTitles: false }, poll: { id: 'poll', status: 'open' }, suggestions: [{ id: 1, title: 'Arrival', votes: 2, movie: { description: '', pageUrl: 'https://en.wikipedia.org/wiki/Arrival_(film)' } }] };
+  const state = { ...hostState(), role: 'viewer', permissions: { ...DEFAULT_PERMISSIONS, vote: false, suggestTitles: false }, poll: { id: 'poll', status: 'open' }, suggestions: [{ id: 1, title: 'Arrival', votes: 2, movie: { description: '', pageUrl: 'https://www.themoviedb.org/movie/329865' } }] };
   render(wrap(state, <Poll expanded disclosure={false} />));
   expect(screen.getByRole('heading', { name: 'Arrival' })).toBeVisible();
   expect(screen.getByRole('button', { name: 'Vote for Arrival' })).toBeDisabled();
@@ -102,7 +144,7 @@ it('keeps poll viewing available when voting and suggesting are restricted', asy
   expect(screen.getByText('Movie vote:').parentElement).toHaveTextContent('Movie vote: 2 votes');
   expect(screen.getByText('Voting is disabled for you. You can still view the results.')).toBeVisible();
   await userEvent.click(screen.getByText('Movie details'));
-  expect(screen.getByRole('link', { name: 'View on Wikipedia' })).toHaveAttribute('href', 'https://en.wikipedia.org/wiki/Arrival_(film)');
+  expect(screen.getByRole('link', { name: 'View on TMDB' })).toHaveAttribute('href', 'https://www.themoviedb.org/movie/329865');
 });
 
 it('moves focus to suggesting another movie after the first suggestion is confirmed', async () => {

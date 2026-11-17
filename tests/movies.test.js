@@ -4,69 +4,53 @@ const { createMovieSearch, normalizeMoviePage } = require("../server/movies");
 const { createApplication } = require("../server/application");
 const { CPU_ENCODER } = require("../server/encoders");
 
-const inception = {
-  pageid: 23270459,
-  title: "Inception",
-  fullurl: "https://en.wikipedia.org/wiki/Inception",
-  thumbnail: {
-    source: "https://upload.wikimedia.org/wikipedia/en/poster.jpg",
-    width: 220,
-    height: 326
-  },
-  extract: "A science fiction film."
-};
+const inception = { id: 27205, title: "Inception", release_date: "2010-07-16", poster_path: "/poster.jpg", overview: "A science fiction film." };
 
-test("movie search uses the keyless MediaWiki API, normalizes results, and caches queries", async () => {
-  let calls = 0;
-  let now = 1000;
-  let requestUrl;
-  const service = createMovieSearch({
-    now: () => now,
-    fetchImpl: async (url, options) => {
-      calls++;
-      requestUrl = new URL(url);
-      assert.match(options.headers["User-Agent"], /^WatchParty\//);
-      assert.equal(options.signal.aborted, false);
-      return { ok: true, json: async () => ({ query: { pages: [inception] } }) };
-    }
-  });
-
+test("movie search authenticates with TMDB, normalizes results, and caches queries", async () => {
+  let calls = 0, now = 1000, requestUrl;
+  const service = createMovieSearch({ apiToken: "test-token", apiKey: "", now: () => now, fetchImpl: async (url, options) => {
+    calls++; requestUrl = new URL(url);
+    assert.equal(options.headers.Authorization, "Bearer test-token");
+    assert.equal(options.signal.aborted, false);
+    return { ok: true, json: async () => ({ results: [inception] }) };
+  } });
   const first = await service.search("  Inception   film ");
-  assert.equal(calls, 1);
-  assert.equal(requestUrl.searchParams.get("gsrsearch"), "Inception film");
-  assert.equal(requestUrl.searchParams.get("generator"), "search");
+  assert.equal(requestUrl.origin + requestUrl.pathname, "https://api.themoviedb.org/3/search/movie");
+  assert.equal(requestUrl.searchParams.get("query"), "Inception film");
+  assert.equal(requestUrl.searchParams.get("include_adult"), "false");
   assert.equal(requestUrl.searchParams.has("api_key"), false);
-  assert.deepEqual(first, [{
-    pageId: 23270459,
-    title: "Inception",
-    description: "A science fiction film.",
-    pageUrl: "https://en.wikipedia.org/wiki/Inception",
-    posterUrl: "https://upload.wikimedia.org/wikipedia/en/poster.jpg"
-  }]);
-  assert.deepEqual(service.getSelection(23270459), first[0]);
+  assert.deepEqual(first, [{ tmdbId: 27205, title: "Inception (2010)", description: inception.overview, pageUrl: "https://www.themoviedb.org/movie/27205", posterUrl: "https://image.tmdb.org/t/p/w342/poster.jpg" }]);
+  assert.deepEqual(service.getSelection(27205), first[0]);
   assert.deepEqual(await service.search("inception film"), first);
   assert.equal(calls, 1);
   now += 10 * 60 * 1000 + 1;
-  await service.search("inception film");
-  assert.equal(calls, 2);
+  assert.equal(service.getSelection(27205), null);
+  await service.search("inception film"); assert.equal(calls, 2);
 });
 
-test("movie search rejects short queries and surfaces provider failures", async () => {
-  const service = createMovieSearch({ fetchImpl: async () => ({ ok: false }) });
+test("movie search supports a v3 API key and missing credentials make no request", async () => {
+  let calls = 0;
+  const fetchImpl = async (url) => { calls++; assert.equal(new URL(url).searchParams.get("api_key"), "test-key"); return { ok: true, json: async () => ({ results: [] }) }; };
+  const missing = createMovieSearch({ apiToken: "", apiKey: "", fetchImpl });
+  await assert.rejects(missing.search("Arrival"), { status: 503 }); assert.equal(calls, 0);
+  await createMovieSearch({ apiToken: "", apiKey: "test-key", fetchImpl }).search("Arrival"); assert.equal(calls, 1);
+});
+
+test("movie search rejects short queries, malformed payloads, and provider failures", async () => {
+  const service = createMovieSearch({ apiToken: "test", fetchImpl: async () => ({ ok: false }) });
   await assert.rejects(service.search("x"), /at least two characters/);
   await assert.rejects(service.search("Inception"), /temporarily unavailable/);
-  const invalidJson = createMovieSearch({ fetchImpl: async () => ({ ok: true, json: async () => { throw new Error("bad JSON"); } }) });
-  await assert.rejects(invalidJson.search("Inception"), /invalid response/);
+  for (const json of [async () => { throw new Error("bad JSON"); }, async () => ({ success: false }), async () => ({ unexpected: [] })]) {
+    await assert.rejects(createMovieSearch({ apiToken: "test", fetchImpl: async () => ({ ok: true, json }) }).search("Inception"), /invalid response|temporarily unavailable/);
+  }
 });
 
-test("movie results reject unsafe article URLs and ignore non-Wikimedia poster URLs", () => {
-  assert.equal(normalizeMoviePage({ ...inception, fullurl: "https://evil.example/wiki/Inception" }), null);
-  const result = normalizeMoviePage({
-    ...inception,
-    thumbnail: { source: "https://attacker.example/poster.jpg" }
-  });
-  assert.equal(result.posterUrl, null);
-  assert.equal(result.pageUrl, inception.fullurl);
+test("TMDB normalization rejects invalid IDs and unsafe poster paths", () => {
+  assert.equal(normalizeMoviePage({ ...inception, id: -1 }), null);
+  assert.equal(normalizeMoviePage({ ...inception, adult: true }), null);
+  assert.equal(normalizeMoviePage({ ...inception, title: " " }), null);
+  for (const poster_path of [null, "https://evil.example/image.jpg", "/../bad.jpg", "/image.svg"]) assert.equal(normalizeMoviePage({ ...inception, poster_path }).posterUrl, null);
+  assert.equal(normalizeMoviePage({ ...inception, release_date: null }).title, "Inception");
 });
 
 test("movie search route returns results and validates method and query length", async (t) => {

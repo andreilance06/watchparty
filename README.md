@@ -19,7 +19,7 @@ Its objectives are to keep playback synchronized, make group interaction availab
 | Screen and tab sharing | Share a screen, window, or browser tab live, with audio when supported. Use Share screen beside Choose video, then Stop sharing to end capture. See the [sharing setup guide](docs/screen-sharing.md). |
 | Captions | Add SRT, VTT, ASS, or SSA subtitles and choose a caption track independently. |
 | Chat and reactions | Send messages and quoted replies, insert emojis, and react to comments, including in fullscreen. |
-| Movie polls | Start a poll as host, suggest titles with optional Wikipedia metadata, vote, and post the result when the host finishes the poll. |
+| Movie polls | Start a poll as host, suggest titles with optional TMDB metadata, vote, and post the result when the host finishes the poll. |
 | Participants and moderation | See connected participants; hosts can configure 19 permissions with room defaults and individual overrides, transfer hosting, and delegate moderation. |
 | Theater layout | Watch in an edge-to-edge player with a resizable, collapsible right-side chat dock, including in fullscreen. Its width and open/closed state are remembered in this browser. Chat moves below the video on phones; drafts, tabs, and unread counts survive hiding and reopening it. |
 | Responsive interface | Consistent Chat, People, and Up next tabs, a visible display-name editor, direct room actions, and light/dark themes. |
@@ -36,7 +36,7 @@ Its objectives are to keep playback synchronized, make group interaction availab
 | Movi Player and WebCodecs | Browser playback and video controls. |
 | ffprobe, FFmpeg, and HLS | Structured media inspection, processing, and compatibility streaming. |
 | JASSUB | Subtitle rendering, including styled ASS/SSA captions. |
-| Wikipedia MediaWiki API | Optional movie search, metadata, and poster sources; no API key is required. |
+| TMDB API | Optional movie search, metadata, and posters; requires a server-side API credential. |
 | Git and GitHub | Version history, development branches, and integration of group contributions. |
 
 ## Run locally
@@ -169,7 +169,7 @@ The root page is a room hub, separate from the player at `/watch?roomId=ID` (or 
 
 Unexpected host disconnects reserve hosting for 15 seconds so a refresh or brief interruption can reconnect. Other participants see a reconnecting notice; if the host does not return in time, the next connected participant takes over. Explicit room leaving and host transfers take effect immediately. A private room's creator reclaims the sole host role whenever they reconnect, including after leaving and rejoining with the same verified browser identity; any replacement host becomes a viewer. Other hosts cannot block the creator. The public default room has no permanent creator. These identities and rooms last until room expiry or server restart, and localhost and the public domain use separate cookies.
 
-The host or viewers granted Start polls permission start movie polls from **Chat options** (the three-dot button in the lounge). An active poll stays pinned above messages as a compact, expandable card; viewers can suggest and vote unless the host revokes those permissions. Suggestions search Wikipedia through its keyless MediaWiki API. Choose a matching article for its thumbnail and attribution, or suggest a title without a poster. Suggesting automatically casts your vote when voting is allowed. The host, authorized moderators of suggestions, and original suggesters with removal permission can remove entries; the suggester keeps that right after browser restarts or rejoining with the same browser cookie and site address while the room/server remains alive. Finishing a poll hides it for everyone and posts the winner, tie, or no-votes result in chat. The host can then start a fresh round. Posters are served by Wikimedia, so availability and licensing depend on each source image. See the [movie poll API](docs/rooms.md#movie-suggestions-and-posters).
+The host or viewers granted Start polls permission start movie polls from **Chat options** (the three-dot button in the lounge). An active poll stays pinned above messages as a compact, expandable card; viewers can suggest and vote unless the host revokes those permissions. Suggestions search TMDB for movies, release years, overviews, and posters. Choose a match or suggest a title without a poster. Suggesting automatically casts your vote when voting is allowed. The host, authorized moderators of suggestions, and original suggesters with removal permission can remove entries; the suggester keeps that right after browser restarts or rejoining with the same browser cookie and site address while the room/server remains alive. Finishing a poll hides it for everyone and posts the winner, tie, or no-votes result in chat. The host can then start a fresh round. Movie data and posters come from TMDB. See the [movie poll API](docs/rooms.md#movie-suggestions-and-posters).
 
 ## Playback
 
@@ -298,3 +298,16 @@ The hls.js pause/resume bridge uses Movi 0.4.1's internal stream-wrapper loader 
 `js/player/native-quality-menu.js` isolates the quality Settings hooks, including menu placement when viewer seeking is disabled. `js/player/adaptive-quality.js` observes completed downloads and the pinned hls.js fragment-loading bridge. Verify these integrations and native mobile Settings when upgrading Movi; vendor distributions remain unchanged.
 
 Movi 0.4.1 exposes custom controls and overlays but no host-managed subtitle-menu provider. `js/player/native-caption-menu.js` isolates element-level menu hooks for the room's track list, selection, status, and permission-controlled Add and Remove actions. It reuses native CC/Settings/context surfaces and leaves decoder methods and the generated bundle intact. Verify these hooks against the real player when upgrading Movi; DOM doubles do not exercise its menu lifecycle or CSS.
+
+## TMDB movie search setup
+
+Set `TMDB_READ_ACCESS_TOKEN` to your TMDB API Read Access Token in the Node server environment, then restart the server. Alternatively, set `TMDB_API_KEY` to a v3 API key. When both are present, the read access token takes precedence. Never put either credential in a `VITE_*` variable or client-side code.
+
+For local PowerShell development:
+
+```powershell
+$env:TMDB_READ_ACCESS_TOKEN = 'your-read-access-token'
+npm.cmd run dev
+```
+
+TMDB credentials are available in [your account API settings](https://www.themoviedb.org/settings/api). Search uses [TMDB's movie search endpoint](https://developer.themoviedb.org/reference/search-movie). Queries and selected results are cached for ten minutes; title-only suggestions still work if credentials are missing or TMDB is unavailable. The header About & credits dialog includes the TMDB logo and attribution. This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.

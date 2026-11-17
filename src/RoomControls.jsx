@@ -156,7 +156,7 @@ export function RoomHeader() {
     setError(''); setConfirming(true);
   }
   return <>
-    <Header brandHeading={false} context={<RoomIdentity />} onBrandClick={requestLeave}><a className="rooms-link" href="/" aria-label="Browse rooms" title="Browse rooms" onClick={requestLeave}><Icon name="cards" /><span>Browse rooms</span></a></Header>
+    <Header brandHeading={false} context={<RoomIdentity />} onBrandClick={requestLeave}><a className="room-exit-link" href="/" aria-label="Exit room" title="Exit room" onClick={requestLeave}><Icon name="leave" /><span>Exit room</span></a></Header>
     {confirming && <Dialog title={title} returnFocusRef={returnTarget} initialFocusRef={stay} busy={leaving} onClose={close} aria-describedby="leaveRoomDescription">
       <DialogHeader title={title} />
       <p id="leaveRoomDescription" className="ui-dialog-description">{providing ? 'This browser is sharing the video. Leaving will stop playback for everyone in the room.' : 'Leave this watch party and return to the room list?'}</p>
@@ -170,14 +170,16 @@ export function RoomActions() {
   const { state, roomId } = useRoom();
   const [inviteOpen, setInviteOpen] = useState(false), [permissions, setPermissions] = useState(false), [copyStatus, setCopyStatus] = useState('');
   const inviteTrigger = useRef(null), permissionsTrigger = useRef(null), link = useRef(null);
-  const invite = new URL(state.room.invitePath || `/?room=${encodeURIComponent(roomId || 'default')}`, location.origin).href;
+  const includesAccess = Boolean(state.room.inviteAccessPath);
+  const invite = new URL(state.room.inviteAccessPath || state.room.invitePath || `/?room=${encodeURIComponent(roomId || 'default')}`, location.origin).href;
+  const displayedInvite = includesAccess ? invite.replace(/(#invite=)[^&]*/, '$1••••••••') : invite;
   return <div className="watch-room-actions">
     <Button ref={inviteTrigger} variant="quiet" icon aria-label="Invite friends" title="Invite friends" onClick={() => { setCopyStatus(''); setInviteOpen(true); }}><Icon name="invite" /></Button>
     {state.role === 'host' && <Button ref={permissionsTrigger} variant="quiet" icon aria-label="Room permissions" title="Room permissions" disabled={!state.connected} onClick={() => setPermissions(true)}><Icon name="settings" /></Button>}
     {inviteOpen && <Dialog title="Invite friends" returnFocusRef={inviteTrigger} onClose={() => setInviteOpen(false)}>
       <DialogHeader title="Invite friends" onClose={() => setInviteOpen(false)} />
-      <p className="ui-dialog-description">Share this link to bring friends straight to {state.room.name}. If the room has a password, share that with them too.</p>
-      <Field label="Invitation link" ref={link} value={invite} readOnly onFocus={event => event.target.select()} />
+      <p className="ui-dialog-description">Share this link to bring friends straight to {state.room.name}.{includesAccess ? ' Room access is included, so friends will not need to enter the password. Only the private access key is masked below.' : state.room.passwordRequired ? ' Friends will need the room password.' : ''}</p>
+      <Field label="Invitation link" ref={link} type="text" autoComplete="off" value={displayedInvite} readOnly onFocus={event => event.target.select()} onCopy={event => { if (includesAccess) { event.preventDefault(); event.clipboardData.setData('text/plain', invite); } }} />
       <div className="watch-invite-actions"><Button variant="primary" onClick={async () => { try { await navigator.clipboard.writeText(invite); setCopyStatus('Invitation link copied.'); } catch { link.current?.focus(); link.current?.select(); setCopyStatus('Copy the selected invitation link using your browser or keyboard.'); } }}>Copy invitation link</Button></div>
       <Status>{copyStatus}</Status>
     </Dialog>}

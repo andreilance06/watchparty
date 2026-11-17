@@ -10,7 +10,6 @@ const QUICK = ['❤️', '👍', '😂', '🔥', '😮', '😢', '👏', '🎉']
 export function Chat({ overlayTarget, layoutKey }) {
   const { state, send, attention } = useRoom();
   const canReply = can(state, 'replyChat') && can(state, 'sendChat'), canReact = can(state, 'reactMessages');
-  const actionLabel = canReact && canReply ? 'Reply / react' : canReact ? 'React' : 'Reply';
   const [draft, setDraft] = useState(''), [reply, setReply] = useState(null), [status, setStatus] = useState('');
   const [pending, setPending] = useState(null), [atLatest, setAtLatest] = useState(true);
   const pendingRef = useRef(null), draftRef = useRef(draft), replyRef = useRef(reply);
@@ -85,25 +84,29 @@ export function Chat({ overlayTarget, layoutKey }) {
       const node = messages.current; if (!node.getBoundingClientRect().height) return;
       const latest = node.scrollHeight - node.scrollTop - node.clientHeight < 48; setAtLatest(latest); attention.current?.setAtLatest(latest);
     }}>
-      {state.messages.map(comment => comment.system ? <div className="system-message" key={comment.id}>{comment.message}</div> : <article key={comment.id} data-comment-id={comment.commentId} className={`chat-message${comment.isOwn ? ' self' : ''}${highlight === comment.commentId ? ' reply-highlight' : ''}`} tabIndex={0} aria-haspopup="menu" aria-expanded={menu?.id === comment.commentId} aria-description="Right-click, long-press, or press Shift+F10 for message actions."
+      {state.messages.map((comment, index) => {
+        const sameSender = other => Boolean(other && !other.system && comment.clientId && other.clientId === comment.clientId && other.name === comment.name && other.isOwn === comment.isOwn);
+        const grouped = sameSender(state.messages[index - 1]), continues = sameSender(state.messages[index + 1]);
+        return comment.system ? <div className="system-message" key={comment.id}>{comment.message}</div> : <article key={comment.id} data-comment-id={comment.commentId} className={`chat-message${comment.isOwn ? ' self' : ''}${grouped ? ' grouped' : ''}${continues ? ' continues' : ''}${menu?.id === comment.commentId ? ' actions-open' : ''}${highlight === comment.commentId ? ' reply-highlight' : ''}`} tabIndex={0} aria-haspopup="menu" aria-expanded={menu?.id === comment.commentId} aria-description="Tap on mobile, right-click, or press Enter for reply and reactions."
+        onClick={event => {
+          if (event.target.closest('button, a') || window.getSelection()?.toString()) return;
+          if (['touch', 'pen'].includes(event.nativeEvent.pointerType) || matchMedia('(max-width: 767px), (pointer: coarse)').matches) openMenu(event, comment);
+        }}
         onContextMenu={event => openMenu(event, comment, { x: event.clientX, y: event.clientY })}
-        onKeyDown={event => { if (event.key === 'ContextMenu' || event.key === 'F10' && event.shiftKey) openMenu(event, comment); }}
+        onKeyDown={event => { if (event.target === event.currentTarget && (['Enter', ' ', 'ContextMenu'].includes(event.key) || event.key === 'F10' && event.shiftKey)) openMenu(event, comment); }}
         onPointerDown={event => { cancelPress(); if (event.target.closest('button, a') || !['touch', 'pen'].includes(event.pointerType) || event.isPrimary === false) return;
           const trigger = event.currentTarget, x = event.clientX, y = event.clientY;
           press.current = { x, y, timer: setTimeout(() => { suppress.current = Date.now() + 800; setPicker(null); setExpanded(false); setMenu({ id: comment.commentId, trigger, point: { x, y } }); }, 500) };
         }} onPointerMove={event => { if (press.current && Math.hypot(event.clientX - press.current.x, event.clientY - press.current.y) > 10) cancelPress(); }} onPointerUp={cancelPress} onPointerCancel={cancelPress} onClickCapture={event => { if (Date.now() < suppress.current) { event.preventDefault(); event.stopPropagation(); } }}>
-        <div className="meta"><span className="name">{comment.name}</span><time>{comment.time}</time>
-          {(canReact || canReply) && <Button variant="quiet" className="message-actions-trigger" aria-label={`${actionLabel}: ${comment.name}: ${comment.message}`} aria-haspopup="menu" aria-expanded={menu?.id === comment.commentId} onClick={event => openMenu(event, comment)}>
-            {actionLabel}
-          </Button>}
-        </div>
+        {!grouped && <div className="meta"><span className="name">{comment.name}</span></div>}
+        <time>{comment.time}</time>
         {comment.replyTo && <button className="chat-reply-quote" aria-label={`View original message from ${comment.replyTo.name}: ${comment.replyTo.message}`} onClick={() => viewOriginal(comment.replyTo)}><strong>{comment.replyTo.name}</strong><span>{comment.replyTo.message}</span></button>}
         <p>{comment.message}</p>
         <div className="comment-reactions">{[...new Set((comment.reactions || []).map(item => item.emoji))].map(emoji => {
           const names = comment.reactions.filter(item => item.emoji === emoji).map(item => item.name || 'Guest');
           return <button key={emoji} className="comment-reaction" disabled={!state.connected || !can(state, 'reactMessages')} aria-pressed={comment.myReaction === emoji} aria-label={`${emoji}, ${names.length} reactions from ${names.join(', ')}${comment.myReaction === emoji ? ', your reaction' : ''}`} title={names.join(', ')} onClick={() => react(comment, emoji)}><span aria-hidden="true">{emoji}</span><span>{names.length}</span></button>;
         })}<span key={comment.myReaction || 'none'} className="comment-reaction-feedback pop" aria-hidden="true">{comment.myReaction}</span></div>
-      </article>)}
+      </article>; })}
     </div>
     {!atLatest && <Button className="chat-jump-latest" onClick={scrollLatest}>↓ Latest messages</Button>}
     <form className="chat-form" autoComplete="off" aria-busy={Boolean(pending)} onSubmit={submit}>
@@ -125,10 +128,10 @@ export function Chat({ overlayTarget, layoutKey }) {
       <div className="emoji-picker-grid" aria-label="Emoji choices">{EMOJI_CHOICES.filter(item => `${item.emoji} ${item.label}`.includes(search.trim().toLowerCase())).map(item => <button className="emoji-choice" type="button" key={item.emoji} aria-label={item.label} title={item.label} onClick={() => chooseEmoji(item.emoji)}>{item.emoji}</button>)}</div>
       {!EMOJI_CHOICES.some(item => `${item.emoji} ${item.label}`.includes(search.trim().toLowerCase())) && <p className="emoji-picker-empty">No matching emojis.</p>}
     </Popover>}
-    {selected && <Popover target={overlayTarget} trigger={menu.trigger} point={menu.point} className="message-menu" label="Message actions" menu onClose={() => { setMenu(null); setExpanded(false); }}>
-      <div className="message-menu-reactions" role="group" aria-label="Quick reactions">{QUICK.map(emoji => <button className={`message-menu-reaction${selected.myReaction === emoji ? ' selected' : ''}`} role="menuitem" key={emoji} disabled={!state.connected || !can(state, 'reactMessages')} aria-label={`${selected.myReaction === emoji ? 'Remove your' : 'React with'} ${EMOJI_CHOICES.find(item => item.emoji === emoji)?.label || emoji}`} onClick={() => { react(selected, emoji); if (!expanded) { setMenu(null); menu.trigger.focus(); } }}>{emoji}</button>)}<button role="menuitem" className="message-menu-more" aria-label="More reactions" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}>⌄</button></div>
-      {expanded && <div className="message-menu-expanded" role="group" aria-label="More reactions">{EMOJI_CHOICES.filter(item => !QUICK.includes(item.emoji)).map(item => <button className={`message-menu-reaction message-menu-extra${selected.myReaction === item.emoji ? ' selected' : ''}`} role="menuitem" key={item.emoji} disabled={!state.connected || !can(state, 'reactMessages')} aria-label={`React with ${item.label}`} onClick={() => react(selected, item.emoji)}>{item.emoji}</button>)}</div>}
-      <button className="message-menu-action" role="menuitem" disabled={!can(state, 'sendChat') || !can(state, 'replyChat')} onClick={() => { setReply(selected); setStatus(''); setMenu(null); input.current.focus(); }}>↩ Reply</button>
+    {selected && <Popover target={overlayTarget} trigger={menu.trigger} point={menu.point} className={`message-menu message-bubble-menu${expanded ? ' is-expanded' : ''}`} label="Message actions" menu onClose={() => { setMenu(null); setExpanded(false); }}>
+      {canReact && <div className="message-menu-reactions" role="group" aria-label="Quick reactions">{QUICK.map(emoji => <button className={`message-menu-reaction${selected.myReaction === emoji ? ' selected' : ''}`} role="menuitem" key={emoji} disabled={!state.connected || !can(state, 'reactMessages')} aria-label={`${selected.myReaction === emoji ? 'Remove your' : 'React with'} ${EMOJI_CHOICES.find(item => item.emoji === emoji)?.label || emoji}`} onClick={() => { react(selected, emoji); if (!expanded) { setMenu(null); menu.trigger.focus(); } }}>{emoji}</button>)}<button role="menuitem" className="message-menu-more" aria-label="More reactions" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg></button></div>}
+      {canReact && expanded && <div className="message-menu-expanded" role="group" aria-label="More reactions">{EMOJI_CHOICES.filter(item => !QUICK.includes(item.emoji)).map(item => <button className={`message-menu-reaction message-menu-extra${selected.myReaction === item.emoji ? ' selected' : ''}`} role="menuitem" key={item.emoji} disabled={!state.connected || !can(state, 'reactMessages')} aria-label={`React with ${item.label}`} onClick={() => react(selected, item.emoji)}>{item.emoji}</button>)}</div>}
+      {canReply && <button className="message-menu-action" role="menuitem" disabled={!can(state, 'sendChat') || !can(state, 'replyChat')} onClick={() => { setReply(selected); setStatus(''); setMenu(null); input.current.focus(); }}>↩ Reply</button>}
     </Popover>}
   </div>;
 }

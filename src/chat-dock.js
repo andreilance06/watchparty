@@ -59,6 +59,7 @@ export function useChatDock(theater) {
     width, min: Math.round(min), max: Math.floor(max), resizing, sideBySide,
     toggleProps: {
       onClick(event) {
+        if (event.currentTarget.getAttribute('role') === 'separator') { suppressClick.current = false; return; }
         if (suppressClick.current && event.detail !== 0) { suppressClick.current = false; return; }
         suppressClick.current = false;
         document.dispatchEvent(new Event('watchparty-fullscreen-change'));

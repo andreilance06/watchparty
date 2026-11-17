@@ -85,7 +85,7 @@ Global reactions use `{ "type": "reaction", "emoji": "..." }`; message reactions
 
 ## Movie suggestions and posters
 
-`GET /api/movies/search?q=Arrival` searches Wikipedia through its keyless MediaWiki Action API. Queries are normalized, limited to 80 characters, and cached in memory for ten minutes. The API returns up to eight article matches with a title, short description, article URL, and optional Wikimedia thumbnail URL. Requests use the existing admission rate limit.
+`GET /api/movies/search?q=Arrival` searches the TMDB movie API using a server-only TMDB_READ_ACCESS_TOKEN (or TMDB_API_KEY). Queries are normalized, limited to 80 characters, and cached in memory for ten minutes. The API returns up to eight movie matches with a TMDB ID, title and release year, overview, TMDB page URL, and optional poster URL. Adult results are excluded. Requests use the existing admission rate limit.
 
 The host or a viewer with `startPoll` starts an empty movie poll with `{ "type": "start-video-poll" }`. Each `party-state` includes `poll: { id, status, result }`, initially `{ id: null, status: "idle", result: null }`. Starting a poll creates a new ID and sets its status to `open`. While open, admitted participants with `suggestTitles` and `vote` respectively may suggest titles and vote. Use that poll's ID in every suggestion, vote, removal, and finish command; inactive polls and stale IDs are rejected.
 
@@ -95,18 +95,18 @@ To add a selected result to an open poll, send the result's metadata:
 {
   "type": "suggest-video",
   "pollId": "current-poll-id",
-  "title": "Arrival (film)",
+  "title": "Arrival (2016)",
   "movie": {
-    "pageId": 23270459,
-    "title": "Arrival (film)",
-    "pageUrl": "https://en.wikipedia.org/wiki/Arrival_(film)",
-    "posterUrl": "https://upload.wikimedia.org/wikipedia/en/example.jpg",
+    "tmdbId": 329865,
+    "title": "Arrival (2016)",
+    "pageUrl": "https://www.themoviedb.org/movie/329865",
+    "posterUrl": "https://image.tmdb.org/t/p/w342/example.jpg",
     "description": "A science fiction film."
   }
 }
 ```
 
-The server verifies that the selection came from a recent search, accepts only HTTPS Wikipedia article links and Wikimedia upload/thumbnail image URLs, and shares the selected details in party-state snapshots. `posterUrl` may be `null`; title-only suggestions remain supported. Poster availability and reuse terms vary by image; follow the linked article for source details.
+The server verifies that the selection came from a recent search, accepts only matching HTTPS TMDB movie links and TMDB poster URLs, and shares the selected details in party-state snapshots. `posterUrl` may be `null`; title-only suggestions remain supported. TMDB attribution is shown in the header About & credits dialog.
 
 The server records the original suggester using its verified browser identity, with a membership/connection identity fallback when no browser cookie is available. Each suggestion includes `ownerId`, `ownerName`, `votes`, and a personalized `canRemove` flag. Identity keys stay private. The first submission owns a title; submitting a duplicate preserves that ownership and casts the submitter's vote for the existing suggestion when voting is permitted. New suggestions also cast their owner's vote automatically when `vote` is enabled. Cast or replace a vote with `{ "type": "vote-video", "pollId": "current-poll-id", "suggestionId": 1 }`.
 

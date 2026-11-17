@@ -64,7 +64,7 @@ const MIME_TYPES = {
   ".js": "text/javascript; charset=utf-8", ".wasm": "application/wasm",
   ".woff2": "font/woff2", ".ass": "text/plain; charset=utf-8", ".ssa": "text/plain; charset=utf-8",
   ".m3u8": "application/vnd.apple.mpegurl", ".vtt": "text/vtt; charset=utf-8",
-  ".ts": "video/mp2t", ".ttf": "font/ttf", ".otf": "font/otf", ".png": "image/png"
+  ".ts": "video/mp2t", ".ttf": "font/ttf", ".otf": "font/otf", ".png": "image/png", ".svg": "image/svg+xml"
 };
 
 module.exports = { createConfig, MIME_TYPES };

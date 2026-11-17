@@ -24,7 +24,7 @@ export function roomReducer(state, action) {
   if (m.requestId) next.responses = [...state.responses.filter(item => item.requestId !== m.requestId), m].slice(-64);
   const people = value => (value || []).map(person => ({ ...person, sameBrowser: person.sameBrowser ?? state.people.find(old => old.clientId === person.clientId)?.sameBrowser }));
   switch (m.type) {
-    case 'room-updated': next.room = m.room; break;
+    case 'room-updated': next.room = { ...state.room, ...m.room }; break;
     case 'role': next = { ...next, clientId: m.clientId, clientName: m.name || state.clientName, role: m.role, permissions: m.permissions || state.permissions, viewerCount: m.viewerCount }; break;
     case 'presence': next.people = people(m.participants); next.viewerCount = m.count; break;
     case 'party-state':

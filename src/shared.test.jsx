@@ -2,7 +2,19 @@ import React, { useRef, useState } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { expect, it, vi } from 'vitest';
-import { Button, Dialog, Field, Status } from './shared.jsx';
+import { Button, Dialog, Field, Header, Status, ThemeProvider } from './shared.jsx';
+
+it('shows the bundled TMDB logo and attribution in header credits', async () => {
+  const user = userEvent.setup();
+  render(<ThemeProvider><Header /></ThemeProvider>);
+  const trigger = screen.getByRole('button', { name: 'About & credits' });
+  await user.click(trigger);
+  expect(screen.getByRole('dialog', { name: 'About WatchParty' })).toBeVisible();
+  expect(screen.getByRole('img', { name: 'TMDB' }).getAttribute('src')).toMatch(/^data:image\/svg\+xml,/);
+  expect(screen.getByRole('region', { name: 'Movie data credits' })).toHaveTextContent('This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.');
+  await user.click(screen.getByRole('button', { name: 'Close' }));
+  expect(trigger).toHaveFocus();
+});
 
 it('prevents repeat submissions while a shared button is pending and resumes afterward', async () => {
   const submit = vi.fn(event => event.preventDefault());

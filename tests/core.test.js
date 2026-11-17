@@ -129,7 +129,7 @@ test("suggestions are normalized, deduplicated, bounded, and validated", () => {
   }
 });
 
-test("movie suggestion metadata is shared only for trusted Wikimedia URLs", () => {
+test("movie suggestion metadata is shared only for trusted TMDB URLs", () => {
   const state = createSession();
   state.poll = { id: "poll", status: "open", result: null };
   const ws = { clientId: "host" };
@@ -137,16 +137,16 @@ test("movie suggestion metadata is shared only for trusted Wikimedia URLs", () =
   const sent = [];
   const handler = createMessageHandler({
     state, transport: { send: (_, message) => sent.push(message), broadcast() {} }, media: {},
-    movieSearch: { getSelection: (pageId) => pageId === 1 ? {
-      pageId: 1, title: "Arrival", pageUrl: "https://en.wikipedia.org/wiki/Arrival_(film)",
-      posterUrl: "https://upload.wikimedia.org/wikipedia/en/Arrival_poster.jpg", description: "A science fiction film."
+    movieSearch: { getSelection: (tmdbId) => tmdbId === 1 ? {
+      tmdbId: 1, title: "Arrival", pageUrl: "https://www.themoviedb.org/movie/1",
+      posterUrl: "https://image.tmdb.org/t/p/w342/Arrival_poster.jpg", description: "A science fiction film."
     } : null }
   });
   const movie = {
-    pageId: 1,
+    tmdbId: 1,
     title: "Arrival",
-    pageUrl: "https://en.wikipedia.org/wiki/Arrival_(film)",
-    posterUrl: "https://upload.wikimedia.org/wikipedia/en/Arrival_poster.jpg",
+    pageUrl: "https://www.themoviedb.org/movie/1",
+    posterUrl: "https://image.tmdb.org/t/p/w342/Arrival_poster.jpg",
     description: "A science fiction film."
   };
 
@@ -156,7 +156,7 @@ test("movie suggestion metadata is shared only for trusted Wikimedia URLs", () =
       pageUrl: movie.pageUrl, posterUrl: movie.posterUrl, description: movie.description
     }
   });
-  handler.handleMessage(ws, { type: "suggest-video", pollId: "poll", title: "Unsafe", movie: { ...movie, title: "Unsafe", pageId: 2, posterUrl: "https://attacker.example/image.jpg" } });
+  handler.handleMessage(ws, { type: "suggest-video", pollId: "poll", title: "Unsafe", movie: { ...movie, title: "Unsafe", tmdbId: 2, posterUrl: "https://attacker.example/image.jpg" } });
   assert.equal(sent.at(-1).type, "error");
   assert.equal(state.videoSuggestions.length, 1);
 });

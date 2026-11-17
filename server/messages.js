@@ -25,8 +25,8 @@ function normalizeMovieSelection(movie) {
       typeof movie.title !== "string" || typeof movie.pageUrl !== "string") return null;
   let pageUrl;
   try { pageUrl = new URL(movie.pageUrl); } catch { return null; }
-  if (pageUrl.protocol !== "https:" || pageUrl.hostname !== "en.wikipedia.org" ||
-      !pageUrl.pathname.startsWith("/wiki/") || pageUrl.username || pageUrl.password) return null;
+  if (pageUrl.protocol !== "https:" || pageUrl.hostname !== "www.themoviedb.org" ||
+      !Number.isSafeInteger(movie.tmdbId) || movie.tmdbId <= 0 || pageUrl.pathname !== `/movie/${movie.tmdbId}` || pageUrl.username || pageUrl.password) return null;
 
   let posterUrl = null;
   if (movie.posterUrl != null) {
@@ -34,8 +34,8 @@ function normalizeMovieSelection(movie) {
     try {
       const imageUrl = new URL(movie.posterUrl);
       if (imageUrl.protocol !== "https:" ||
-          !["upload.wikimedia.org", "thumb.wikimedia.org"].includes(imageUrl.hostname) ||
-          !imageUrl.pathname.startsWith("/wikipedia/") ||
+          imageUrl.hostname !== "image.tmdb.org" ||
+          !/^\/t\/p\/w342\/[a-zA-Z0-9_-]+\.(?:jpg|png|webp)$/.test(imageUrl.pathname) ||
           imageUrl.username || imageUrl.password) return null;
       posterUrl = imageUrl.href;
     } catch { return null; }
@@ -335,8 +335,8 @@ function createMessageHandler({ state, transport, media, movieSearch }) {
           break;
         }
         const movie = message.movie === undefined ? null : normalizeMovieSelection(message.movie);
-        const knownMovie = movie && Number.isSafeInteger(message.movie.pageId)
-          ? movieSearch?.getSelection(message.movie.pageId)
+        const knownMovie = movie && Number.isSafeInteger(message.movie.tmdbId)
+          ? movieSearch?.getSelection(message.movie.tmdbId)
           : null;
         if (message.movie !== undefined && (!movie || !knownMovie || message.movie.title !== title ||
             knownMovie.title !== title || knownMovie.pageUrl !== movie.pageUrl ||

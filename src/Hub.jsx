@@ -55,6 +55,10 @@ function HubIdentity({ name, onSave, disabled }) {
 }
 
 export function Hub() {
+  const [invitationKey] = useState(() => new URLSearchParams(location.hash.slice(1)).get('invite'));
+  useEffect(() => {
+    if (new URLSearchParams(location.hash.slice(1)).has('invite')) history.replaceState(null, '', location.pathname + location.search);
+  }, []);
   const [identity] = useState(createClientState);
   const [name, setName] = useState(identity.clientName === identity.guestName ? '' : identity.clientName);
   const [rooms, setRooms] = useState([]);
@@ -86,12 +90,12 @@ export function Hub() {
     try { localStorage.setItem('watchparty-display-name', displayName); } catch { /* Optional preference. */ }
     if (!signal.aborted) navigate(result.room.watchPath);
   }, [identity]);
-  const choose = useCallback(async room => {
+  const choose = useCallback(async (room, inviteKey) => {
     if (busyRef.current) return;
     busyRef.current = true; setBusy(true); setJoiningRoom(room.id); setNotice(''); setError('');
     entryController.current = new AbortController();
     try {
-      if (room.passwordRequired) {
+      if (room.passwordRequired && !inviteKey) {
         try {
           await request(`/rooms/${encodeURIComponent(room.id)}/api/session`, { signal: entryController.current.signal });
           navigate(room.watchPath);
@@ -99,7 +103,7 @@ export function Hub() {
           if (error.status !== 401) throw error;
           setDialog({ mode: 'join', room });
         }
-      } else await enter('/api/rooms/join', { roomId: room.id });
+      } else await enter('/api/rooms/join', { roomId: room.id, ...(inviteKey ? { inviteKey } : {}) });
     } catch (error) { if (error.name !== 'AbortError') setNotice(error.message); }
     finally { busyRef.current = false; setBusy(false); setJoiningRoom(null); }
   }, [enter]);
@@ -121,7 +125,7 @@ export function Hub() {
           const params = new URLSearchParams(location.search); params.delete('room');
           history.replaceState(null, '', params.size ? `/?${params}` : '/');
           const room = result.rooms.find(item => item.id === invitation);
-          if (room) void choose(room); else setNotice('That room is no longer available. Choose another room or create your own.');
+          if (room) void choose(room, invitationKey); else setNotice('That room is no longer available. Choose another room or create your own.');
         }
       } catch { if (!disposed) setFailure(true); }
       finally { clearTimeout(timeout); fetching = false; if (!disposed) setLoading(false); }
@@ -132,7 +136,7 @@ export function Hub() {
     document.addEventListener('visibilitychange', visible); window.addEventListener('pageshow', restored);
     void refresh();
     return () => { disposed = true; controller?.abort(); clearInterval(timer); document.removeEventListener('visibilitychange', visible); window.removeEventListener('pageshow', restored); };
-  }, [choose, refreshToken]);
+  }, [choose, refreshToken, invitationKey]);
   async function submit(fields) {
     if (busyRef.current) return;
     if (dialog.mode === 'create' && !fields.name) { setError('Enter a room name.'); return; }
@@ -157,9 +161,9 @@ export function Hub() {
       <section aria-labelledby="roomsTitle"><div className="hub-section-heading"><h2 id="roomsTitle">Rooms <span className="hub-count" aria-hidden="true">{loading ? '…' : rooms.length}</span><span className="sr-only">{loading ? ', loading' : `, ${rooms.length} available`}</span></h2>
         <div className="hub-search"><Icon name="search" /><Input type="search" aria-label="Search rooms" placeholder="Search rooms or videos" value={query} onChange={event => setQuery(event.target.value)} /></div></div>
         <div className="hub-browser-controls">
-          <label className="hub-sort">Sort by<select className="ui-input" value={preferences.sort} onChange={event => setPreferences(previous => ({ ...previous, sort: event.target.value }))}>{SORT_OPTIONS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+          <label className="hub-sort">Sort by<span className="hub-sort-control"><select className="ui-input" value={preferences.sort} onChange={event => setPreferences(previous => ({ ...previous, sort: event.target.value }))}>{SORT_OPTIONS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select><Icon name="chevron" /></span></label>
           <Button aria-expanded={filtersOpen} aria-controls="hubFilters" onClick={() => setFiltersOpen(value => !value)}><Icon name="filter" />Filters{activeFilters > 0 && <span className="hub-filter-count">{activeFilters}<span className="sr-only"> active</span></span>}</Button>
-          <div className="hub-view-toggle" role="group" aria-label="Room view">{[['cards', 'Cards'], ['list', 'List']].map(([view, label]) => <Button key={view} aria-pressed={preferences.view === view} onClick={() => setPreferences(previous => ({ ...previous, view }))}><Icon name={view} /><span>{label}</span></Button>)}</div>
+          <div className="hub-view-toggle" role="group" aria-label="Room view">{[['cards', 'Cards'], ['list', 'List']].map(([view, label]) => <Button key={view} aria-label={label} title={label} aria-pressed={preferences.view === view} onClick={() => setPreferences(previous => ({ ...previous, view }))}><Icon name={view} /><span>{label}</span></Button>)}</div>
         </div>
         <div id="hubFilters" className="hub-filters" hidden={!filtersOpen} role="group" aria-label="Room filters">
           <label>Access<select className="ui-input" value={access} onChange={event => setAccess(event.target.value)}><option value="all">All rooms</option><option value="open">Open</option><option value="protected">Password protected</option></select></label>

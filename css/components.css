@@ -1,4 +1,8 @@
 /* Imported in the components layer so shared controls supersede legacy visual rules. */
+.movie-data-credits { padding-top: 16px; border-top: 1px solid var(--border-subtle); }
+.movie-data-credits h3 { margin: 0 0 16px; font-size: 1rem; }
+.movie-data-credits img { display: block; width: 100px; height: auto; }
+.movie-data-credits p { margin: 16px 0 0; color: var(--text-secondary); font-size: .875rem; line-height: 1.5; }
 .ui-button {
   display: inline-flex;
   align-items: center;
@@ -118,7 +122,6 @@ html { scroll-padding-top: 96px; }
 /* Visible social actions share the same hit areas as other controls. */
 .chat-message .meta { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
 .chat-message .name { min-width: 0; overflow-wrap: anywhere; }
-.message-actions-trigger { padding: 8px; }
 .chat-message p { font-size: 1rem; line-height: 1.5; }
 .poll-launcher { max-width: 100%; }
 .poll-launcher .ui-status { max-width: 16rem; margin: 8px 0 0; }

@@ -307,6 +307,11 @@ body > .reaction-feed .reaction-item {
   background: color-mix(in srgb, var(--accent) 23%, var(--surface));
 }
 .chat-message.self::before { left: auto; right: -.35rem; transform: scaleX(-1); }
+.chat-message.grouped { margin-top: -.4rem; border-top-left-radius: .35rem; }
+.chat-message.self.grouped { border-top-left-radius: 1rem; border-top-right-radius: .35rem; }
+.chat-message.continues { border-bottom-left-radius: .35rem; }
+.chat-message.self.continues { border-bottom-right-radius: .35rem; }
+.chat-message.continues::before { display: none; }
 .chat-message .meta { margin-bottom: .2rem; }
 .chat-message .name { color: var(--accent-soft-text); font-size: .7rem; font-weight: 700; }
 .chat-message time { position: absolute; right: .65rem; bottom: .3rem; color: var(--muted); font-size: .6rem; }
@@ -580,3 +585,48 @@ body > .reaction-feed .reaction-item {
 .emoji-picker-tabs button { flex: 1; min-width: 0; padding: .5rem .35rem; border: 0; border-radius: .4rem; color: var(--muted); background: transparent; font-size: .75rem; cursor: pointer; }
 .emoji-picker-tabs button[aria-selected="true"] { color: white; background: var(--accent); }
 .emoji-picker-hint { margin: 0 0 .5rem; color: var(--muted); font-size: .72rem; line-height: 1.4; }
+
+.message-menu.message-bubble-menu {
+  width: max-content;
+  padding: 6px;
+  border-radius: 18px;
+  box-shadow: var(--shadow-raised);
+}
+.message-menu.message-bubble-menu.is-expanded { border-radius: 18px; }
+.message-menu.message-bubble-menu .message-menu-reactions {
+  display: flex;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+}
+.message-bubble-menu .message-menu-reaction,
+.message-bubble-menu .message-menu-more {
+  flex: 0 1 30px;
+  width: 30px;
+  height: 32px;
+  min-width: 24px;
+  min-height: 32px;
+  padding: 2px;
+  border-radius: 50%;
+}
+.message-bubble-menu .message-menu-expanded { border-bottom: 0; margin-top: 6px; }
+.message-bubble-menu .message-menu-expanded .message-menu-reaction { width: 100%; }
+.message-bubble-menu .message-menu-more {
+  align-self: center;
+  flex-basis: 28px;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  margin-inline: 2px;
+  color: var(--text-secondary);
+  background: var(--surface-subtle);
+}
+.message-bubble-menu .message-menu-more:hover,
+.message-bubble-menu .message-menu-more[aria-expanded="true"] {
+  color: var(--text-brand);
+  background: var(--surface-selected);
+}
+.message-menu-more svg { transition: transform var(--motion-feedback); }
+@media (prefers-reduced-motion: reduce) {
+  .message-menu-more svg { transition: none; }
+}

@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import tmdbLogo from '../assets/images/logo/tmdb.svg';
 
 const ThemeContext = createContext(null);
 export function ThemeProvider({ children }) {
@@ -32,16 +33,35 @@ export function Field({ id, label, optional = false, hint, error, className = ''
     {error && <p id={`${inputId}-error`} className="ui-field-error" role="alert">{error}</p>}
   </div>;
 }
+function AboutButton() {
+  const [open, setOpen] = useState(false);
+  const trigger = useRef(null);
+  return <>
+    <Button ref={trigger} icon variant="quiet" aria-label="About & credits" title="About & credits" onClick={() => setOpen(true)}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7h.01" /></svg>
+    </Button>
+    {open && <Dialog title="About WatchParty" returnFocusRef={trigger} onClose={() => setOpen(false)}>
+      <DialogHeader title="About WatchParty" onClose={() => setOpen(false)} />
+      <p className="ui-dialog-description">Watch videos together with synchronized playback, chat, and movie polls.</p>
+      <section className="movie-data-credits" aria-label="Movie data credits">
+        <h3>Movie data</h3>
+        <a href="https://www.themoviedb.org" target="_blank" rel="noopener noreferrer"><img src={tmdbLogo} alt="TMDB" width="100" height="13" /></a>
+        <p>This application uses TMDB and the TMDB APIs but is not endorsed, certified, or otherwise approved by TMDB.</p>
+      </section>
+    </Dialog>}
+  </>;
+}
+
 export function Header({ children, context, brandHeading = true, onBrandClick, brandRef }) {
   const { theme, toggle } = useTheme();
   const label = `Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`;
-  return <header className="site-header flex items-center justify-between gap-4">
-    <a ref={brandRef} className="brand" href="/" aria-label="WatchParty" onClick={onBrandClick}><img className="brand-mark" src="/assets/images/logo/logo_watchparty.png" alt="" /><div>{brandHeading ? <h1>WatchParty</h1> : <span className="brand-name">WatchParty</span>}<p>Watch together. Chat together.</p></div></a>
+  return <header className="site-header">
+    <a ref={brandRef} className="brand" href="/" aria-label="WatchParty" onClick={onBrandClick}><span className="brand-mark" aria-hidden="true" /><div>{brandHeading ? <h1>WatchParty</h1> : <span className="brand-name">WatchParty</span>}<p>Watch together. Chat together.</p></div></a>
     {context}
-    <div className="header-actions flex items-center gap-3"><Button icon className="theme-toggle" aria-label={label} title={label} aria-pressed={theme === 'light'} onClick={toggle}>
+    <div className="header-actions"><Button icon className="theme-toggle" aria-label={label} title={label} aria-pressed={theme === 'light'} onClick={toggle}>
       <svg className="theme-icon icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2m0 16v2M4.93 4.93l1.42 1.42m11.3 11.3 1.42 1.42M2 12h2m16 0h2M4.93 19.07l1.42-1.42m11.3-11.3 1.42-1.42" /></svg>
       <svg className="theme-icon icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.4 15.2A8.5 8.5 0 0 1 8.8 3.6 8.5 8.5 0 1 0 20.4 15.2Z" /></svg>
-    </Button>{children}</div>
+    </Button><AboutButton />{children}</div>
   </header>;
 }
 export function Status({ children, className = '', tone = 'neutral', ...props }) {

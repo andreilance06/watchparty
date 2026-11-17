@@ -127,7 +127,7 @@ export function Poll({ expanded = true, onToggle, disclosure = true }) {
           </div>
           <div className="poll-choice-meter" aria-hidden="true"><span style={{ width: `${percentage}%` }} /></div>
           <div className="poll-choice-footer"><span className="poll-choice-count">{votes} {votes === 1 ? 'vote' : 'votes'} <span>· {percentage}%</span></span><Button variant={selected ? 'secondary' : 'primary'} className="poll-choice-vote" aria-pressed={selected} aria-label={`${selected ? 'Your vote for' : 'Vote for'} ${option.title}`} disabled={selected || !state.connected || !can(state, 'vote')} onClick={() => sendPoll({ type: 'vote-video', suggestionId: option.id })}>{selected && <Icon name="check" />}{selected ? 'Your vote' : 'Vote'}</Button></div>
-          {(option.movie?.description || option.movie?.pageUrl) && <details className="poll-choice-info"><summary>Movie details</summary>{option.movie.description && <p>{option.movie.description}</p>}{option.movie.pageUrl && <a href={option.movie.pageUrl} target="_blank" rel="noopener noreferrer">View on Wikipedia</a>}</details>}
+          {(option.movie?.description || option.movie?.pageUrl) && <details className="poll-choice-info"><summary>Movie details</summary>{option.movie.description && <p>{option.movie.description}</p>}{option.movie.pageUrl && <a href={option.movie.pageUrl} target="_blank" rel="noopener noreferrer">View on TMDB</a>}</details>}
         </article>;
       })}</div>
       {options.length > 0 && can(state, 'vote') && <p className="poll-vote-help">You can change your vote until the poll closes.</p>}
@@ -138,8 +138,8 @@ export function Poll({ expanded = true, onToggle, disclosure = true }) {
         </div>}
         {!can(state, 'suggestTitles') && options.length === 0 && <p className="poll-vote-help">Waiting for someone to suggest a movie. Suggestions are disabled for you.</p>}
         {status && <Status className="poll-search-status">{status}</Status>}
-        {showForm && <div className="poll-search-results" aria-label="Movie search results">{movies.map(movie => <article className="poll-search-result" key={movie.pageId}>
-          <Poster className="poll-search-poster" url={movie.posterUrl} title={movie.title} /><div><h3>{movie.title}</h3><p>{movie.description}</p><a href={movie.pageUrl} target="_blank" rel="noopener noreferrer">Wikipedia</a><Button variant="secondary" disabled={!canSuggest} onClick={() => suggest(movie.title, movie)}>{can(state, 'vote') ? 'Suggest & vote' : 'Suggest'}</Button></div>
+        {showForm && <div className="poll-search-results" aria-label="Movie search results">{movies.map(movie => <article className="poll-search-result" key={movie.tmdbId}>
+          <Poster className="poll-search-poster" url={movie.posterUrl} title={movie.title} /><div><h3>{movie.title}</h3><p>{movie.description}</p><a href={movie.pageUrl} target="_blank" rel="noopener noreferrer">TMDB</a><Button variant="secondary" disabled={!canSuggest} onClick={() => suggest(movie.title, movie)}>{can(state, 'vote') ? 'Suggest & vote' : 'Suggest'}</Button></div>
         </article>)}{searched && <Button variant="quiet" className="poll-title-only" disabled={!canSuggest} onClick={() => suggest(searched)}>Suggest “{searched}” without a poster</Button>}</div>}
       </div>
       {can(state, 'finishPoll') && <div className="poll-finish"><Button ref={finishButton} variant="quiet" disabled={!state.connected} onClick={() => { setStatus(''); setConfirmFinish(true); }}>Finish poll</Button></div>}

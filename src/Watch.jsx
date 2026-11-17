@@ -45,8 +45,10 @@ export function WatchContent() {
     <main id="watchMain" tabIndex={-1} className="watch-layout">
       <div ref={theater} className={`watch-theater${chatOpen ? ' is-chat-open' : ''}${dock.resizing ? ' is-resizing' : ''}`} style={{ '--chat-width': `${dock.width}px` }}>
       <Player portals={portals} attentionView={attentionView} chatOpen={chatOpen} />
+      {chatOpen && dock.sideBySide && <div className="watch-chat-resizer" role="separator" tabIndex={0} aria-label="Resize chat panel" title="Drag to resize chat" aria-orientation="vertical" aria-controls="watchChatroom" aria-valuemin={dock.min} aria-valuemax={dock.max} aria-valuenow={dock.width} aria-valuetext={`${dock.width} pixels`} aria-describedby="chatResizeHint" {...dock.toggleProps} />}
+      <span id="chatResizeHint" className="sr-only">Drag the panel edge or use Left/Right arrow keys to resize. Home/End set the minimum/maximum width.</span>
       <button ref={chatToggle} type="button" className="watch-chat-toggle" aria-controls="watchChatroom" aria-expanded={chatOpen} aria-label={`${chatOpen ? 'Hide' : 'Show'} chat${unread ? `, ${unreadLabel}` : ''}`} aria-describedby={dock.sideBySide ? 'chatDockHint' : undefined} title={`${chatOpen ? 'Hide' : 'Show'} chat${dock.sideBySide ? '. Drag to resize' : ''}`} {...dock.toggleProps}>
-        <span className="watch-chat-toggle-clip"><span className="watch-chat-toggle-surface"><Icon name="chevron" /></span></span>
+        <span className="watch-chat-toggle-clip"><span className="watch-chat-toggle-surface"><Icon name="chevron" /><span className="watch-chat-toggle-label">{chatOpen ? 'Hide chat' : 'Show chat'}</span></span></span>
         {unread > 0 && <span className="watch-tab-count" aria-hidden="true">{compactCount(unread)}</span>}
       </button>
       <span id="chatDockHint" className="sr-only">Chat width {dock.width} pixels. Click to {chatOpen ? 'hide' : 'show'} chat. Drag or use Left/Right arrow keys to resize; Home/End set the minimum/maximum width.</span>

@@ -19,6 +19,36 @@ async function setup(t, config = {}) {
   return { app, base, api, connect };
 }
 
+test('private invitation keys admit guests without exposing the room password', async t => {
+  const { app, base, api } = await setup(t);
+  const created = await api('/api/rooms', { name: 'Private', password: 'original password' });
+  const id = created.body.room.id;
+  const invite = new URL(created.body.room.inviteAccessPath, base);
+  const inviteKey = new URLSearchParams(invite.hash.slice(1)).get('invite');
+  assert.match(inviteKey, /^v1\.[\w-]{95}$/);
+  const rawKey = app.rooms.get(id).inviteKey;
+  assert.ok(!inviteKey.includes(rawKey));
+  assert.equal((await api('/api/rooms/join', { roomId: id, inviteKey: rawKey })).status, 401);
+  const tampered = inviteKey.slice(0, 8) + (inviteKey[8] === 'A' ? 'B' : 'A') + inviteKey.slice(9);
+  assert.equal((await api('/api/rooms/join', { roomId: id, inviteKey: tampered })).status, 401);
+  assert.doesNotMatch(JSON.stringify(created.body), /original password/);
+  const directory = JSON.stringify(await (await fetch(base + '/api/rooms')).json());
+  assert.ok(!directory.includes(inviteKey));
+  assert.ok(!directory.includes(rawKey));
+  assert.ok(!directory.includes('inviteAccessPath'));
+  assert.equal((await api('/api/rooms/join', { roomId: id })).status, 401);
+  assert.equal((await api('/api/rooms/join', { roomId: id, inviteKey: 'bad' })).status, 401);
+  const other = await api('/api/rooms', { name: 'Other', password: 'another password' });
+  assert.equal((await api('/api/rooms/join', { roomId: other.body.room.id, inviteKey })).status, 401);
+  const joined = await api('/api/rooms/join', { roomId: id, inviteKey, displayName: 'Invited' });
+  assert.equal(joined.status, 200);
+  assert.equal(joined.body.room.inviteAccessPath, created.body.room.inviteAccessPath);
+  const browser = (await api('/api/viewer-identity')).cookie;
+  const identity = `browser:${browser.split('=')[1].split('.')[0]}`;
+  app.rooms.get(id).state.blockedParticipants.set(identity, {});
+  assert.equal((await api('/api/rooms/join', { roomId: id, inviteKey }, browser)).status, 403);
+});
+
 test("only the host can rename a room, with validation and synchronized metadata", async t => {
   const { app, api, connect, base } = await setup(t);
   const created = await api('/api/rooms', { name: 'Original', displayName: 'Host' });

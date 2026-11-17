@@ -44,7 +44,7 @@ it('exposes identity and room actions without opening an options menu', () => {
   expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
 });
 
-it.each(['WatchParty', 'Browse rooms'])('confirms %s navigation for the provider and keeps cancellation harmless', async target => {
+it.each(['WatchParty', 'Exit room'])('confirms %s navigation for the provider and keeps cancellation harmless', async target => {
   const user = userEvent.setup(), fetch = vi.spyOn(globalThis, 'fetch');
   render(wrap({ ...stateFor(), sourceOwnerId: 'alex', role: 'viewer', media: { hasVideo: true } }, <RoomHeader />));
   const link = screen.getByRole('link', { name: target }); await user.click(link);
@@ -60,7 +60,7 @@ it.each(['WatchParty', 'Browse rooms'])('confirms %s navigation for the provider
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument(); expect(fetch).not.toHaveBeenCalled();
 });
 
-it.each(['WatchParty', 'Browse rooms'])('keeps a failed leave through %s retryable and disconnects only after confirmation succeeds', async target => {
+it.each(['WatchParty', 'Exit room'])('keeps a failed leave through %s retryable and disconnects only after confirmation succeeds', async target => {
   let resolveLeave;
   const fetch = vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('Connection lost. Try again.'))
     .mockImplementationOnce(() => new Promise(resolve => { resolveLeave = resolve; }));
@@ -113,7 +113,7 @@ it('protects a provider reported by presence while preparing video and removes p
   expect(attemptUnload().defaultPrevented).toBe(false);
 });
 
-it.each(['WatchParty', 'Browse rooms'])('confirms active viewer playback through %s and preserves idle/modified navigation', async target => {
+it.each(['WatchParty', 'Exit room'])('confirms active viewer playback through %s and preserves idle/modified navigation', async target => {
   const user = userEvent.setup(), state = { ...stateFor(), role: 'viewer', sourceOwnerId: 'sam', media: { hasVideo: true } };
   const view = render(wrap(state, <RoomHeader />));
   const link = screen.getByRole('link', { name: target });
@@ -216,6 +216,25 @@ it('treats slight pointer movement as a click and lets a leftward drag reopen cl
   pointer('pointerdown', 1000); pointer('pointermove', 650); pointer('pointerup', 650);
   fireEvent.click(toggle, { detail: 1 });
   expect(toggle).toHaveAttribute('aria-expanded', 'true'); expect(dockWidth()).toBe('350px');
+  expect(screen.getByRole('separator', { name: 'Resize chat panel' })).toBeVisible();
+});
+
+it('resizes along the panel edge without toggling chat and supports keyboard sizing', async () => {
+  render(wrap(stateFor(), <WatchContent />));
+  const edge = screen.getByRole('separator', { name: 'Resize chat panel' });
+  const pointer = (type, x) => {
+    const event = new MouseEvent(type, { bubbles: true, clientX: x, clientY: 100, button: 0 });
+    Object.defineProperty(event, 'pointerId', { value: 8 }); fireEvent(edge, event);
+  };
+  pointer('pointerdown', 700); pointer('pointermove', 600); pointer('pointerup', 600);
+  fireEvent.click(edge, { detail: 1 });
+  expect(dockWidth()).toBe('480px');
+  expect(edge).toHaveAttribute('aria-valuenow', '480');
+  expect(dockButton()).toHaveAttribute('aria-expanded', 'true');
+  edge.focus(); await userEvent.keyboard('{ArrowRight}');
+  expect(dockWidth()).toBe('464px');
+  await userEvent.click(dockButton());
+  expect(dockButton()).toHaveAttribute('aria-expanded', 'false');
   expect(screen.queryByRole('separator')).not.toBeInTheDocument();
 });
 
@@ -399,4 +418,21 @@ it('provides a selectable invite link when clipboard access fails and restores f
   const link = screen.getByLabelText('Invitation link');
   expect(link).toHaveFocus(); expect(link.selectionStart).toBe(0); expect(link.selectionEnd).toBe(link.value.length);
   await user.click(screen.getByRole('button', { name: 'Close' })); expect(trigger).toHaveFocus();
+});
+
+it('masks protected invitations while copying their included room access', async () => {
+  const user = userEvent.setup(), copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+  const inviteAccessPath = '/?room=friday#invite=private-access-key';
+  let state = { ...stateFor(), room: { name: 'Friday', passwordRequired: true, inviteAccessPath } };
+  state = roomReducer(state, { message: { type: 'room-updated', room: { name: 'Friday films' } } });
+  render(wrap(state, <RoomActions />));
+  await user.click(screen.getByRole('button', { name: 'Invite friends' }));
+  const field = screen.getByLabelText('Invitation link');
+  expect(field).toHaveAttribute('type', 'text');
+  expect(field.value).toBe(`${location.origin}/?room=friday#invite=••••••••`);
+  const clipboardData = { setData: vi.fn() };
+  fireEvent.copy(field, { clipboardData });
+  expect(clipboardData.setData).toHaveBeenCalledWith('text/plain', new URL(inviteAccessPath, location.origin).href);
+  await user.click(screen.getByRole('button', { name: 'Copy invitation link' }));
+  expect(copy).toHaveBeenCalledWith(new URL(inviteAccessPath, location.origin).href);
 });
