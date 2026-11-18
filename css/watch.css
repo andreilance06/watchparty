@@ -107,8 +107,12 @@
 .watch-poll-notice > span { flex: 1; }
 .watch-poll-notice strong { display: block; font-size: .875rem; font-weight: 600; }
 .watch-poll-notice span span { display: block; margin-top: 2px; color: var(--text-secondary); font-size: .75rem; }
-.watch-page .chat-messages { padding: 24px 20px; gap: 10px; }
-.watch-page .chat-message { padding: 8px 12px 28px; }
+.watch-page .chat-messages {
+  --chat-message-gap: 10px;
+  --chat-bubble-padding: 8px 12px;
+  --chat-time-padding: 28px;
+  padding: 24px 20px;
+}
 .watch-page .chat-message .name { font-size: .875rem; font-weight: 600; }
 .watch-page .chat-message p { line-height: 1.5; }
 .watch-page .chat-message time { bottom: 8px; right: 12px; font-size: .75rem; }

@@ -86,7 +86,9 @@ export function Chat({ overlayTarget, layoutKey }) {
     }}>
       {state.messages.map((comment, index) => {
         const sameSender = other => Boolean(other && !other.system && comment.clientId && other.clientId === comment.clientId && other.name === comment.name && other.isOwn === comment.isOwn);
-        const grouped = sameSender(state.messages[index - 1]), continues = sameSender(state.messages[index + 1]);
+        const next = state.messages[index + 1];
+        const grouped = sameSender(state.messages[index - 1]), continues = sameSender(next);
+        const showTime = comment.time && (!continues || comment.time !== next.time);
         return comment.system ? <div className="system-message" key={comment.id}>{comment.message}</div> : <article key={comment.id} data-comment-id={comment.commentId} className={`chat-message${comment.isOwn ? ' self' : ''}${grouped ? ' grouped' : ''}${continues ? ' continues' : ''}${menu?.id === comment.commentId ? ' actions-open' : ''}${highlight === comment.commentId ? ' reply-highlight' : ''}`} tabIndex={0} aria-haspopup="menu" aria-expanded={menu?.id === comment.commentId} aria-description="Tap on mobile, right-click, or press Enter for reply and reactions."
         onClick={event => {
           if (event.target.closest('button, a') || window.getSelection()?.toString()) return;
@@ -99,7 +101,7 @@ export function Chat({ overlayTarget, layoutKey }) {
           press.current = { x, y, timer: setTimeout(() => { suppress.current = Date.now() + 800; setPicker(null); setExpanded(false); setMenu({ id: comment.commentId, trigger, point: { x, y } }); }, 500) };
         }} onPointerMove={event => { if (press.current && Math.hypot(event.clientX - press.current.x, event.clientY - press.current.y) > 10) cancelPress(); }} onPointerUp={cancelPress} onPointerCancel={cancelPress} onClickCapture={event => { if (Date.now() < suppress.current) { event.preventDefault(); event.stopPropagation(); } }}>
         {!grouped && <div className="meta"><span className="name">{comment.name}</span></div>}
-        <time>{comment.time}</time>
+        {showTime && <time>{comment.time}</time>}
         {comment.replyTo && <button className="chat-reply-quote" aria-label={`View original message from ${comment.replyTo.name}: ${comment.replyTo.message}`} onClick={() => viewOriginal(comment.replyTo)}><strong>{comment.replyTo.name}</strong><span>{comment.replyTo.message}</span></button>}
         <p>{comment.message}</p>
         <div className="comment-reactions">{[...new Set((comment.reactions || []).map(item => item.emoji))].map(emoji => {

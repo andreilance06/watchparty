@@ -75,6 +75,18 @@ it('groups consecutive messages by sender identity and resets names after system
   expect(bubbles[4].querySelector('.name')).toHaveTextContent('New name');
 });
 
+it('shows one timestamp at the end of each consecutive run from the same sender and minute', () => {
+  let state = hostState();
+  const messages = [['alex', '09:44 AM'], ['alex', '09:44 AM'], ['alex', '09:45 AM'], ['sam', '09:45 AM']];
+  messages.forEach(([clientId, time], index) => {
+    const commentId = String(index);
+    state = roomReducer(state, { message: { type: 'chat', commentId, clientId, name: clientId, message: commentId, time } });
+  });
+  render(wrap(state, <Chat overlayTarget={document.body} layoutKey="normal" />));
+  expect(screen.getAllByRole('article').map(bubble => bubble.querySelector('time')?.textContent))
+    .toEqual([undefined, '09:44 AM', '09:45 AM', '09:45 AM']);
+});
+
 it('hides message actions when both replies and reactions are disallowed', () => {
   const state = roomReducer({ ...hostState(), role: 'viewer', permissions: { ...DEFAULT_PERMISSIONS, reactMessages: false, replyChat: false } }, { message: { type: 'chat', commentId: 'one', name: 'Sam', message: 'Hello' } });
   render(wrap(state, <Chat overlayTarget={document.body} layoutKey="normal" />));
