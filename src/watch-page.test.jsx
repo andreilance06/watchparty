@@ -6,7 +6,7 @@ import { initialRoom, RoomContext, roomReducer } from './room.jsx';
 import { ThemeProvider } from './shared.jsx';
 import { DisplayNameForm, RoomIdentity, RoomActions, RoomHeader } from './RoomControls.jsx';
 import { navigate } from './shared.jsx';
-import { WatchContent } from './Watch.jsx';
+import { Watch, WatchContent } from './Watch.jsx';
 import { DEFAULT_PERMISSIONS } from '../js/permissions.js';
 import { CHAT_DOCK_KEY } from './chat-dock.js';
 
@@ -23,6 +23,58 @@ function attemptUnload() {
   Object.defineProperty(event, 'returnValue', { value: '', writable: true });
   window.dispatchEvent(event); return event;
 }
+
+it('keeps the entry screen until the join snapshot and keeps the room mounted on reconnect', async () => {
+  let admit, socket;
+  class Socket {
+    static OPEN = 1;
+    readyState = 1;
+    handlers = {};
+    constructor() { socket = this; }
+    addEventListener(type, fn) { this.handlers[type] = fn; }
+    send() {}
+    close() { this.readyState = 3; }
+    message(message) { this.handlers.message({ data: JSON.stringify(message) }); }
+  }
+  vi.stubGlobal('WebSocket', Socket);
+  vi.spyOn(globalThis, 'fetch').mockImplementation(path => new Promise(resolve => {
+    const respond = body => resolve({ ok: true, json: async () => body });
+    if (path === '/api/viewer-identity') respond({});
+    else admit = () => respond({ room: { name: 'Friday films' }, endpoints: { websocket: '/ws' } });
+  }));
+  try {
+    const view = render(<ThemeProvider><Watch /></ThemeProvider>);
+    expect(screen.getByText('Checking room access…')).toBeVisible();
+    const watch = view.container.querySelector('.watch-page');
+    expect(watch).toHaveAttribute('inert');
+    await waitFor(() => expect(admit).toBeTypeOf('function'));
+    await act(async () => admit());
+    expect(screen.getByRole('heading', { name: 'Joining Friday films' })).toBeVisible();
+    act(() => {
+      socket.handlers.open();
+      socket.message({ type: 'role', clientId: 'alex', name: 'Alex', role: 'host' });
+    });
+    expect(screen.getByText('Connecting to the room…')).toBeVisible();
+    act(() => socket.message({ type: 'session-state', syncMode: 'join', hasVideo: false }));
+    expect(screen.queryByText('Connecting to the room…')).not.toBeInTheDocument();
+    expect(watch).not.toHaveAttribute('inert');
+    act(() => socket.handlers.close({ code: 1006 }));
+    expect(view.container.querySelector('.watch-page')).toBe(watch);
+    expect(screen.queryByText('Checking room access…')).not.toBeInTheDocument();
+    view.unmount();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
+it('offers retry and room browsing when admission fails', async () => {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: false, status: 503, json: async () => ({ error: 'Room service unavailable.' }) });
+  history.replaceState(null, '', '/watch?roomId=friday');
+  render(<ThemeProvider><Watch /></ThemeProvider>);
+  expect(await screen.findByRole('alert')).toHaveTextContent('Room service unavailable.');
+  expect(screen.getByRole('link', { name: 'Try again' })).toHaveAttribute('href', '/watch?roomId=friday');
+  expect(screen.getByRole('link', { name: 'Back to rooms' })).toHaveAttribute('href', '/');
+});
 
 it('exposes identity and room actions without opening an options menu', () => {
   render(wrap(stateFor(), <WatchContent />));
@@ -404,6 +456,7 @@ it('opens a newly started poll in Up next while keeping the chat draft mounted',
   state = { ...state, poll: { id: 'new', status: 'open' } };
   view.rerender(wrap(state, <WatchContent />, send));
   expect(screen.getByRole('textbox', { name: 'Movie title' })).toBeVisible();
+  expect(screen.getByRole('button', { name: 'Finish poll' }).closest('.poll-finish')).not.toBeNull();
   await user.click(screen.getByRole('tab', { name: 'Chat' }));
   expect(screen.getByLabelText('Message')).toHaveValue('Saved draft');
   expect(screen.getByRole('button', { name: /A movie vote is open/ })).toBeVisible();

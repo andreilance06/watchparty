@@ -1,6 +1,4 @@
 /* Player-page layout and responsive rules live together. Media/fullscreen internals remain in player.css. */
-.fullscreen-chat { flex-direction: column; }
-.fullscreen-chat > .chat-portal { display: flex; flex: 1 1 0; min-height: 0; min-width: 0; flex-direction: column; }
 .watch-join-playback { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 25; }
 .watch-page { height: 100dvh; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--canvas); }
 .watch-page .site-header { position: static; flex: 0 0 auto; padding: 4px 20px; background: var(--surface); backdrop-filter: none; }

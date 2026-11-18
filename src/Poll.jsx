@@ -7,7 +7,7 @@ import { useRoom } from './room.jsx';
 function Poster({ url, title, className }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => setFailed(false), [url]);
-  return <div className={`${className}${!url || failed ? ' movie-poster-placeholder' : ''}`}>{url && !failed ? <img src={url} alt={`Poster for ${title}`} loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} /> : <Icon name="video" />}</div>;
+  return <div className={className}>{url && !failed ? <img src={url} alt={`Poster for ${title}`} loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} /> : <Icon name="video" />}</div>;
 }
 
 export function PollLauncher({ onStart }) {
@@ -49,7 +49,7 @@ function PollResults({ poll, onStart, resultRef }) {
   </div>;
 }
 
-export function Poll({ expanded = true, onToggle, disclosure = true }) {
+export function Poll() {
   const { state, send } = useRoom();
   const { poll, suggestions: options } = state;
   const [query, setQuery] = useState(''), [searched, setSearched] = useState(''), [movies, setMovies] = useState([]);
@@ -113,10 +113,9 @@ export function Poll({ expanded = true, onToggle, disclosure = true }) {
   }
   const total = options.reduce((sum, item) => sum + Math.max(0, Number(item.votes) || 0), 0);
   const showForm = can(state, 'suggestTitles') && (adding || options.length === 0);
-  return <section className="vote-panel poll-workspace" aria-labelledby="vote-title">
+  return <section className="poll-workspace" aria-labelledby="vote-title">
     <div className="poll-heading"><div><h2 id="vote-title">Movie vote</h2><p>{options.length} {options.length === 1 ? 'suggestion' : 'suggestions'}</p></div><span className="poll-vote-total" role="status" aria-atomic="true"><span className="sr-only">Movie vote: </span>{total} {total === 1 ? 'vote' : 'votes'}</span></div>
-    {disclosure && <Button variant="secondary" className="poll-toggle" aria-expanded={expanded} aria-controls="pollDetails" onClick={onToggle}>{expanded ? 'Hide poll' : can(state, 'vote') ? 'Vote on next movie' : 'View movie poll'}</Button>}
-    <div id="pollDetails" className="poll-details" hidden={!expanded}>
+    <div>
       {!state.connected && <Status>Reconnect to vote or suggest a movie.</Status>}
       {!can(state, 'vote') && <Status>Voting is disabled for you. You can still view the results.</Status>}
       <div className="poll-choices" aria-label="Next-video options">{options.map(option => {

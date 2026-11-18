@@ -3,6 +3,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { Status } from './shared.jsx';
 import { RoomProvider, useRoom } from './room.jsx';
 import { Player } from './Player.jsx';
+import { RoomLoading } from './RoomLoading.jsx';
 import { Chat } from './Chat.jsx';
 import { Poll } from './Poll.jsx';
 import { Participants } from './Permissions.jsx';
@@ -11,7 +12,7 @@ import { Icon } from './Icons.jsx';
 import { useAttention } from './attention.js';
 import { useChatDock } from './chat-dock.js';
 
-export function WatchContent() {
+export function WatchContent({ joining = false }) {
   const { state, attention } = useRoom();
   const [tab, setTab] = useState('chat');
   const theater = useRef(null);
@@ -36,7 +37,7 @@ export function WatchContent() {
   const compactCount = count => count > 99 ? '99+' : count;
   const tabs = [{ key: 'chat', label: 'Chat', icon: 'chat' }, { key: 'people', label: 'People', icon: 'people' }, { key: 'upnext', label: 'Up next', icon: 'vote' }];
   const livePoll = state.poll.status === 'open';
-  return <div className="watch-page" onKeyDown={event => {
+  return <div className="watch-page" inert={joining} onKeyDown={event => {
     if (event.key !== 'Escape' || event.defaultPrevented || event.target.closest('dialog') || !event.target.closest('#watchChatroom')) return;
     event.preventDefault(); setChatOpen(false); chatToggle.current?.focus({ preventScroll: true });
   }}>
@@ -70,7 +71,7 @@ export function WatchContent() {
         </div>
         <Participants hidden={tab !== 'people'} tabbed />
         <section id="socialUpNext" className="watch-upnext-panel" hidden={tab !== 'upnext'} role="tabpanel" aria-labelledby="upNextTab">
-          <Poll expanded disclosure={false} />
+          <Poll />
         </section>
       </aside>
       </div>
@@ -80,4 +81,14 @@ export function WatchContent() {
     {createPortal(attentionView.notices.map(item => <div key={item.id} className={`reaction-item${item.message ? ' chat-notification' : ''}`}>{item.message ? <><strong>{item.name}</strong><p>{item.message}</p></> : `${item.emoji} ${item.name}`}</div>), portals.feed)}
   </div>;
 }
-export function Watch() { return <RoomProvider><WatchContent /></RoomProvider>; }
+
+function WatchEntry() {
+  const { state } = useRoom();
+  const joining = state.entryPhase !== 'ready';
+  return <>
+    <WatchContent joining={joining} />
+    {joining && <RoomLoading phase={state.entryPhase} roomName={state.entryPhase === 'connecting' ? state.room.name : undefined} error={state.entryError} />}
+  </>;
+}
+
+export function Watch() { return <RoomProvider><WatchEntry /></RoomProvider>; }

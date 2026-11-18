@@ -1,6 +1,13 @@
 /* Polls share one scroller with Up next. Choices lead; adding movies is secondary. */
 .watch-upnext-panel { flex: 1 1 0; min-height: 0; overflow-y: auto; }
-.poll-workspace.vote-panel { padding: 16px; border: 0; background: var(--surface); }
+.poll-workspace {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  min-height: 0;
+  padding: 16px;
+  background: var(--surface);
+}
 .poll-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 16px; }
 .poll-heading h2 { margin: 0; font-size: 1.125rem; font-weight: 650; line-height: 1.4; }
 .poll-heading p { margin: 4px 0 0; color: var(--text-secondary); font-size: .875rem; }

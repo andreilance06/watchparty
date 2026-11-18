@@ -12,56 +12,6 @@
   flex-wrap: wrap;
 }
 
-.chat-heading-actions {
-  display: flex;
-  align-items: flex-end;
-  flex-direction: column;
-  gap: .4rem;
-}
-
-.name-form {
-  display: flex;
-  gap: .35rem;
-}
-
-.name-form input {
-  width: clamp(7.5rem, 30vw, 10rem);
-  min-width: 0;
-  padding: .38rem .5rem;
-  border: 1px solid var(--border);
-  border-radius: .45rem;
-  outline: none;
-  color: var(--text);
-  background: var(--surface-2);
-  font-family: var(--font-readable);
-  font-size: .72rem;
-}
-
-.name-form input:focus {
-  border-color: color-mix(in srgb, var(--text-brand) 65%, transparent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-brand) 10%, transparent);
-}
-
-.name-form input[aria-invalid="true"] {
-  border-color: var(--danger);
-  box-shadow: 0 0 0 3px rgba(255, 93, 115, .1);
-}
-
-.name-form button {
-  border: 0;
-  border-radius: .45rem;
-  padding: .38rem .55rem;
-  color: white;
-  background: var(--accent);
-  font-size: .68rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.name-form button:hover {
-  background: var(--accent-hover);
-}
-
 .chat-heading,
 .participant-section,
 .chat-form {
@@ -577,13 +527,8 @@ body > .reaction-feed .reaction-item {
 .message-menu-expanded[hidden] { display: none; }
 .message-menu button:hover { background: var(--surface-3); }
 .message-menu .selected { background: var(--accent); }
-.message-menu button:focus-visible, .emoji-picker-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.message-menu button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .message-menu-action { display: block; width: 100%; min-height: 2.5rem; padding: .55rem .7rem; text-align: left; font-size: .8rem; }
-
-.emoji-picker-tabs { display: flex; gap: .25rem; margin-bottom: .4rem; padding: .2rem; border-radius: .6rem; background: var(--surface-2); }
-.emoji-picker-tabs[hidden] { display: none; }
-.emoji-picker-tabs button { flex: 1; min-width: 0; padding: .5rem .35rem; border: 0; border-radius: .4rem; color: var(--muted); background: transparent; font-size: .75rem; cursor: pointer; }
-.emoji-picker-tabs button[aria-selected="true"] { color: white; background: var(--accent); }
 .emoji-picker-hint { margin: 0 0 .5rem; color: var(--muted); font-size: .72rem; line-height: 1.4; }
 
 .message-menu.message-bubble-menu {

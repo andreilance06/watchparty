@@ -8,13 +8,17 @@ import { navigate, post, request } from './shared.jsx';
 export const RoomContext = createContext(null);
 export const useRoom = () => useContext(RoomContext);
 export function initialRoom(identity) {
-  return { ...identity, connected: false, connectionText: 'Connecting…', permissions: DEFAULT_PERMISSIONS,
+  return { ...identity, connected: false, connectionText: 'Connecting…', entryPhase: 'checking', entryError: '', permissions: DEFAULT_PERMISSIONS,
     roomPermissions: DEFAULT_PERMISSIONS, room: { name: 'Default room', invitePath: '/?room=default' },
     people: [], viewerCount: 0, sourceOwnerId: null, poll: { id: null, status: 'idle' }, suggestions: [], myVoteId: null,
     messages: [{ id: 'welcome', system: true, message: 'Welcome to WatchParty.' }], media: null, reactions: [], responses: [], nameFeedback: null, lastMessage: null, event: 0 };
 }
 export function roomReducer(state, action) {
   if (action.type === 'status') return { ...state, connected: action.connected, connectionText: action.text };
+  if (action.type === 'entry') {
+    if (state.entryPhase === 'ready' || (state.entryPhase === 'error' && action.phase === 'connecting')) return state;
+    return { ...state, entryPhase: action.phase, entryError: action.error || '' };
+  }
   if (action.type === 'metadata') return { ...state, room: action.room };
   if (action.type === 'system') return { ...state, messages: [...state.messages, { id: action.id, system: true, message: action.message }].slice(-500) };
   if (action.type === 'expire-reactions') return { ...state, reactions: state.reactions.filter(item => item.expires > action.now) };
@@ -30,7 +34,11 @@ export function roomReducer(state, action) {
     case 'party-state':
       next = { ...next, people: people(m.participants), poll: m.poll || state.poll, suggestions: m.suggestions || [], myVoteId: m.myVoteId ?? null, host: m.host };
       break;
-    case 'session-state': next.media = m; if (m.sourceOwnerId !== undefined) next.sourceOwnerId = m.sourceOwnerId; break;
+    case 'session-state':
+      next.media = m;
+      if (m.sourceOwnerId !== undefined) next.sourceOwnerId = m.sourceOwnerId;
+      if (m.syncMode === 'join') { next.entryPhase = 'ready'; next.entryError = ''; }
+      break;
     case 'host-left': if (!m.preserveMedia) next.media = { hasVideo: false }; break;
     case 'permissions-updated':
       next.people = state.people.map(person => person.clientId === m.clientId ? { ...person, permissions: m.permissions, permissionOverrides: m.permissionOverrides || {} } : person);
@@ -66,7 +74,9 @@ export function RoomProvider({ children }) {
   useEffect(() => {
     let disposed = false, connection;
     const controller = new AbortController();
+    const entryTimeout = setTimeout(() => dispatch({ type: 'entry', phase: 'error', error: 'The room is taking longer than expected to respond.' }), 20000);
     function blocked() {
+      clearTimeout(entryTimeout);
       connection?.dispose(); player.current?.files.disconnect(); player.current?.screenShare?.disconnect();
       navigate('/?blocked=1');
     }
@@ -98,7 +108,10 @@ export function RoomProvider({ children }) {
           }
           break;
         }
-        case 'session-state': media?.controller.applySessionState(message); break;
+        case 'session-state':
+          if (message.syncMode === 'join') clearTimeout(entryTimeout);
+          media?.controller.applySessionState(message);
+          break;
         case 'permissions-updated': if (message.clientId === session.current.clientId) media?.controller.applyPermissions(message.permissions); break;
         case 'playback-rejected': media?.controller.rejectPlayback(message); system(message.message); break;
         case 'captions-updated': media?.controller.updateCaptions(message); break;
@@ -127,6 +140,7 @@ export function RoomProvider({ children }) {
         }
         if (disposed) return;
         dispatch({ type: 'metadata', room: admission.room || stateRef.current.room });
+        dispatch({ type: 'entry', phase: 'connecting' });
         connection = createConnection({ path: admission.endpoints?.websocket || '/ws',
           getIdentity: () => ({ clientId: session.current.clientId, name: session.current.clientName }),
           onMessage: receive, onBlocked: blocked,
@@ -141,14 +155,17 @@ export function RoomProvider({ children }) {
           },
         });
         transport.current = connection; connection.connect();
-      } catch (error) { if (!disposed) dispatch({ type: 'status', connected: false, text: `${error.message} Reload to reconnect.` }); }
+      } catch (error) {
+        clearTimeout(entryTimeout);
+        if (!disposed) dispatch({ type: 'entry', phase: 'error', error: error.message });
+      }
     }
     void start();
     const timer = setInterval(() => dispatch({ type: 'expire-reactions', now: Date.now() }), 1000);
     const restore = event => { if (event.persisted) location.reload(); };
     const hide = () => { connection?.dispose(); player.current?.files.disconnect(); player.current?.screenShare?.disconnect(); };
     window.addEventListener('pagehide', hide); window.addEventListener('pageshow', restore);
-    return () => { disposed = true; controller.abort(); connection?.dispose(); transport.current = null; clearInterval(timer); window.removeEventListener('pagehide', hide); window.removeEventListener('pageshow', restore); };
+    return () => { disposed = true; clearTimeout(entryTimeout); controller.abort(); connection?.dispose(); transport.current = null; clearInterval(timer); window.removeEventListener('pagehide', hide); window.removeEventListener('pageshow', restore); };
   }, [roomId, system]);
   useEffect(() => {
     session.current.clientName = state.clientName;

@@ -6,6 +6,7 @@
 @import "../css/watch.css" layer(components);
 @import "../css/polls.css" layer(components);
 @import "../css/hub.css" layer(components);
+@import "../css/room-loading.css" layer(components);
 
 @theme inline {
   --color-background: var(--bg);
@@ -19,7 +20,5 @@
 @layer components {
   .chat-slot, .chat-portal { @apply flex min-h-0 min-w-0 flex-1 flex-col; }
   .overlay-portal { @apply contents; }
-  .movie-search-poster > img { @apply h-full w-full object-cover; }
-  .room-info { grid-area: room; }
   [hidden] { display: none !important; }
 }

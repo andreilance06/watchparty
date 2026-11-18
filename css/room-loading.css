@@ -1,0 +1,79 @@
+.room-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 1500;
+  display: grid;
+  place-items: safe center;
+  overflow-y: auto;
+  padding: clamp(20px, 6vw, 48px);
+  background: var(--canvas);
+  color: var(--text-primary);
+}
+
+.room-loading-inner { width: min(100%, 27rem); }
+
+.room-loading-screen {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 2.35;
+  margin-bottom: var(--space-6);
+  overflow: hidden;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-panel);
+  background:
+    radial-gradient(ellipse at 50% 100%, color-mix(in srgb, var(--action-primary) 42%, transparent), transparent 72%),
+    var(--media-surface);
+}
+
+.room-loading-screen::before,
+.room-loading-screen::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  width: 1rem;
+  background: radial-gradient(ellipse, var(--palette-sand) 0 32%, transparent 37%) center / .75rem 1.15rem;
+  opacity: .32;
+}
+
+.room-loading-screen::before { left: .25rem; }
+.room-loading-screen::after { right: .25rem; }
+.room-loading-screen .brand-mark {
+  width: clamp(62px, 20vw, 102px);
+  height: auto;
+  aspect-ratio: 1;
+  background: linear-gradient(135deg, var(--palette-ivory), var(--palette-sand));
+}
+
+.room-loading h1 {
+  margin: 0;
+  font-size: clamp(1.8rem, 5.5vw, 2.65rem);
+  line-height: 1.12;
+  letter-spacing: -.04em;
+  overflow-wrap: anywhere;
+}
+
+.room-loading p {
+  margin: var(--space-2) 0 var(--space-4);
+  color: var(--text-secondary);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.room-loading-progress {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+}
+
+.room-loading-progress span { height: 4px; border-radius: 4px; background: var(--border-subtle); }
+.room-loading-progress .is-complete { background: var(--border-control); }
+.room-loading-progress .is-current { background: var(--text-brand); animation: room-entry-pulse 1.4s ease-in-out infinite alternate; }
+@keyframes room-entry-pulse { to { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) {
+  .room-loading-progress .is-current { animation: none; }
+}
+
+.room-loading-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-4); }
+.room-loading-actions a { text-decoration: none; }
+.room-loading-actions .ui-button--quiet { padding-inline: var(--space-2); }

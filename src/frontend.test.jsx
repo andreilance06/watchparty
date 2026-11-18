@@ -199,7 +199,7 @@ describe('React room workflows', () => {
   it('supports movie search failures, title-only suggestions, and replacing votes', async () => {
     vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Search unavailable.'));
     const state = { ...initial(), connected: true, poll: { id: 'poll', status: 'open' }, suggestions: [{ id: 'arrival', title: 'Arrival', votes: 1, canRemove: true }], myVoteId: null };
-    const send = vi.fn(() => true); render(wrap(state, <Poll expanded onToggle={() => {}} />, send));
+    const send = vi.fn(() => true); render(wrap(state, <Poll />, send));
     await userEvent.click(screen.getByRole('button', { name: 'Suggest a movie' })); await userEvent.type(screen.getByLabelText('Movie title'), 'Dune'); await userEvent.click(screen.getByRole('button', { name: 'Search' }));
     await userEvent.click(await screen.findByText('Suggest “Dune” without a poster'));
     expect(send).toHaveBeenCalledWith({ type: 'suggest-video', title: 'Dune', pollId: 'poll' });

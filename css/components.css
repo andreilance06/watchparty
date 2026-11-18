@@ -100,8 +100,8 @@ html { scroll-padding-top: 96px; }
 .eyebrow { color: var(--text-brand); }
 .room-badge { background: var(--media-surface); color: var(--media-text); }
 .player-panel, .chat-panel { border-radius: var(--radius-panel); box-shadow: none; }
-.room-info-bar:hover, .player-panel:hover, .chat-panel:hover { border-color: var(--border-subtle); }
-.control-help, .hub-preview-note, .sync-status { font-size: .875rem; line-height: 1.5; }
+.player-panel:hover, .chat-panel:hover { border-color: var(--border-subtle); }
+.hub-preview-note, .sync-status { font-size: .875rem; line-height: 1.5; }
 .chat-message { font-size: 1rem; line-height: 1.5; }
 .chat-message .name, .chat-message time { font-size: .75rem; }
 .permission-switch { min-height: var(--control-height); font-size: .875rem; }
@@ -109,15 +109,9 @@ html { scroll-padding-top: 96px; }
 .theme-toggle .theme-icon { width: 20px; height: 20px; }
 .ui-field .ui-input { width: 100%; }
 .hub-dialog-actions { gap: var(--space-2); }
-.suggestion-form { align-items: end; }
-.suggestion-form .ui-field { flex: 1; margin-top: 0; }
-.name-form-row { align-items: end; }
-.name-form-row .ui-field { flex: 1; margin-top: 0; }
-.room-menu .name-form .ui-input { width: 100%; }
 .chat-compose-row { gap: var(--space-2); }
 .chat-compose-row .ui-input { flex: 1; }
 .ui-button.chat-jump-latest { align-self: center; }
-.vote-button[aria-pressed="true"] { background: var(--action-primary); border-color: var(--action-primary); color: var(--on-action); opacity: 1; }
 
 /* Visible social actions share the same hit areas as other controls. */
 .chat-message .meta { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); }
@@ -125,14 +119,6 @@ html { scroll-padding-top: 96px; }
 .chat-message p { font-size: 1rem; line-height: 1.5; }
 .poll-launcher { max-width: 100%; }
 .poll-launcher .ui-status { max-width: 16rem; margin: 8px 0 0; }
-.chat-heading-actions { min-width: 0; }
-.vote-heading { display: flex; justify-content: space-between; gap: var(--space-2); }
-.vote-panel .vote-leader { white-space: normal; overflow-wrap: anywhere; font-size: .875rem; }
-.vote-status { font-size: .875rem; font-variant-numeric: tabular-nums; }
-.poll-toggle { align-self: stretch; }
-.poll-explanation { margin: 12px 0; font-size: .875rem; line-height: 1.5; color: var(--text-secondary); }
-.poll-management { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--border-subtle); }
-.poll-management p { flex: 1 1 160px; margin: 0; font-size: .875rem; line-height: 1.5; color: var(--text-secondary); }
 
 .participant-permission-summary { font-size: .875rem; line-height: 1.5; color: var(--text-secondary); }
 .participant-permissions-open { width: 100%; }

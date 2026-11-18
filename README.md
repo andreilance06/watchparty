@@ -113,7 +113,7 @@ Follow the [Ubuntu VPS deployment guide](docs/deployment.md) to host WatchParty 
 ## Your first watch party
 
 1. Open the room hub at `/`. Use the pencil beside your name to choose a display name, or join as a guest. Search rooms by name or video title. Select **Create room**, enter a room name and optional password, then create it to open the separate player page. You can also select **Join room** on any listed room, including the public default room.
-2. Use **Invite** in the player to copy an invitation link. Viewers can follow the link or select your room on the hub; protected rooms prompt for their password. No access code is needed. For viewers on another device, use the server's reachable LAN or HTTPS address rather than `localhost`.
+2. Use **Invite** in the player to copy an invitation link. Viewers can follow the link or select your room on the hub. Protected rooms prompt for their password. The watch page shows progress while it loads, checks access, and connects. If entry stalls or fails, select **Try again** or **Back to rooms**. For viewers on another device, use the server's reachable LAN or HTTPS address.
 3. As host, select **Choose video** for a file, optionally with subtitle files, or **Share screen** for a screen, window, or browser tab. Enable audio in the browser picker when offered. Keep the sharing browser open throughout the session. Select **Stop sharing** to end the current file share or your live capture. If you share an entire screen, **Disable dimming** restores your preview brightness and **Dim preview** turns dimming back on. The toggle affects only the preview in the sharing browser. Live sharing requires HTTPS or localhost. See the [screen-sharing setup guide](docs/screen-sharing.md).
 4. Type in the chatroom and select **Send**. Use **Reply / react** on a message to open its actions; right-click, long-press, and Shift+F10 remain shortcuts. The composer emoji button inserts emoji into your draft.
 5. Open **Up next** and, as host, select **Start poll**. Suggest a movie using **Search**, then **Suggest & vote**, or add a title without a poster. With existing choices, **Suggest a movie** opens the search editor. Participants can change their vote. **Finish poll** asks for confirmation before closing voting and posting the result in chat; winner/tie cards and the next-poll action appear in Up next. The host still selects the actual video file.
@@ -132,6 +132,17 @@ These captures show the local application with demonstration data. The video is 
 The room hub lists rooms with video previews, participant counts, and optional password protection.
 
 ![WatchParty hub with searchable room cards and create and join controls](docs/screenshots/sharing-room-hub.png)
+
+### Joining a room
+
+The entry screen shows the room name once access is confirmed and stays visible until the watch page receives the room's initial state.
+
+![WatchParty waiting to connect to Friday Film Club, with the current stage and Back to rooms link visible](docs/screenshots/joining-room.png)
+
+<details>
+<summary>Phone view in the light theme</summary>
+<img src="docs/screenshots/joining-room-mobile.png" alt="Phone-width room entry screen in the light theme" width="390">
+</details>
 
 ### Desktop room
 
@@ -173,7 +184,7 @@ The root page is a room hub, separate from the player at `/watch?roomId=ID` (or 
 
 Unexpected host disconnects reserve hosting for 15 seconds so a refresh or brief interruption can reconnect. Other participants see a reconnecting notice; if the host does not return in time, the next connected participant takes over. Explicit room leaving and host transfers take effect immediately. A private room's creator reclaims the sole host role whenever they reconnect, including after leaving and rejoining with the same verified browser identity; any replacement host becomes a viewer. Other hosts cannot block the creator. The public default room has no permanent creator. These identities and rooms last until room expiry or server restart, and localhost and the public domain use separate cookies.
 
-The host or viewers granted Start polls permission start movie polls from **Chat options** (the three-dot button in the lounge). An active poll stays pinned above messages as a compact, expandable card; viewers can suggest and vote unless the host revokes those permissions. Suggestions search TMDB for movies, release years, overviews, and posters. Choose a match or suggest a title without a poster. Suggesting automatically casts your vote when voting is allowed. The host, authorized moderators of suggestions, and original suggesters with removal permission can remove entries; the suggester keeps that right after browser restarts or rejoining with the same browser cookie and site address while the room/server remains alive. Finishing a poll hides it for everyone and posts the winner, tie, or no-votes result in chat. The host can then start a fresh round. Movie data and posters come from TMDB. See the [movie poll API](docs/rooms.md#movie-suggestions-and-posters).
+The host and viewers with **Start polls** permission can start movie polls under **Up next**. While a poll is open, Chat shows a link to it above the messages. Participants can suggest and vote according to their room permissions. Suggestions search TMDB for movies, release years, overviews, and posters. Choose a match or suggest a title without a poster. Suggesting automatically casts your vote when voting is allowed. The host, authorized moderators of suggestions, and original suggesters with removal permission can remove entries. The original suggester keeps that right while the room and server stay active and they return with the same browser cookie and site address. Finishing a poll closes voting and posts the winner, tie, or no-votes result in chat. The host can then start a fresh round. See the [movie poll API](docs/rooms.md#movie-suggestions-and-posters).
 
 ## Playback
 

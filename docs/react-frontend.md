@@ -10,6 +10,11 @@ the room protocol, browser-owned video sharing, and the Movi/JASSUB distribution
   create/join forms, invitations, protected-room sessions, and retry feedback.
 - `RoomProvider` owns admission and the control WebSocket. Its reducer holds the
   identity, role, permissions, participants, poll, bounded chat history, and status.
+- `RoomLoading` is shared by the lazy watch-route fallback and the initial room
+  connection. It announces the current stage, shows the room name after admission,
+  and offers a way back to the hub. The watch controls stay mounted and inert
+  until the initial join snapshot arrives. A stalled or failed join offers a retry,
+  while reconnecting after a successful join keeps the watch page visible.
 - `Watch` composes the room bar, player, stable portal hosts, and persistent Chat,
   People, and Up next panels. `RoomControls` owns the on-demand display-name and
   room-name editors, invitations, room-permission entry, and provider-aware leave flow.
@@ -57,7 +62,8 @@ the incoming Host and Origin headers so origin validation and same-origin cookie
 continue to work. Production serves only built frontend assets from `dist`, with
 HTML revalidated and hashed bundles cached immutably. Unknown API and asset paths
 return 404. Vendor JavaScript, WASM, workers, fonts, and licenses are copied without
-modification, preserving relative paths.
+modification, preserving relative paths. The original logo is also kept at its
+existing static URL. The favicon and TMDB logo use Vite's asset handling.
 
 ## Development and validation
 
@@ -113,4 +119,4 @@ test. Existing deployment and cross-browser release checks still apply.
 - [React effects and external systems](https://react.dev/reference/react/useEffect)
 - [Vite documentation](https://vite.dev/guide/)
 - [Tailwind Vite integration](https://tailwindcss.com/docs/installation/using-vite)
-- Existing vendor acknowledgments and contribution history remain in the README.
+- See the README for vendor acknowledgments.

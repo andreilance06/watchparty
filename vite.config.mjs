@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
-import { cpSync, mkdirSync } from 'node:fs';
+import { copyFileSync, cpSync, mkdirSync } from 'node:fs';
 
 export default defineConfig({
   plugins: [{
@@ -13,8 +13,10 @@ export default defineConfig({
   }, react(), tailwindcss(), {
     name: 'watchparty-static-assets',
     closeBundle() {
-      mkdirSync('dist', { recursive: true });
-      for (const directory of ['vendor', 'assets']) cpSync(directory, `dist/${directory}`, { recursive: true });
+      cpSync('vendor', 'dist/vendor', { recursive: true });
+      const logo = 'assets/images/logo';
+      mkdirSync(`dist/${logo}`, { recursive: true });
+      copyFileSync(`${logo}/logo_watchparty.png`, `dist/${logo}/logo_watchparty.png`);
     },
   }],
   publicDir: false,
