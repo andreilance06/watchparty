@@ -115,8 +115,27 @@ test('theater fullscreen keeps the entire sidebar mounted and restores overlays 
   let requested = false;
   theater.requestFullscreen = async () => { requested = true; browser.document.fullscreenElement = theater; browser.document.dispatch('fullscreenchange'); };
   browser.document.exitFullscreen = async () => { browser.document.fullscreenElement = null; browser.document.dispatch('fullscreenchange'); };
-  const snapshots = [];
-  const fullscreen = createFullscreen({ elements, getHostPaused: () => true, afterResize() {}, attention: { setFullscreen: state => snapshots.push(state) } });
+  const snapshots = [], hostFullscreen = [], layout = [];
+  let onResize, disconnected = false;
+  browser.context.ResizeObserver = class {
+    constructor(callback) { onResize = callback; }
+    observe() {}
+    disconnect() { disconnected = true; }
+  };
+  elements.video.setHostFullscreen = active => hostFullscreen.push(active);
+  elements.video.updateCanvasSize = () => layout.push("canvas");
+  elements.video.updateFitMode = () => layout.push("fit");
+  elements.video.clientWidth = 1540;
+  elements.video.clientHeight = 1080;
+  const pictureParts = new Set();
+  const picturePart = "watchparty-contained-picture";
+  const picture = browser.document.createElement("video");
+  picture.videoWidth = 1414;
+  picture.videoHeight = 1080;
+  picture.style.objectFit = "contain";
+  picture.part = { add: name => pictureParts.add(name), remove: name => pictureParts.delete(name) };
+  elements.video.video = picture;
+  const fullscreen = createFullscreen({ elements, getHostPaused: () => true, afterResize: () => layout.push("captions"), attention: { setFullscreen: state => snapshots.push(state) } });
   elements.chatMessages.scrollTop = 180;
   elements.chatMessages.clientHeight = 0; // A collapsed, still-mounted scroller retains its position.
   fullscreen.setChatVisible(false);
@@ -124,22 +143,61 @@ test('theater fullscreen keeps the entire sidebar mounted and restores overlays 
   elements.chatMessages.clientHeight = 360;
   await fullscreen.toggle();
   assert.equal(requested, true); assert.equal(snapshots.at(-1).active, true); assert.equal(snapshots.at(-1).chatVisible, false);
+  assert.equal(hostFullscreen.at(-1), true);
   assert.equal(elements.chatConversation.parentNode, conversationParent);
   assert.equal(elements.chatMessages.scrollTop, 180);
   assert.equal(elements.emojiPicker.parentNode, theater);
   fullscreen.setChatVisible(true);
   assert.equal(snapshots.at(-1).chatVisible, true);
+  assert.deepEqual(layout, []);
+  browser.runFrame();
+  assert.deepEqual(layout, ["fit", "captions"]);
+  assert.equal(pictureParts.has(picturePart), true);
+  assert.equal(picture.style["--picture-width"], "1414px");
+  assert.equal(picture.style["--picture-height"], "1080px");
+  layout.length = 0;
+  elements.video.clientWidth = 707;
+  onResize();
+  onResize();
+  browser.runFrame();
+  assert.deepEqual(layout, ["fit", "captions"], "coalesce resize notifications");
+  assert.equal(picture.style["--picture-width"], "707px");
+  assert.equal(picture.style["--picture-height"], "540px");
+  fullscreen.setChatVisible(false);
+  browser.runFrame();
+  picture.style.objectFit = "cover";
+  layout.length = 0;
+  fullscreen.setChatVisible(true);
+  browser.runFrame();
+  assert.deepEqual(layout, ["fit", "captions"]);
+  assert.equal(pictureParts.has(picturePart), false, "preserve alternate fit modes");
+  picture.style.objectFit = "contain";
+  fullscreen.setChatVisible(true);
+  browser.runFrame();
+  assert.equal(pictureParts.has(picturePart), true);
+  layout.length = 0;
   await fullscreen.toggle();
   assert.equal(snapshots.at(-1).active, false);
+  assert.equal(hostFullscreen.at(-1), false);
   assert.equal(elements.chatConversation.parentNode, conversationParent);
   assert.equal(elements.emojiPicker.parentNode, overlayParent);
+  browser.runFrame();
+  assert.equal(pictureParts.has(picturePart), false, "restore windowed layout");
+  layout.length = 0;
   theater.requestFullscreen = undefined;
   await fullscreen.toggle();
-  assert.equal(theater.classList.contains('pseudo-fullscreen'), true);
+  assert.equal(theater.getAttribute("data-pseudo-fullscreen"), "");
+  theater.className = "watch-theater";
+  fullscreen.setChatVisible(false);
+  assert.equal(theater.getAttribute("data-pseudo-fullscreen"), "");
+  assert.equal(snapshots.at(-1).active, true);
   browser.document.dispatch('keydown', { key: 'Escape' });
-  assert.equal(theater.classList.contains('pseudo-fullscreen'), false);
+  assert.equal(theater.getAttribute("data-pseudo-fullscreen"), null);
   assert.equal(elements.chatConversation.parentNode, conversationParent);
   fullscreen.destroy();
+  browser.runFrame();
+  assert.equal(disconnected, true);
+  assert.deepEqual(layout, [], "destroy cancels the pending refresh");
 });
 
 test('blocked autoplay exposes a local retry that catches up without broadcasting a room command', async () => {

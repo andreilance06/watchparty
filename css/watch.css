@@ -206,11 +206,10 @@
   @keyframes chat-stack-in { from { transform: translateY(16px); opacity: .5; } to { transform: none; opacity: 1; } }
 }
 /* The whole theater enters fullscreen, so video and chat always share one layout. */
-.watch-theater:fullscreen, .watch-theater:-webkit-full-screen, .watch-theater.pseudo-fullscreen { width: 100%; height: var(--chat-viewport-height, 100dvh); background: #000; }
-.watch-theater.pseudo-fullscreen { position: fixed; inset: 0; z-index: 2147483647; }
-.watch-theater:fullscreen .watch-media-bar, .watch-theater:fullscreen .watch-sharing-status, .watch-theater:fullscreen .watch-player-help,
-.watch-theater:-webkit-full-screen .watch-media-bar, .watch-theater:-webkit-full-screen .watch-sharing-status, .watch-theater:-webkit-full-screen .watch-player-help,
-.watch-theater.pseudo-fullscreen .watch-media-bar, .watch-theater.pseudo-fullscreen .watch-sharing-status, .watch-theater.pseudo-fullscreen .watch-player-help { display: none; }
+.watch-theater:is(:fullscreen, :-webkit-full-screen, [data-pseudo-fullscreen]) { width: 100%; height: var(--chat-viewport-height, 100dvh); background: #000; }
+.watch-theater[data-pseudo-fullscreen] { position: fixed; inset: 0; z-index: 2147483647; }
+.watch-theater:is(:fullscreen, :-webkit-full-screen, [data-pseudo-fullscreen])
+  :is(.watch-media-bar, .watch-sharing-status, .watch-player-help) { display: none; }
 @media (max-height: 500px) and (min-width: 600px) {
   .watch-theater.is-chat-open { display: grid; }
   .watch-page .is-chat-open .video-shell { flex: 1; max-height: none; aspect-ratio: auto; }

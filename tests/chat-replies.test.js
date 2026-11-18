@@ -201,13 +201,13 @@ test("pseudo and WebKit fullscreen restore the conversation, and Escape first cl
   const shell = el("videoShell"), parent = el("chatConversation").parentNode;
   shell.requestFullscreen = undefined;
   el("video").dispatch("movi-fullscreen-request");
-  assert.equal(shell.classList.contains("pseudo-fullscreen"), true);
+  assert.equal(shell.getAttribute("data-pseudo-fullscreen") !== null, true);
   el("chatEmojiButton").click();
   document.dispatch("keydown", { key: "Escape" });
-  assert.equal(shell.classList.contains("pseudo-fullscreen"), true);
+  assert.equal(shell.getAttribute("data-pseudo-fullscreen") !== null, true);
   assert.equal(el("emojiPicker").hidden, true);
   document.dispatch("keydown", { key: "Escape" });
-  assert.equal(shell.classList.contains("pseudo-fullscreen"), false);
+  assert.equal(shell.getAttribute("data-pseudo-fullscreen") !== null, false);
   assert.equal(el("chatConversation").parentNode, parent);
   shell.webkitRequestFullscreen = () => { document.webkitFullscreenElement = shell; document.dispatch("webkitfullscreenchange"); };
   el("video").dispatch("movi-fullscreen-request");

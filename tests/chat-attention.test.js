@@ -106,7 +106,7 @@ test("fullscreen chat preference survives native, WebKit and fallback transition
   b.document.dispatch("webkitfullscreenchange");
   shell.webkitRequestFullscreen = undefined;
   b.el("video").dispatch("movi-fullscreen-request");
-  assert.equal(shell.classList.contains("pseudo-fullscreen"), true);
+  assert.equal(shell.getAttribute("data-pseudo-fullscreen") !== null, true);
   assert.equal(b.el("fullscreenChat").hidden, true);
   toggle(b).click();
   b.document.dispatch("keydown", { key: "Escape" });

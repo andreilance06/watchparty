@@ -13,6 +13,16 @@
   background: #050608;
 }
 
+.video-shell movi-player::part(watchparty-contained-picture) {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: var(--picture-width) !important;
+  height: var(--picture-height) !important;
+  /* Keep the resized picture in the page compositor on Chromium. */
+  filter: opacity(.999);
+}
+
 .viewer-controls {
   position: absolute;
   right: .75rem;
@@ -46,16 +56,14 @@
   stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
 }
 
-.video-shell:fullscreen,
-.video-shell:-webkit-full-screen,
-.video-shell.pseudo-fullscreen {
+.video-shell:is(:fullscreen, :-webkit-full-screen, [data-pseudo-fullscreen]) {
   width: 100vw;
   height: 100vh;
   aspect-ratio: auto;
   background: #000;
 }
 
-.video-shell.pseudo-fullscreen {
+.video-shell[data-pseudo-fullscreen] {
   position: fixed;
   inset: 0;
   z-index: 2147483647;
