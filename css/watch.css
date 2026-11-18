@@ -167,14 +167,17 @@
   .watch-theater { display: flex; flex-direction: column; }
   .watch-page .watch-theater:not(.is-chat-open) > .player-panel { flex: 1 1 0; }
   .watch-chat-toggle, .is-chat-open > .watch-chat-toggle {
+    --chat-tab-height: 24px;
     position: relative;
     top: auto;
     right: auto;
     transform: none;
     align-self: center;
-    flex: 0 0 24px;
+    /* Keep the tab at the panel edge without reserving a separate row. */
+    flex: 0 0 var(--chat-tab-height);
+    margin-block-start: calc(-1 * var(--chat-tab-height));
     width: 72px;
-    height: 24px;
+    height: var(--chat-tab-height);
     border-radius: 12px 12px 0 0;
     touch-action: manipulation;
   }
