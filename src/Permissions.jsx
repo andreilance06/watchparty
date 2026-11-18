@@ -31,8 +31,10 @@ export function RoomPermissions({ onClose, returnFocusRef }) {
   useEffect(() => { if (state.role !== 'host') onClose(); }, [state.role, onClose]);
   return <Dialog title="Viewer permissions" wide className="permissions-dialog" onClose={onClose} returnFocusRef={returnFocusRef}>
     <DialogHeader title="Viewer permissions" eyebrow="ROOM SETTINGS" onClose={onClose} />
-    <p>Defaults apply to everyone without an individual override. Select a participant to customize their permissions.</p>
-    <PermissionFields values={state.roomPermissions} disabled={!state.connected || state.role !== 'host' || Boolean(pending)} onChange={permissions => execute({ type: 'set-room-permissions', permissions })} />
+    <div className="permissions-dialog-body">
+      <p className="ui-dialog-description">Defaults apply to everyone without an individual override. Select a participant to customize their permissions.</p>
+      <PermissionFields values={state.roomPermissions} disabled={!state.connected || state.role !== 'host' || Boolean(pending)} onChange={permissions => execute({ type: 'set-room-permissions', permissions })} />
+    </div>
     <Status tone={result?.type === 'error' ? 'error' : 'neutral'}>{status}</Status>
   </Dialog>;
 }
@@ -76,11 +78,13 @@ function ParticipantDetails({ person, triggerRef, onClose }) {
   const feedback = <Status tone={result?.type === 'error' ? 'error' : 'neutral'}>{status}</Status>;
   if (view === 'permissions') return <Dialog title={`Permissions for ${person.name}`} wide className="permissions-dialog" busy={Boolean(pending)} returnFocusRef={triggerRef} onClose={onClose}>
     <DialogHeader title={`Permissions for ${person.name}`} eyebrow="INDIVIDUAL SETTINGS" busy={Boolean(pending)} onClose={onClose} />
-    <p className="ui-dialog-description">{person.blocked ? 'These are the last permissions before blocking. This participant has no room access while blocked.' : person.role === 'host' ? 'The host has all room permissions.' : `Room default follows future room updates. Custom applies to ${person.name}’s browser in this room.`}</p>
-    <p className="ui-dialog-description">{editable ? 'Changes save immediately across their tabs in this room. Reset a custom setting to follow the room default again.' : 'These settings are read-only. Only the current host can edit a connected viewer’s permissions.'}</p>
-    <PermissionFields values={permissions} roomDefaults={state.roomPermissions} person={person.name} disabled={!editable || Boolean(pending)} readOnly={state.role !== 'host' || person.role === 'host' || person.blocked} overrides={person.role === 'host' || person.blocked ? null : overrides} onChange={permissions => execute({ type: 'set-viewer-permissions', clientId: person.clientId, permissions })} />
-    {editable && <Button disabled={Boolean(pending) || !Object.keys(overrides).length} onClick={() => execute({ type: 'reset-viewer-permissions', clientId: person.clientId })}>Reset all to room defaults</Button>}
-    <div className="permission-feedback">{feedback}</div>
+    <div className="permissions-dialog-body">
+      <p className="ui-dialog-description">{person.blocked ? 'These are the last permissions before blocking. This participant has no room access while blocked.' : person.role === 'host' ? 'The host has all room permissions.' : `Room default follows future room updates. Custom applies to ${person.name}’s browser in this room.`}</p>
+      <p className="ui-dialog-description">{editable ? 'Changes save immediately across their tabs in this room. Reset a custom setting to follow the room default again.' : 'These settings are read-only. Only the current host can edit a connected viewer’s permissions.'}</p>
+      <PermissionFields values={permissions} roomDefaults={state.roomPermissions} person={person.name} disabled={!editable || Boolean(pending)} readOnly={state.role !== 'host' || person.role === 'host' || person.blocked} overrides={person.role === 'host' || person.blocked ? null : overrides} onChange={permissions => execute({ type: 'set-viewer-permissions', clientId: person.clientId, permissions })} />
+      {editable && <Button disabled={Boolean(pending) || !Object.keys(overrides).length} onClick={() => execute({ type: 'reset-viewer-permissions', clientId: person.clientId })}>Reset all to room defaults</Button>}
+    </div>
+    {feedback}
   </Dialog>;
   if (confirming) return <Dialog title={view === 'transfer' ? `Transfer host to ${person.name}?` : `Kick and block ${person.name}?`} busy={Boolean(pending)} returnFocusRef={triggerRef} onClose={onClose}>
     <DialogHeader title={view === 'transfer' ? `Transfer host to ${person.name}?` : `Kick and block ${person.name}?`} />

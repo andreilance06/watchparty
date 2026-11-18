@@ -12,13 +12,17 @@ export function Player({ portals, attentionView, chatOpen = true }) {
   const root = useRef(null);
   const currentState = useRef(null);
   const [liveStream, setLiveStream] = useState(null);
+  const [dimPreview, setDimPreview] = useState(true);
   const [screenState, setScreenState] = useState({ pending: false, local: false, status: '', error: '' });
   const { session, send, system, registerPlayer, attention, state, player } = useRoom();
   const { theme } = useTheme();
   currentState.current = state;
   const isScreen = state.media?.sourceType === 'screen';
+  const isWholeScreenPreview = isScreen && liveStream?.local && liveStream.stream.getVideoTracks()[0]?.getSettings?.().displaySurface === 'monitor';
   const hasVideo = Boolean(state.media?.hasVideo || state.media?.processing);
   const providing = state.sourceOwnerId === state.clientId || state.people.some(person => person.clientId === state.clientId && person.suppliesVideo);
+  const canStopFileShare = state.media?.sourceType === 'file' && state.media.sourceId &&
+    (state.role === 'host' || state.media.sourceOwnerId === state.clientId);
   useEffect(() => {
     // Resolve the semantic color after ThemeProvider applies its theme to the root.
     const frame = requestAnimationFrame(() => {
@@ -38,7 +42,11 @@ export function Player({ portals, attentionView, chatOpen = true }) {
     const controller = createPlayer({ elements, state: session.current, send, report: system, files, attention: attention.current, onScreenQuality: value => screenShare.setQuality(value) });
     let disposed = false;
     const screenShare = createScreenShare({ send, getState: () => currentState.current, getClientId: () => session.current.clientId,
-      onStream: (stream, local) => { if (!disposed) setLiveStream(previous => !stream ? null : previous?.stream === stream && previous.local === local ? previous : { stream, local }); },
+      onStream: (stream, local) => {
+        if (disposed) return;
+        if (!stream) setDimPreview(true);
+        setLiveStream(previous => !stream ? null : previous?.stream === stream && previous.local === local ? previous : { stream, local });
+      },
       onChange: value => { if (!disposed) { setScreenState(previous => ({ ...previous, ...value })); if (Object.hasOwn(value, 'quality')) controller.setScreenQuality(value.quality); } } });
     const controls = event => attention.current?.controlsChange(event.detail.visible);
     elements.video.addEventListener('controlschange', controls);
@@ -52,13 +60,23 @@ export function Player({ portals, attentionView, chatOpen = true }) {
   return <section ref={root} className="player-panel" aria-labelledby="player-title">
     <h2 id="player-title" className="sr-only">Shared video</h2>
     <div className="watch-media-bar"><div className="watch-media-title"><h3 id="fileName">No video selected</h3>{hasVideo && <p className="watch-playback-summary">{isScreen ? (providing ? 'Sharing your screen live' : 'Live screen share') : state.role === 'host' ? 'You control shared playback' : can(state, 'playPause') ? 'Play and pause are shared with the room' : 'Playback is controlled by the host'}</p>}</div>
-      <div className="watch-media-actions"><div id="hostControls" className="host-controls" hidden><Button id="chooseVideoButton" className="watch-choose-video" disabled={screenState.pending} variant="secondary"><Icon name={hasVideo ? 'video' : 'plus'} />{hasVideo ? 'Replace video' : 'Choose video'}</Button></div>
-      {(can(state, 'chooseVideo') || screenState.local || isScreen && providing) && <Button id="shareScreenButton" variant={screenState.local ? 'danger' : 'secondary'} pending={screenState.pending} pendingLabel="Choosing screen…" disabled={!state.connected} onClick={() => screenState.local ? player.current?.screenShare.stop() : player.current?.screenShare.start()}><Icon name="screen" />{screenState.local ? 'Stop sharing' : 'Share screen'}</Button>}</div>
+      <div className="watch-media-actions">
+        <div id="hostControls" className="host-controls" hidden>
+          <Button id="chooseVideoButton" className="watch-choose-video" hidden={screenState.local || Boolean(canStopFileShare)} disabled={screenState.pending} variant="secondary">
+            <Icon name={hasVideo ? 'video' : 'plus'} />{isScreen ? 'Switch to video' : 'Choose video'}
+          </Button>
+        </div>
+        {canStopFileShare ? <Button variant="danger" disabled={!state.connected} onClick={() => {
+          if (!send({ type: 'source-stop', sourceId: state.media.sourceId })) system('Connect to the room first.');
+        }}><Icon name="video" />Stop sharing</Button> :
+          (can(state, 'chooseVideo') || screenState.local || isScreen && providing) && <Button id="shareScreenButton" variant={screenState.local ? 'danger' : 'secondary'} pending={screenState.pending} pendingLabel="Choosing screen…" disabled={!state.connected} onClick={() => screenState.local ? player.current?.screenShare.stop() : player.current?.screenShare.start()}><Icon name="screen" />{screenState.local ? 'Stop sharing' : 'Share screen'}</Button>}
+      </div>
       <span id="roleBadge" className="sr-only" aria-hidden="true">Viewer</span>
     </div>
     {screenState.error && <div className="watch-screen-feedback"><Status tone="error">{screenState.error}</Status>{isScreen && !providing && <Button onClick={() => player.current?.screenShare.retry()}>Retry screen share</Button>}</div>}
-    <div id="videoShell" className="video-shell">
+    <div id="videoShell" className={isWholeScreenPreview && dimPreview ? 'video-shell is-preview-dimmed' : 'video-shell'}>
       <movi-player id="video" playsinline="" preload="auto" engine="native wasm" wasmurl="/vendor/movi.wasm" smoothwarning="" theme={theme} objectfit="contain" titlemode="fullscreen">Your browser does not support the WatchParty player.</movi-player>
+      {isWholeScreenPreview && <Button className="watch-preview-toggle" aria-controls="video" onClick={() => setDimPreview(dimmed => !dimmed)}>{dimPreview ? 'Disable dimming' : 'Dim preview'}</Button>}
       <div id="videoPlaceholder" className="video-placeholder"><span className="placeholder-icon" aria-hidden="true"><Icon name="video" /></span><strong>Waiting for the host</strong><span>The host will choose a video file and start the watch party.</span></div>
       <div id="viewerControls" className="viewer-controls" hidden><button id="fullscreenButton" className="fullscreen-button" type="button" aria-label="Enter fullscreen" title="Fullscreen"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5" /></svg></button></div>
       {attentionView.playbackBlocked && state.connected && state.media?.hasVideo && <Button className="watch-join-playback" variant="primary" onClick={() => player.current?.controller.retryPlayback()}>Join playback</Button>}

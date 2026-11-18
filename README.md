@@ -6,17 +6,17 @@ Repository: [andreilance06/watchparty](https://github.com/andreilance06/watchpar
 
 ## Purpose and target users
 
-WatchParty helps friends, classmates, and small groups watch a host's local video together while chatting and deciding what to watch next. The project combines a responsive React interface built with Vite and Tailwind CSS with a Node.js server and demonstrates collaborative development through Git branches, commits, and feature integration.
+WatchParty is a solo project by Andrei Lance Asuncion. It helps friends, classmates, and small groups watch a host's local video together while chatting and deciding what to watch next. The project combines a responsive React interface built with Vite and Tailwind CSS with a Node.js server.
 
-Its objectives are to keep playback synchronized, make group interaction available in one page, and let members contribute separate features to one working application.
+Its objectives are to keep playback synchronized and bring viewing, chat, and movie voting together in one page.
 
 ## Major features
 
 | Feature | What users can do |
 | --- | --- |
 | Room hub | Browse all rooms, see the current video filename and a preview refreshed every 30 seconds, create a room with an optional password, or join the public room. Invite others with a link. |
-| Shared playback | Watch a video supplied by the host's browser, with synchronized playback and automatic compatibility streaming when needed. |
-| Screen and tab sharing | Share a screen, window, or browser tab live, with audio when supported. Use Share screen beside Choose video, then Stop sharing to end capture. See the [sharing setup guide](docs/screen-sharing.md). |
+| Shared playback | Watch a video supplied by the host's browser, with synchronized playback and automatic compatibility streaming when needed. The sharer or current host can select **Stop sharing** to clear the video for the room. |
+| Screen and tab sharing | Share a screen, window, or browser tab live, with audio when supported. The local preview dims during whole-screen capture. Select **Disable dimming** to restore brightness or **Dim preview** to turn dimming back on. See the [sharing setup guide](docs/screen-sharing.md). |
 | Captions | Add SRT, VTT, ASS, or SSA subtitles and choose a caption track independently. |
 | Chat and reactions | Send messages and quoted replies, insert emojis, and react to comments, including in fullscreen. |
 | Movie polls | Start a poll as host, suggest titles with optional TMDB metadata, vote, and post the result when the host finishes the poll. |
@@ -37,7 +37,7 @@ Its objectives are to keep playback synchronized, make group interaction availab
 | ffprobe, FFmpeg, and HLS | Structured media inspection, processing, and compatibility streaming. |
 | JASSUB | Subtitle rendering, including styled ASS/SSA captions. |
 | TMDB API | Optional movie search, metadata, and posters; requires a server-side API credential. |
-| Git and GitHub | Version history, development branches, and integration of group contributions. |
+| Git and GitHub | Version history, development branches, and source hosting. |
 
 ## Run locally
 
@@ -114,7 +114,7 @@ Follow the [Ubuntu VPS deployment guide](docs/deployment.md) to host WatchParty 
 
 1. Open the room hub at `/`. Use the pencil beside your name to choose a display name, or join as a guest. Search rooms by name or video title. Select **Create room**, enter a room name and optional password, then create it to open the separate player page. You can also select **Join room** on any listed room, including the public default room.
 2. Use **Invite** in the player to copy an invitation link. Viewers can follow the link or select your room on the hub; protected rooms prompt for their password. No access code is needed. For viewers on another device, use the server's reachable LAN or HTTPS address rather than `localhost`.
-3. As host, select **Choose video** for a file, optionally with subtitle files, or **Share screen** for a screen, window, or browser tab. Enable audio in the browser picker when offered. Keep the sharing browser open throughout the session. Other participants join the room to watch. Live sharing requires HTTPS or localhost; see [screen-sharing setup](docs/screen-sharing.md) for relay configuration and browser requirements.
+3. As host, select **Choose video** for a file, optionally with subtitle files, or **Share screen** for a screen, window, or browser tab. Enable audio in the browser picker when offered. Keep the sharing browser open throughout the session. Select **Stop sharing** to end the current file share or your live capture. If you share an entire screen, **Disable dimming** restores your preview brightness and **Dim preview** turns dimming back on. The toggle affects only the preview in the sharing browser. Live sharing requires HTTPS or localhost. See the [screen-sharing setup guide](docs/screen-sharing.md).
 4. Type in the chatroom and select **Send**. Use **Reply / react** on a message to open its actions; right-click, long-press, and Shift+F10 remain shortcuts. The composer emoji button inserts emoji into your draft.
 5. Open **Up next** and, as host, select **Start poll**. Suggest a movie using **Search**, then **Suggest & vote**, or add a title without a poster. With existing choices, **Suggest a movie** opens the search editor. Participants can change their vote. **Finish poll** asks for confirmation before closing voting and posting the result in chat; winner/tie cards and the next-poll action appear in Up next. The host still selects the actual video file.
 6. Your display name appears above the chatroom tabs. Select its **pencil icon** to edit it, then **Save name** or **Cancel**. **People** shows the participant count; **Chat** shows unread messages in a circular badge. Use **People** to select a participant, then **Edit permissions** as host or **View permissions** as viewer. The dialog distinguishes **Room default: On/Off** from **Custom: On/Off** and provides resets. Changes save immediately across that participant's browser tabs in the room. Host transfer and blocking require confirmation, including a playback warning when blocking the video provider. Use **Room permissions** in the room bar to configure defaults, **Invite friends** to share the room, or **Leave room** to return to the hub. Leaving the browser that supplies the video also asks for confirmation.
@@ -125,45 +125,49 @@ On the hub, switch between **Cards** and **List**, or sort by participant count,
 
 ## Screenshots
 
-These captures show the redesigned application with local demonstration data. The video is a generated test clip.
+These captures show the local application with demonstration data. The video is a generated test clip. The whole-screen screenshots use a simulated monitor feed.
 
 ### Room selection
 
 The room hub lists rooms with video previews, participant counts, and optional password protection.
 
-![WatchParty hub with searchable room cards and create/join controls](design-system/watchparty/hub-redesign-desktop.png)
+![WatchParty hub with searchable room cards and create and join controls](docs/screenshots/sharing-room-hub.png)
 
 ### Desktop room
 
-Video sits beside Chat, People, and Up next. Pencil buttons open the room and display-name editors; invitations and room permissions are directly available.
+An active file share shows **Stop sharing** above the player. Chat, People, and Up next sit beside the video.
 
-![Desktop room with demonstration video, compact chatroom tabs, and composer](design-system/watchparty/player-current-desktop.png)
+![Desktop room playing a shared video file with Stop sharing above the player](docs/screenshots/file-sharing-desktop.png)
 
 ### Mobile room
 
-Video sits above the chatroom with the same Chat, People, and Up next tabs. This full-page capture uses a 375-pixel mobile viewport.
+Video sits above the chatroom. **Stop sharing** remains above the player at a phone-width viewport.
 
-<img src="design-system/watchparty/player-current-mobile.png" alt="Mobile room with video, compact chatroom navigation, and message composer" width="375">
+<img src="docs/screenshots/file-sharing-mobile.png" alt="Phone-width room with the Stop sharing button above the video" width="390">
 
-### Viewer permissions
+### Whole-screen preview
 
-Hosts can configure room defaults, then customize individual viewers from the participant list. The grouped controls scroll to include polls, identity, and moderation.
+The preview starts dimmed during whole-screen sharing. Selecting **Disable dimming** restores brightness and changes the button to **Dim preview**.
 
-![Individual permissions with room defaults, custom overrides, and reset actions](design-system/watchparty/individual-permissions-mobile.png)
+![Whole-screen preview with dimming enabled and the Disable dimming button visible](docs/screenshots/whole-screen-dimmed.png)
 
-## Team and contributions
+![Whole-screen preview at full brightness with the Dim preview button visible](docs/screenshots/whole-screen-undimmed.png)
 
-| Team member | GitHub username | Contributions |
-| --- | --- | --- |
-| Jobert Aguirre | `jxa-sh-h` | UI design, responsive layout, light/dark themes, voting interface, room-entry interface, invitation display, and movie suggestion search interface. |
-| Andrei Lance Asuncion | `andreilance06` | Initial application and modular structure, backend and room management, playback and captions, participant permissions and moderation, and integration of group features. |
-| Justin Mandapat | `DarkDream83` | Participant list, shared voting logic, floating emoji reactions, comment reactions, and emoji picker. |
+### Room permissions
 
-The contribution summary follows the recorded work in the repository. Examples include Jobert's voting interface (`83c0caf`), Justin's participant/reaction/voting implementation (`fcbeee7`) and comment reactions (`b40b5ab`), and Andrei Lance's room/backend work (`3301544`) and integration (`b520781`, `eaff53f`).
+Hosts can configure room defaults, then customize individual viewers from the participant list.
+
+![Viewer permissions dialog with a contrasting header, Close button, and grouped defaults](docs/screenshots/sharing-room-permissions.png)
+
+### Individual viewer permissions
+
+Open **People**, select a viewer, then choose **Edit permissions** to see their overrides. In this example, Sam can seek even though the room default is off. **Reset to room default** removes that override.
+
+![Permissions for Sam showing the contrasting header, a custom Seek setting, and the reset control](docs/screenshots/individual-viewer-permissions.png)
 
 ## Room behavior
 
-The host selects one video and optional SRT, VTT, ASS, or SSA files. Keep that browser page open: its File objects answer bounded byte requests, with no initial full-file upload. Transferring host keeps that browser as the video provider while the new host controls the room. Refreshing, disconnecting, or blocking the provider ends the current video; the host can choose a replacement from their device.
+The host selects one video and optional SRT, VTT, ASS, or SSA files. Keep that browser page open so its File objects can answer bounded byte requests without an initial full-file upload. Transferring host keeps that browser as the video provider while the new host controls the room. The provider or current host can use **Stop sharing** to clear the video and captions for everyone. Refreshing, disconnecting, or blocking the provider also ends the current video.
 
 The root page is a room hub, separate from the player at `/watch?roomId=ID` (or `/watch` for the public default room). Room cards show connected participant counts, password requirements, the selected filename, and a real video frame. While the hub is visible, the directory refreshes every five seconds and requests updated previews at most once every 30 seconds per room. Unchanged paused frames are reused; unavailable previews show a placeholder. Names, filenames, and thumbnails are visible to everyone, including for password-protected rooms; video playback still requires admission. Creating or joining opens the player directly. **Invite** copies a room link, and **Leave room** returns to the hub. See the [room API](docs/rooms.md).
 
@@ -173,7 +177,7 @@ The host or viewers granted Start polls permission start movie polls from **Chat
 
 ## Playback
 
-- Choosing another file immediately stops the previous video and audio and shows an opening notice until the selected video is ready. Media URLs are unique to each room session, preventing cached video fragments from an earlier server run from appearing after a restart.
+- **Stop sharing** ends the active file for the room. Selecting a file shows an opening notice until it is ready. Media URLs are unique to each room session, preventing cached video fragments from an earlier server run from appearing after a restart.
 - **Settings → Quality** offers Auto, Source / Original, and up to 1080p, 720p, 480p, and 360p, plus an independent bitrate limit (Auto, 8, 5, 3, 1.5, or 0.75 Mbps). Smaller sources expose their own size for compatibility playback. Choices are local to each participant, including the host, and remain in the current tab until reload. Source preserves original bytes and disables bitrate overrides; unsupported originals are unavailable.
 - Auto is the default. It uses device support, measured media-transfer throughput, buffer health, the video provider's observed upload performance, and current server encoding/CPU pressure. Browser connection information is only an initial hint. Auto budgets 70% of measured viewer throughput, requires repeated evidence before downgrading, waits 30 seconds before upgrading, and spaces switches by at least ten seconds. Adaptation pauses during seeks, pauses, switching, and background inactivity. Default video limits are 5 Mbps at 1080p, 3 Mbps at 720p, 1.5 Mbps at 480p, and 0.75 Mbps at 360p; Auto quality with an explicit limit may use lower default bitrates within that ceiling.
 - Manual resolution and bitrate choices remain fixed. A buffering notice offers a return to Auto. Bitrate limits are encoder budgets, not guaranteed download speeds or exact constant bitrates; audio and protocol overhead are additional. Changing quality preserves the shared time, pause state, speed, and captions.

@@ -253,4 +253,19 @@ test("captions remain separate, seeks encode the requested segment, and segments
   assert.equal(playing.playbackRate, 1);
   viewer.send({ type: "video-state", syncMode: "pause", time: 8 });
   assert.equal((await host.next("session-state", (message) => message.syncMode === "pause")).paused, true);
+
+  viewer.send({ type: "source-stop", requestId: "viewer-stop", sourceId: replaced.sourceId });
+  assert.match((await viewer.next("error", (message) => message.requestId === "viewer-stop")).message, /sharer or host/);
+  host.send({ type: "source-stop", requestId: "stale-stop", sourceId: relay.sourceId });
+  await host.next("error", (message) => message.requestId === "stale-stop");
+  assert.equal(app.state.sourceId, replaced.sourceId);
+
+  host.send({ type: "source-stop", requestId: "stop-current", sourceId: replaced.sourceId });
+  await host.next("source-stopped", (message) => message.requestId === "stop-current");
+  await host.next("source-ended", (message) => message.sourceId === replaced.sourceId);
+  const stopped = await viewer.next("session-state", (message) => message.syncMode === "source" && message.mediaVersion > replacementState.mediaVersion);
+  assert.equal(stopped.sourceId, null);
+  assert.equal(stopped.hasVideo, false);
+  assert.deepEqual(stopped.captions, []);
+  assert.equal((await fetch(base + replacementState.mediaUrl)).status, 404);
 });

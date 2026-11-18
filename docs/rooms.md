@@ -152,6 +152,8 @@ IDs must be unique ASCII alphanumeric/hyphen strings of 1–64 characters. Sizes
 
 File registration requires `chooseVideo`; bundled or added captions require `addCaptions`, and caption removal requires `removeCaptions`. A new registration invalidates the previous source generation, pending reads, and media. The reply is `{ type: "source-registered", requestId, sourceId, token, relayPath }`. The token is a private, single-use attachment credential; never place it in a URL or share it with viewers.
 
+The supplying connection or current host can send `{ type: "source-stop", sourceId, requestId }` to end the active file share. The server verifies the source ID, closes the relay, clears playback and captions, broadcasts the cleared session state, and acknowledges with `source-stopped`. A stale source ID cannot stop a newer share.
+
 Open a separate WebSocket at `relayPath` and send `{ type: "source-attach", sourceId, token }`. Private rooms also require their membership cookie. Attachment must begin within 5 seconds of opening this socket and within 30 seconds of registration. Successful attachment receives `source-attached`, then the existing processing/ready `session-state` messages arrive on the control socket.
 
 ## Comment reactions

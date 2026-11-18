@@ -1,6 +1,8 @@
 # Screen, window, and tab sharing
 
-Choose **Share screen** beside **Choose video / Replace video**. The browser asks which screen, window, or tab to share. Enable the picker's audio option when offered. The button becomes **Stop sharing** while capture is active; the browser's own stop-sharing control also ends the room's stream. Cancelling the picker leaves the current video unchanged.
+Choose **Share screen** when the room has no active source. The browser asks which screen, window, or tab to share. Enable the picker's audio option when offered. Use **Stop sharing** in WatchParty or in the browser to end your live capture. If you're sharing a video file, use **Stop sharing** to bring back the source choices.
+
+The local preview dims automatically when the browser reports that you're sharing an entire screen. Select **Disable dimming** to restore full brightness or **Dim preview** to dim it again. This changes only the sharing browser's preview.
 
 The current video-selection permission also authorizes screen sharing; its visible label is **Choose video / share screen**. A provider can stop their capture even after transferring hosting or losing permission to select a new source. The host may replace the live source with a file or a different share. Replacing a source, leaving, disconnecting, blocking the provider, and server shutdown close the old capture/peer connections. Existing leave confirmations and the provider's native refresh/close warning apply to live sharing too.
 

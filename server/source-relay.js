@@ -100,11 +100,15 @@ function createHostSource({ room, bridge, config }) {
     for (const job of [...source.pending.values(), ...source.queue]) job.fail(new Error("Source is no longer available."));
   }
 
-  function unavailable(source) {
-    if (active !== source || source.closed) return;
+  function stop() {
     reset();
     room.media.reset();
     room.transport.broadcast(sessionState(room.state, "source"));
+  }
+
+  function unavailable(source) {
+    if (active !== source || source.closed) return;
+    stop();
     room.transport.broadcast({ type: "media-error", message: "The video provider disconnected. The host can choose another video." });
   }
 
@@ -374,9 +378,17 @@ function createHostSource({ room, bridge, config }) {
   }
 
   async function handleControl(ws, message) {
-    if (!["source-register", "caption-provider-register", "captions-add", "caption-remove"].includes(message.type)) return false;
+    if (!["source-register", "source-stop", "caption-provider-register", "captions-add", "caption-remove"].includes(message.type)) return false;
     const reply = (payload) => send(ws, { requestId: message.requestId, ...payload });
     try {
+      if (message.type === "source-stop") {
+        if (room.state.clients.get(ws.clientId)?.ws !== ws) return true;
+        if (!active || message.sourceId !== active.id) throw new Error("That video is no longer being shared.");
+        if (active.owner !== ws && room.state.hostId !== ws.clientId) throw new Error("Only the sharer or host can stop this video.");
+        stop();
+        reply({ type: "source-stopped" });
+        return true;
+      }
       const permission = message.type === "source-register" ? "chooseVideo" : message.type === "caption-remove" ? "removeCaptions" : "addCaptions";
       if (!allowed(ws, permission)) throw new Error("You do not have permission to manage these files or captions.");
       if (message.type === "source-register") {

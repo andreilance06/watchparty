@@ -38,6 +38,13 @@
 .watch-page .player-panel { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; border: 0; border-radius: 0; background: var(--surface); }
 .watch-page .video-shell { flex: 1; min-height: 0; aspect-ratio: auto; background: #000; }
 .watch-page .video-shell movi-player { background: #000; }
+.watch-page .video-shell.is-preview-dimmed > movi-player { filter: brightness(.25); }
+.watch-preview-toggle {
+  position: absolute;
+  top: max(.75rem, env(safe-area-inset-top));
+  left: max(.75rem, env(safe-area-inset-left));
+  z-index: 4;
+}
 .watch-chat-toggle { position: absolute; z-index: 21; top: 50%; right: 0; transform: translateY(-50%); width: 44px; height: 52px; padding: 0; border: 0; border-radius: 8px 0 0 8px; color: var(--on-accent); background: transparent; cursor: pointer; touch-action: none; }
 .is-chat-open > .watch-chat-toggle { right: var(--chat-width); }
 .watch-chat-toggle-label { display: none; }
