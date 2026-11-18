@@ -102,17 +102,21 @@ it('preserves browsing choices through a directory refresh', async () => {
   expect(screen.getByRole('searchbox')).toHaveValue('a');
   expect(screen.getByRole('button', { name: 'List', exact: true })).toHaveAttribute('aria-pressed', 'true');
 });
-it.each(['cards', 'list'])('preserves joining feedback and protected-room entry in %s view', async view => {
+it.each([['cards', ''], ['list', ''], ['cards', ' from thumbnail'], ['list', ' from thumbnail']])('preserves joining feedback and protected-room entry in %s view%s', async (view, suffix) => {
   localStorage.setItem(BROWSER_PREFERENCE_KEY, JSON.stringify({ view, sort: 'people-desc' }));
   let resolveJoin;
   vi.spyOn(globalThis, 'fetch').mockImplementation(async url => url === '/api/rooms' ? response({ rooms }) : url.endsWith('/api/session') ? response({ error: 'Join first.' }, 401) : url === '/api/rooms/join' ? new Promise(resolve => { resolveJoin = resolve; }) : response({}));
   const user = userEvent.setup(); mount();
-  await user.click(await screen.findByRole('button', { name: 'Join Alpha' }));
+  await user.click(await screen.findByRole('button', { name: `Join Alpha${suffix}` }));
   expect(screen.getByRole('button', { name: 'Joining Alpha' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Join Zebra' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: 'Join Alpha from thumbnail' })).toHaveAttribute('aria-busy', 'true');
+  expect(screen.getByRole('button', { name: 'Join Zebra from thumbnail' })).toBeDisabled();
   await act(async () => { resolveJoin(response({ room: rooms[2] })); });
   await waitFor(() => expect(screen.getByRole('button', { name: 'Join Zebra' })).toBeEnabled());
-  await user.click(screen.getByRole('button', { name: 'Join Zebra' }));
+  const target = screen.getByRole('button', { name: `Join Zebra${suffix}` });
+  if (suffix) { target.focus(); await user.keyboard('{Enter}'); }
+  else await user.click(target);
   expect(screen.getByRole('dialog', { name: 'Join Zebra' })).toBeVisible();
   expect(screen.getByLabelText('Room password')).toHaveFocus();
 });

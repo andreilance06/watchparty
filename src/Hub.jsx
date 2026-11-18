@@ -9,10 +9,10 @@ export function RoomCard({ room, busy, joining = false, onJoin }) {
   useEffect(() => setFailed(false), [room.thumbnailUrl]);
   const preview = room.thumbnailUrl && !failed;
   return <article className="room-card">
-    <div className="room-preview">
+    <button type="button" className="room-preview" aria-label={`Join ${room.name} from thumbnail`} disabled={busy} aria-busy={joining || undefined} onClick={() => onJoin(room)}>
       {preview && <img src={room.thumbnailUrl} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} />}
-      {!preview && <div className="room-placeholder"><span className="room-placeholder-icon"><Icon name="video" /></span><span>{room.fileName ? 'Preview unavailable' : 'Waiting for a video'}</span></div>}
-    </div>
+      {!preview && <span className="room-placeholder"><span className="room-placeholder-icon"><Icon name="video" /></span><span>{room.fileName ? 'Preview unavailable' : 'Waiting for a video'}</span></span>}
+    </button>
     <div className="room-card-body"><h3>{room.name}</h3><p className={`room-file${room.fileName ? '' : ' room-file-empty'}`}>{room.fileName || 'Waiting for a video'}</p>
       <span className={`room-badge${room.passwordRequired ? '' : ' room-access-open'}`}>{room.passwordRequired ? <><Icon name="lock" />Password protected</> : 'Open'}</span>
       <div className="room-card-footer"><span className="room-participants"><Icon name="people" /><span>{room.participantCount} online</span></span><Button disabled={busy} pending={joining} pendingLabel="Joining…" aria-label={joining ? `Joining ${room.name}` : `Join ${room.name}`} onClick={() => onJoin(room)}>Join room<Icon name="arrow" /></Button></div>
